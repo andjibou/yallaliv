@@ -1,0 +1,10 @@
+# Dépendances et builds (installés/générés par Render)
+node_modules/
+web/dist/
+
+# Secrets et données locales (JAMAIS sur GitHub)
+server/.env
+server/data/
+
+*.log
+.DS_Store

@@ -1,0 +1,68 @@
+import React, { useState } from 'react';
+import { api, useT, useAuth, toast } from './lib.jsx';
+
+/**
+ * Parametres du compte (tous roles) : identite (nom, email, telephone)
+ * + changement de mot de passe (avec verification de l'actuel).
+ */
+export default function AccountSettings() {
+  const t = useT();
+  const { user, setUser } = useAuth();
+  const [f, setF] = useState({ name: user?.name || '', phone: user?.phone || '', email: user?.email || '' });
+  const [pw, setPw] = useState({ current: '', next: '' });
+  const [busy, setBusy] = useState(false);
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+
+  const saveData = async () => {
+    setBusy(true);
+    try {
+      const d = await api('/auth/profile', { method: 'PUT', body: f });
+      setUser(d.user);
+      toast(t('data_saved'));
+    } catch (ex) { toast(ex.message, 'err'); }
+    setBusy(false);
+  };
+  const savePw = async () => {
+    setBusy(true);
+    try {
+      await api('/auth/password', { method: 'PUT', body: pw });
+      toast(t('password_changed'));
+      setPw({ current: '', next: '' });
+    } catch (ex) { toast(ex.message, 'err'); }
+    setBusy(false);
+  };
+
+  return (
+    <div>
+      <div className="label mb8">👤 {t('account_info')}</div>
+      <div className="field">
+        <label className="label">{t('name')}</label>
+        <input className="input" value={f.name} onChange={(e) => set('name', e.target.value)} />
+      </div>
+      <div className="field">
+        <label className="label">{t('email')}</label>
+        <input className="input" type="email" dir="ltr" value={f.email} onChange={(e) => set('email', e.target.value)} />
+      </div>
+      <div className="field">
+        <label className="label">{t('phone')}</label>
+        <input className="input" dir="ltr" value={f.phone} onChange={(e) => set('phone', e.target.value)} />
+      </div>
+      <button className="btn primary block" disabled={busy || !f.name.trim() || !f.email.includes('@')} onClick={saveData}>
+        💾 {t('save')}
+      </button>
+
+      <div className="label mb8 mt16">🔑 {t('change_password')}</div>
+      <div className="field">
+        <label className="label">{t('current_password')}</label>
+        <input className="input" type="password" dir="ltr" value={pw.current} onChange={(e) => setPw((x) => ({ ...x, current: e.target.value }))} />
+      </div>
+      <div className="field">
+        <label className="label">{t('new_password')}</label>
+        <input className="input" type="password" dir="ltr" value={pw.next} onChange={(e) => setPw((x) => ({ ...x, next: e.target.value }))} />
+      </div>
+      <button className="btn blue block" disabled={busy || !pw.current || pw.next.length < 5} onClick={savePw}>
+        🔑 {t('change_password')}
+      </button>
+    </div>
+  );
+}

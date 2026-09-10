@@ -1,0 +1,34 @@
+# Render Blueprint — ALTERNATIVE (demande une carte). Déploiement choisi : Back4app Containers (voir DEPLOIEMENT.md).
+# Après le push sur GitHub : render.com → New + → Blueprint → choisir ce dépôt.
+# Les variables marquées sync: false seront demandées à la création (voir DEPLOIEMENT.md).
+services:
+  - type: web
+    name: yallaliv
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: cd web && npm install && npm run build && cd ../server && npm install
+    startCommand: cd server && node index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL        # coller la chaîne de connexion Neon (étape 2 du guide)
+        sync: false
+      - key: JWT_SECRET          # secret fort généré automatiquement par Render
+        generateValue: true
+      - key: ADMIN_EMAIL         # ton email réel de Super Admin
+        sync: false
+      - key: ADMIN_PASSWORD      # ton mot de passe Super Admin (fort !)
+        sync: false
+      - key: SMTP_HOST           # Brevo (étape 5) — optionnel au départ
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: GOOGLE_CLIENT_ID    # optionnel (étape 7)
+        sync: false

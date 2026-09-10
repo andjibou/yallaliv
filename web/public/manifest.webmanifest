@@ -1,0 +1,15 @@
+{
+  "name": "YallaLiv",
+  "short_name": "YallaLiv",
+  "description": "Livraison rapide de restaurants, marchés et pharmacies",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#0e9f6e",
+  "lang": "fr",
+  "icons": [
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
