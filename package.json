@@ -1,0 +1,16 @@
+{
+  "name": "yallaliv",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "YallaLiv — livraison à Alexandrie (front Vite + API Express, déployable sur Vercel)",
+  "dependencies": {
+    "express": "^4.21.2",
+    "nodemailer": "^10.0.1",
+    "pg": "^8.13.1",
+    "web-push": "^3.6.7"
+  },
+  "overrides": {
+    "qs": "6.16.0"
+  }
+}
