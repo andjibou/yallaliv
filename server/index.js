@@ -33,6 +33,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(express.json({ limit: '8mb' }));   // photos = miniature + affichage optimisés côté client (< 5 Mo)
 
+// Filet de sécurité dispatch (serverless : setInterval n'y tourne pas en continu) :
+// au passage d'une requête, redistribue les commandes publiques si > 25 s sans vérification.
+let _lastReqDispatch = 0;
+app.use((req, res, next) => {
+  if (Date.now() - _lastReqDispatch > 25000) { _lastReqDispatch = Date.now(); dispatchPublicOrders().catch(() => {}); }
+  next();
+});
+
 // ---------- CORS (utile si front et API hébergés séparément) ----------
 app.use((req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*');
@@ -117,7 +125,7 @@ const round2 = (n) => Math.round(n * 100) / 100;
 
 // ---------- Uploads ----------
 const UPLOADS = path.join(__dirname, 'data', 'uploads');
-fs.mkdirSync(UPLOADS, { recursive: true });
+try { fs.mkdirSync(UPLOADS, { recursive: true }); } catch {} // Vercel : FS en lecture seule (anciennes photos locales uniquement)
 app.use('/uploads', express.static(UPLOADS));   // compat : anciennes photos locales
 
 // ---------- PHOTOS EN BASE PostgreSQL (compatibles hébergement gratuit au disque éphémère) ----------
@@ -1272,11 +1280,19 @@ app.put('/api/admin/settings', auth, requireRole('superadmin'), h(async (req, re
 }));
 
 // ---------- Static (production build) ----------
-const dist = path.join(__dirname, '..', 'web', 'dist');
-if (fs.existsSync(dist)) {
+const dist = [
+  path.join(__dirname, '..', 'web', 'dist'),        // local + Docker (comme avant)
+  path.join(__dirname, '..', '..', 'web', 'dist'),  // bundle Vercel
+  path.join(__dirname, 'web', 'dist'),              // bundle Vercel (variante)
+].find((p) => fs.existsSync(p));
+if (dist) {
   app.use(express.static(dist));
   app.get(/^\/(?!api|uploads).*/, (req, res) => res.sendFile(path.join(dist, 'index.html')));
+} else {
+  app.get(/^\/(?!api|uploads).+/, (req, res) => res.redirect('/')); // serverless sans dist : retour accueil
 }
+
+export default app; // Vercel : importé par api/index.js (export au niveau module)
 
 // ---------- Démarrage ----------
 initDb()
@@ -1289,7 +1305,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Erreur serveur' });
 });
 
-app.listen(PORT, '0.0.0.0', () => console.log(`🚀 API YallaLiv (PostgreSQL) sur le port ${PORT}`));
+if (!process.env.VERCEL) app.listen(PORT, '0.0.0.0', () => console.log(`🚀 API YallaLiv (PostgreSQL) sur le port ${PORT}`)); // Vercel : pas d'écoute, l'app est exportée
   })
   .catch((err) => {
     console.error('❌ Impossible d\'initialiser la base :', err.message);
