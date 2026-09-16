@@ -78,6 +78,32 @@ export default function DriverApp() {
   useEffect(() => {
     if (!approved || !online) return;
     let stopped = false;
+
+    // 📱 APP NATIVE ANDROID (Capacitor) : watcher GPS ARRIÈRE-PLAN.
+    // Un service natif + notification maintiennent le suivi même téléphone verrouillé/éteint.
+    const BG = (window.Capacitor?.isNativePlatform?.() && window.Capacitor.Plugins?.BackgroundGeolocation) || null;
+    let nativeOk = false; let wid = null; let lastSent = 0;
+    if (BG) {
+      BG.addWatcher(
+        {
+          backgroundMessage: 'YallaLiv suit votre position pendant votre service',
+          backgroundTitle: 'YallaLiv Livreur',
+          requestPermissions: true,
+          stale: false,
+          distanceFilter: 20
+        },
+        (loc) => {
+          if (!loc || stopped) return;
+          nativeOk = true; // le watcher natif vit : il remplace la boucle web pour l'envoi
+          const lat = loc.latitude, lng = loc.longitude;
+          lastPos.current = { lat, lng }; setPos({ lat, lng });
+          const now = Date.now();
+          if (now - lastSent > 9000) { lastSent = now; api('/driver/location', { method: 'PUT', body: { lat, lng } }).catch(() => {}); }
+        }
+      ).then((id) => { wid = id; }).catch(() => { /* permission refusée → boucle web reste active */ });
+    }
+
+    // 🌐 NAVIGATEUR / PWA : boucle 5 s + reprise au déverrouillage (filet de sécurité)
     const simPos = () => {
       const a = activeRef.current;
       if (a && a.store_lat != null && a.client_lat != null) {
@@ -94,7 +120,7 @@ export default function DriverApp() {
       const done = (lat, lng) => {
         lastPos.current = { lat, lng };
         setPos({ lat, lng });
-        if (!stopped) api('/driver/location', { method: 'PUT', body: { lat, lng } }).catch(() => {});
+        if (!stopped && !nativeOk) api('/driver/location', { method: 'PUT', body: { lat, lng } }).catch(() => {});
       };
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
@@ -109,7 +135,10 @@ export default function DriverApp() {
     // Reprise immédiate : au déverrouillage du téléphone / retour sur l'app, on renvoie la position tout de suite
     const onVis = () => { if (document.visibilityState === 'visible' && !stopped) send(); };
     document.addEventListener('visibilitychange', onVis);
-    return () => { stopped = true; clearInterval(id); document.removeEventListener('visibilitychange', onVis); };
+    return () => {
+      stopped = true; clearInterval(id); document.removeEventListener('visibilitychange', onVis);
+      if (wid) BG?.removeWatcher({ id: wid }).catch(() => {}); // stoppe le service GPS natif
+    };
   }, [approved, online]);
 
   // Écran maintenu allumé PENDANT une course (suivi GPS continu, téléphone posé sur le guidon).
