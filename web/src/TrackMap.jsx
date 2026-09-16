@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { fetchRoute } from './RouteMap.jsx';
@@ -19,6 +20,7 @@ const mkIcon = (emoji) =>
 export default function TrackMap({ storePos, clientPos, driverPos }) {
   const el = useRef(null);
   const map = useRef(null);
+  const { full, toggle } = useMapFullscreen(map);
   const markers = useRef({});
   const routeKey = useRef('');
 
@@ -67,5 +69,9 @@ export default function TrackMap({ storePos, clientPos, driverPos }) {
     else if (pts.length > 1) m.fitBounds(L.latLngBounds(pts).pad(0.35));
   }, [storePos, clientPos, driverPos]);
 
-  return <div ref={el} style={{ height: 300, borderRadius: 14, border: '1px solid #e3e9f0', background: '#eef2f7' }} />;
+  return (
+    <div ref={el} style={full ? FS_STYLE : { position: 'relative', height: 300, borderRadius: 14, border: '1px solid #e3e9f0', background: '#eef2f7' }}>
+      <FsBtn full={full} onClick={toggle} />
+    </div>
+  );
 }

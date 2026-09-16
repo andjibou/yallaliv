@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { fetchRoute } from './RouteMap.jsx';
+import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';
 
 const driverIcon = (st) =>
   L.divIcon({
@@ -28,6 +29,7 @@ const statusOf = (d) => {
 export default function DriversMap({ drivers }) {
   const el = useRef(null);
   const map = useRef(null);
+  const { full, toggle } = useMapFullscreen(map);
   const layer = useRef(null);
 
   useEffect(() => {
@@ -92,5 +94,9 @@ export default function DriversMap({ drivers }) {
     return () => { cancelled = true; routes.remove(); };
   }, [JSON.stringify(drivers)]);
 
-  return <div ref={el} style={{ height: 320, borderRadius: 14, border: '1px solid #e3e9f0', background: '#eef2f7' }} />;
+  return (
+    <div ref={el} style={full ? FS_STYLE : { position: 'relative', height: 320, borderRadius: 14, border: '1px solid #e3e9f0', background: '#eef2f7' }}>
+      <FsBtn full={full} onClick={toggle} />
+    </div>
+  );
 }

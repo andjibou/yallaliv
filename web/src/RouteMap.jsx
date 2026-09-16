@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useT } from './lib.jsx';
+import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';
 
 const mkIcon = (emoji) =>
   L.divIcon({
@@ -45,6 +46,7 @@ export const fmtMin = (s) => {
 export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠', height = 300 }) {
   const el = useRef(null);
   const map = useRef(null);
+  const { full, toggle } = useMapFullscreen(map);
   const markers = useRef({});
   const coordsRef = useRef(null);   // itineraire courant (pour detecter un ecart)
   const rerouteAt = useRef(0);      // anti-spam : 1 recalcul / 20 s max
@@ -118,7 +120,9 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
 
   return (
     <div>
-      <div ref={el} style={{ height, borderRadius: 14, border: '1px solid #e3e9f0', background: '#eef2f7' }} />
+      <div ref={el} style={full ? FS_STYLE : { position: 'relative', height, borderRadius: 14, border: '1px solid #e3e9f0', background: '#eef2f7' }}>
+        <FsBtn full={full} onClick={toggle} />
+      </div>
       {flash && <div className="row mt8"><span className="badge" style={{ background: '#e0e7ff', color: '#3730a3' }}>🔄 {t('rerouted')}</span></div>}
       {info ? (
         <div className="row mt8 wrap" style={{ gap: 8 }}>
@@ -140,6 +144,7 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
 export function DualRouteMap({ driverPos, storePos, clientPos, height = 320 }) {
   const el = useRef(null);
   const map = useRef(null);
+  const { full, toggle } = useMapFullscreen(map);
   const marks = useRef({});
   const leg1Ref = useRef(null);    // itineraire livreur->magasin (ecart -> recalcul)
   const rerouteAt = useRef(0);
@@ -209,7 +214,9 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320 }) {
 
   return (
     <div>
-      <div ref={el} style={{ height, borderRadius: 14, border: '1px solid #e3e9f0', background: '#eef2f7' }} />
+      <div ref={el} style={full ? FS_STYLE : { position: 'relative', height, borderRadius: 14, border: '1px solid #e3e9f0', background: '#eef2f7' }}>
+        <FsBtn full={full} onClick={toggle} />
+      </div>
       {flash && <div className="row mt8"><span className="badge" style={{ background: '#e0e7ff', color: '#3730a3' }}>🔄 {t('rerouted')}</span></div>}
       {legs ? (
         <div className="row mt8 wrap" style={{ gap: 8 }}>
@@ -296,6 +303,7 @@ const mkStopIcon = (emoji, n, kind) => L.divIcon({
 export function TourMap({ driverPos, stops, height = 340 }) {
   const el = useRef(null);
   const map = useRef(null);
+  const { full, toggle } = useMapFullscreen(map);
   const grp = useRef(null);
   const driverMk = useRef(null);
   const firstLegRef = useRef(null);  // segment en cours (ecart -> recalcul de la tournee)
@@ -367,7 +375,9 @@ export function TourMap({ driverPos, stops, height = 340 }) {
   const total = legs ? legs.reduce((s, l) => ({ d: s.d + (l.dist || 0), t: s.t + (l.dur || 0) }), { d: 0, t: 0 }) : null;
   return (
     <div>
-      <div ref={el} style={{ height, borderRadius: 14, border: '1px solid #e3e9f0', background: '#eef2f7' }} />
+      <div ref={el} style={full ? FS_STYLE : { position: 'relative', height, borderRadius: 14, border: '1px solid #e3e9f0', background: '#eef2f7' }}>
+        <FsBtn full={full} onClick={toggle} />
+      </div>
       {flash && <div className="row mt8"><span className="badge" style={{ background: '#e0e7ff', color: '#3730a3' }}>🔄 {t('rerouted')}</span></div>}
       {legs ? (
         <div className="mt8 row wrap" style={{ gap: 6 }}>
@@ -392,6 +402,7 @@ export function TourMap({ driverPos, stops, height = 340 }) {
 export function StoresMap({ stores, height = 380, onSelect }) {
   const el = useRef(null);
   const map = useRef(null);
+  const { full, toggle } = useMapFullscreen(map);
   const grp = useRef(null);
   const selRef = useRef(onSelect);
   selRef.current = onSelect;
@@ -425,5 +436,9 @@ export function StoresMap({ stores, height = 380, onSelect }) {
     setTimeout(() => map.current?.invalidateSize(), 80);
   }, [stores]);
 
-  return <div ref={el} style={{ height, borderRadius: 14, border: '1px solid #e3e9f0', background: '#eef2f7' }} />;
+  return (
+    <div ref={el} style={full ? FS_STYLE : { position: 'relative', height, borderRadius: 14, border: '1px solid #e3e9f0', background: '#eef2f7' }}>
+      <FsBtn full={full} onClick={toggle} />
+    </div>
+  );
 }
