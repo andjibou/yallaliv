@@ -81,26 +81,32 @@ export default function DriverApp() {
 
     // 📱 APP NATIVE ANDROID (Capacitor) : watcher GPS ARRIÈRE-PLAN.
     // Un service natif + notification maintiennent le suivi même téléphone verrouillé/éteint.
-    const BG = (window.Capacitor?.isNativePlatform?.() && window.Capacitor.Plugins?.BackgroundGeolocation) || null;
+    // Ce plugin n'a pas de bundle JS : on passe par le pont natif (nativeCallback),
+    // qui fournit les positions en continu et renvoie l'ID du watcher (pour l'arrêter plus tard).
+    const cap = window.Capacitor;
     let nativeOk = false; let wid = null; let lastSent = 0;
-    if (BG) {
-      BG.addWatcher(
-        {
-          backgroundMessage: 'YallaLiv suit votre position pendant votre service',
-          backgroundTitle: 'YallaLiv Livreur',
-          requestPermissions: true,
-          stale: false,
-          distanceFilter: 20
-        },
-        (loc) => {
-          if (!loc || stopped) return;
-          nativeOk = true; // le watcher natif vit : il remplace la boucle web pour l'envoi
-          const lat = loc.latitude, lng = loc.longitude;
-          lastPos.current = { lat, lng }; setPos({ lat, lng });
-          const now = Date.now();
-          if (now - lastSent > 9000) { lastSent = now; api('/driver/location', { method: 'PUT', body: { lat, lng } }).catch(() => {}); }
-        }
-      ).then((id) => { wid = id; }).catch(() => { /* permission refusée → boucle web reste active */ });
+    if (cap?.isNativePlatform?.() && typeof cap.nativeCallback === 'function') {
+      try {
+        wid = cap.nativeCallback(
+          'BackgroundGeolocation',
+          'addWatcher',
+          {
+            backgroundMessage: 'YallaLiv suit votre position pendant votre service',
+            backgroundTitle: 'YallaLiv Livreur',
+            requestPermissions: true,
+            stale: false,
+            distanceFilter: 20
+          },
+          (loc) => {
+            if (!loc || stopped) return;
+            nativeOk = true; // le watcher natif vit : il remplace la boucle web pour l'envoi
+            const lat = loc.latitude, lng = loc.longitude;
+            lastPos.current = { lat, lng }; setPos({ lat, lng });
+            const now = Date.now();
+            if (now - lastSent > 9000) { lastSent = now; api('/driver/location', { method: 'PUT', body: { lat, lng } }).catch(() => {}); }
+          }
+        ) || null;
+      } catch { wid = null; /* pont indisponible → boucle web reste active */ }
     }
 
     // 🌐 NAVIGATEUR / PWA : boucle 5 s + reprise au déverrouillage (filet de sécurité)
@@ -137,7 +143,8 @@ export default function DriverApp() {
     document.addEventListener('visibilitychange', onVis);
     return () => {
       stopped = true; clearInterval(id); document.removeEventListener('visibilitychange', onVis);
-      if (wid) BG?.removeWatcher({ id: wid }).catch(() => {}); // stoppe le service GPS natif
+      // stoppe le service GPS natif (l'ID vient de nativeCallback — attendu par removeWatcher)
+      if (wid) { try { cap?.nativePromise?.('BackgroundGeolocation', 'removeWatcher', { id: wid })?.catch?.(() => {}); } catch {} }
     };
   }, [approved, online]);
 
