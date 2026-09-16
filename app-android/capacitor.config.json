@@ -1,0 +1,11 @@
+{
+  "appId": "com.yallaliv.driver",
+  "appName": "YallaLiv Livreur",
+  "webDir": "www",
+  "server": {
+    "url": "https://yallaliv.vercel.app"
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}

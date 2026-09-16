@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">YallaLiv Livreur</string>
+    <string name="title_activity_main">YallaLiv Livreur</string>
+    <string name="package_name">com.yallaliv.driver</string>
+    <string name="custom_url_scheme">com.yallaliv.driver</string>
+</resources>
