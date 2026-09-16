@@ -106,8 +106,30 @@ export default function DriverApp() {
     };
     send();
     const id = setInterval(send, 5000);
-    return () => { stopped = true; clearInterval(id); };
+    // Reprise immédiate : au déverrouillage du téléphone / retour sur l'app, on renvoie la position tout de suite
+    const onVis = () => { if (document.visibilityState === 'visible' && !stopped) send(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { stopped = true; clearInterval(id); document.removeEventListener('visibilitychange', onVis); };
   }, [approved, online]);
+
+  // Écran maintenu allumé PENDANT une course (suivi GPS continu, téléphone posé sur le guidon).
+  // Relâché dès que le livreur verrouille lui-même ou termine sa course. Non vital si indisponible.
+  const wakeRef = useRef(null);
+  const enCourse = !!activeRef.current;
+  useEffect(() => {
+    const grab = async () => {
+      if (!online || !enCourse || document.visibilityState !== 'visible') return;
+      try { wakeRef.current = await navigator.wakeLock?.request?.('screen'); } catch {}
+    };
+    grab();
+    const onVis = () => { if (document.visibilityState === 'visible') grab(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      try { wakeRef.current?.release?.(); } catch {}
+      wakeRef.current = null;
+    };
+  }, [online, enCourse]);
 
   const toggleOnline = async () => {
     const v = !online;

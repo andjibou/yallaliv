@@ -721,6 +721,12 @@ async function dispatchPublicOrders() {
   if (dispatchBusy) return;
   dispatchBusy = true;
   try {
+    // Auto-hors-ligne : un livreur "en ligne" sans position fraîche depuis > 10 min passe hors ligne.
+    // Il reste AFFICHÉ sur les cartes avec sa dernière position, mais ne reçoit plus de dispatch
+    // (téléphone verrouillé/fermé -> le navigateur ne peut plus envoyer la position).
+    await run(`UPDATE users SET online=0 WHERE role='driver' AND online=1
+      AND EXISTS (SELECT 1 FROM driver_locations dl WHERE dl.driver_id=users.id AND dl.updated_at < ?)`,
+      [Date.now() - 10 * 60 * 1000]);
     const orders = await all(`${ORDER_WITH_JOINS} WHERE o.status='ready' AND o.driver_id IS NULL AND o.visibility='public' ORDER BY o.created_at ASC`);
     for (const o of orders) {
       if (o.store_lat == null || o.store_lng == null) continue;

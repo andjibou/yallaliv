@@ -3,13 +3,23 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { fetchRoute } from './RouteMap.jsx';
 
-const driverIcon = (online) =>
+const driverIcon = (st) =>
   L.divIcon({
-    html: `<div style="font-size:24px;line-height:24px;text-shadow:0 1px 4px rgba(0,0,0,.45);${online ? '' : 'filter:grayscale(1);opacity:.55'}">🛵</div>`,
+    html: `<div style="position:relative;font-size:24px;line-height:24px;text-shadow:0 1px 4px rgba(0,0,0,.45);${st.dim ? 'filter:grayscale(1);opacity:.55;' : ''}">🛵<span style="position:absolute;right:-8px;bottom:-1px;width:10px;height:10px;border-radius:50%;background:${st.color};border:1.5px solid #fff"></span></div>`,
     className: '',
     iconSize: [24, 24],
     iconAnchor: [12, 12]
   });
+
+// Fraîcheur de la position : 🟢 live (<1 min) · 🟠 vu il y a X min (<15 min) · ⚪ hors ligne/ancien.
+// Un livreur qui verrouille son téléphone reste AFFICHÉ (badge orange) au lieu de disparaître.
+const statusOf = (d) => {
+  const age = Date.now() - (d.pos_at || 0);
+  const mins = Math.max(1, Math.round(age / 60000));
+  if (d.online && age < 60 * 1000) return { color: '#22c55e', dot: '🟢', label: 'En ligne', dim: false };
+  if (age < 15 * 60 * 1000) return { color: '#f59e0b', dot: '🟠', label: `Vu il y a ${mins} min`, dim: false };
+  return { color: '#9ca3af', dot: '⚪', label: d.pos_at ? `Hors ligne · vu il y a ${mins} min` : 'Hors ligne', dim: true };
+};
 
 /**
  * Carte des livreurs d'une boutique (positions en temps réel).
@@ -35,9 +45,10 @@ export default function DriversMap({ drivers }) {
     const pts = [];
     for (const d of drivers) {
       if (d.lat == null || d.lng == null) continue;
-      L.marker([d.lat, d.lng], { icon: driverIcon(!!d.online) })
+      const st = statusOf(d);
+      L.marker([d.lat, d.lng], { icon: driverIcon(st) })
         .addTo(layer.current)
-        .bindPopup(`<b>${d.name}</b>${d.general ? ' 🌍' : ''}<br>📞 ${d.phone || '—'}<br>${d.online ? '🟢 En ligne' : '⚪ Hors ligne'}${d.active?.length ? `<br>🛵 En course · commande #${d.active[0].id}` : ''}`);
+        .bindPopup(`<b>${d.name}</b>${d.general ? ' 🌍' : ''}<br>📞 ${d.phone || '—'}<br>${st.dot} ${st.label}${d.active?.length ? `<br>🛵 En course · commande #${d.active[0].id}` : ''}`);
       pts.push([d.lat, d.lng]);
     }
     if (pts.length === 1) m.setView(pts[0], 14);
