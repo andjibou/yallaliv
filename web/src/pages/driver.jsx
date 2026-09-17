@@ -79,37 +79,26 @@ export default function DriverApp() {
     if (!approved || !online) return;
     let stopped = false;
 
-    // 📱 APP NATIVE ANDROID (Capacitor) : watcher GPS ARRIÈRE-PLAN.
-    // Un service natif + notification maintiennent le suivi même téléphone verrouillé/éteint.
-    // Ce plugin n'a pas de bundle JS : on passe par le pont natif (nativeCallback),
-    // qui fournit les positions en continu et renvoie l'ID du watcher (pour l'arrêter plus tard).
-    const cap = window.Capacitor;
-    let nativeOk = false; let wid = null; let lastSent = 0;
-    if (cap?.isNativePlatform?.() && typeof cap.nativeCallback === 'function') {
-      try {
-        wid = cap.nativeCallback(
-          'BackgroundGeolocation',
-          'addWatcher',
-          {
-            backgroundMessage: 'YallaLiv suit votre position pendant votre service',
-            backgroundTitle: 'YallaLiv Livreur',
-            requestPermissions: true,
-            stale: false,
-            distanceFilter: 20
-          },
-          (loc) => {
-            if (!loc || stopped) return;
-            nativeOk = true; // le watcher natif vit : il remplace la boucle web pour l'envoi
-            const lat = loc.latitude, lng = loc.longitude;
-            lastPos.current = { lat, lng }; setPos({ lat, lng });
-            const now = Date.now();
-            if (now - lastSent > 9000) { lastSent = now; api('/driver/location', { method: 'PUT', body: { lat, lng } }).catch(() => {}); }
-          }
-        ) || null;
-      } catch { wid = null; /* pont indisponible → boucle web reste active */ }
+    // 📱 APP NATIVE ANDROID : service GPS NATIF (YallaGps) — envoi direct Java au serveur,
+    // 1 position/seconde, indépendant du navigateur : survit au verrouillage et à l'arrière-plan.
+    const YG = window.Capacitor?.isNativePlatform?.() ? window.Capacitor.Plugins?.YallaGps : null;
+    let nativeOk = false; // vrai dès que le service natif envoie lui-même les positions
+    let ygStarted = false; let ygStopped = false;
+    if (YG) {
+      const token = localStorage.getItem('yl_token');
+      const url = window.location.origin + '/api/driver/location';
+      if (token) {
+        YG.start({ url, token })
+          .then(() => { if (ygStopped) { try { YG.stop().catch(() => {}); } catch {} } else { ygStarted = true; nativeOk = true; } })
+          .catch(async (e) => {
+            if (String(e?.message || e).includes('PERMISSION')) {
+              try { const r = await YG.requestPermission(); if (r?.granted) { await YG.start({ url, token }); if (!ygStopped) { ygStarted = true; nativeOk = true; } else YG.stop().catch(() => {}); } } catch {}
+            }
+          });
+      }
     }
 
-    // 🌐 NAVIGATEUR / PWA : boucle 5 s + reprise au déverrouillage (filet de sécurité)
+    // 🌐 NAVIGATEUR / PWA : boucle 1 s + reprise au déverrouillage (filet de sécurité)
     const simPos = () => {
       const a = activeRef.current;
       if (a && a.store_lat != null && a.client_lat != null) {
@@ -132,24 +121,26 @@ export default function DriverApp() {
         navigator.geolocation.getCurrentPosition(
           (p) => done(p.coords.latitude, p.coords.longitude),
           () => { const [lat, lng] = simPos(); done(lat, lng); },
-          { timeout: 4000, maximumAge: 5000 }
+          { timeout: 4000, maximumAge: 1000 }
         );
       } else { const [lat, lng] = simPos(); done(lat, lng); }
     };
     send();
-    const id = setInterval(send, 5000);
+    const id = setInterval(send, 1000); // suivi à la seconde
     // Reprise immédiate : au déverrouillage du téléphone / retour sur l'app, on renvoie la position tout de suite
     const onVis = () => { if (document.visibilityState === 'visible' && !stopped) send(); };
     document.addEventListener('visibilitychange', onVis);
     return () => {
       stopped = true; clearInterval(id); document.removeEventListener('visibilitychange', onVis);
-      // stoppe le service GPS natif (l'ID vient de nativeCallback — attendu par removeWatcher)
-      if (wid) { try { cap?.nativePromise?.('BackgroundGeolocation', 'removeWatcher', { id: wid })?.catch?.(() => {}); } catch {} }
+      ygStopped = true;
+      if (ygStarted) { try { YG?.stop().catch(() => {}); } catch {} } // stoppe le service GPS natif
     };
   }, [approved, online]);
 
   // Écran maintenu allumé PENDANT une course (suivi GPS continu, téléphone posé sur le guidon).
   // Relâché dès que le livreur verrouille lui-même ou termine sa course. Non vital si indisponible.
+  const isNative = !!window.Capacitor?.isNativePlatform?.();
+  const openAppSettings = () => { try { window.Capacitor.Plugins?.YallaGps?.openSettings?.().catch(() => {}); } catch {} };
   const wakeRef = useRef(null);
   const enCourse = !!activeRef.current;
   useEffect(() => {
@@ -215,6 +206,17 @@ export default function DriverApp() {
   return (
     <div className="shell">
       <Top t={t} user={user} logout={logout} online={online} onToggle={toggleOnline} onAccount={() => setAcct(true)} />
+      {isNative && (
+        <div className="card" style={{ background: '#fffbeb', border: '1px solid #fcd34d', padding: '10px 14px', fontSize: 13 }}>
+          <b>📍 Suivi en arrière-plan</b> — pour rester visible écran verrouillé :
+          <ol style={{ margin: '6px 0 8px 18px', padding: 0 }}>
+            <li>Position → <b>« Autoriser tout le temps »</b></li>
+            <li>Batterie → <b>« Sans restriction »</b></li>
+            <li>Ne pas fermer l'app en la glissant (la notification « Suivi de position actif » doit rester)</li>
+          </ol>
+          <button className="btn" style={{ padding: '6px 12px', fontSize: 13 }} onClick={openAppSettings}>⚙️ Ouvrir les réglages</button>
+        </div>
+      )}
       <div className="stat-grid">
         <div className="stat hl"><div className="v" style={{ fontSize: 18 }}>{fmtMoney(stats?.today_earnings || 0)}</div><div className="k">💰 {t('today_earnings')}</div></div>
         <div className="stat"><div className="v" style={{ fontSize: 18 }}>{fmtMoney(stats?.earnings || 0)}</div><div className="k">🏆 {t('total_earnings')}</div></div>

@@ -42,8 +42,18 @@ git push
 3. **Batterie** (Xiaomi, Samsung, Oppo…) : Paramètres → Applications → YallaLiv Livreur →
    Batterie → **« Sans restriction »** (sinon le système tue le suivi)
 
+## 🔴 MISE À JOUR v2 (17/09/2026) — GPS NATIF AUTONOME — RÉINSTALLATION OBLIGATOIRE
+Le suivi est désormais assuré par un **service Android natif** (code Java) qui :
+- envoie la position **chaque seconde** (directement, sans passer par le navigateur) ;
+- survit au **verrouillage**, à l'**arrière-plan** et aux **killers de batterie** (redémarrage auto) ;
+- s'arrête proprement quand le livreur passe **Hors ligne**.
+
+⚠️ **Le code natif a changé → il faut RECONSTRUIRE et RÉINSTALLER l'APK**
+(same procédure : push → onglet Actions → Artifacts → installer le nouvel APK par-dessus l'ancien).
+
 ## Test de validation
-1. Livreur En ligne (app ouverte) → 🟢 sur la carte
+1. Livreur En ligne (app ouverte) → 🟢 sur la carte + notification « Suivi de position actif »
+2. Verrouiller le téléphone 10 min → le point bouge ENCORE (service natif, 1 position/s)
 2. **Verrouiller le téléphone, le mettre dans la poche** → rouler à scooter 10 min
 3. Sur la carte marchand : le point **bouge encore**, badge reste frais 🟢
 4. Livreur passe Hors ligne → la notification GPS disparaît (respect de la vie privée + batterie)
@@ -51,7 +61,7 @@ git push
 ## Dépannage
 | Problème | Solution |
 |---|---|
-| Position s'arrête écran éteint | Permission position = « Toujours » + batterie « Sans restriction » |
+| Position s'arrête écran éteint | 1) réinstaller le DERNIER APK (v2 service natif) 2) batterie « Sans restriction » (bannière ⚙️ dans l'app) 3) ne pas glisser-fermer l'app |
 | Pas de notification « YallaLiv suit votre position » | Le livreur est hors ligne, ou notifications bloquées |
 | L'app affiche « Connexion Internet indisponible » | Réseau absent — l'app a besoin du réseau (le site est dedans) |
 | Le build GitHub Actions échoue | Ouvre la run rouge → copie les logs → à l'assistant |
