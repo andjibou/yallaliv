@@ -14,6 +14,7 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
 
 import androidx.activity.result.ActivityResult;
 import androidx.core.content.ContextCompat;
@@ -26,7 +27,7 @@ import androidx.core.content.ContextCompat;
  * openSettings()      : ouvre les réglages Android de l'app (batterie « Sans restriction »…).
  */
 @CapacitorPlugin(name = "YallaGps", permissions = {
-        @CapacitorPlugin.Permission(
+        @Permission(
                 strings = {Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION},
                 alias = "location"
         )
