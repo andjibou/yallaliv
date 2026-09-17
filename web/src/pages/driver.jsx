@@ -99,18 +99,6 @@ export default function DriverApp() {
     }
 
     // 🌐 NAVIGATEUR / PWA : boucle 1 s + reprise au déverrouillage (filet de sécurité)
-    const simPos = () => {
-      const a = activeRef.current;
-      if (a && a.store_lat != null && a.client_lat != null) {
-        const dur = a.status === 'picked_up' ? 6 * 60000 : 4 * 60000;
-        const p = Math.min(1, Math.max(0, (Date.now() - a.updated_at) / dur));
-        return [
-          a.store_lat + (a.client_lat - a.store_lat) * p + (Math.random() - .5) * .0004,
-          a.store_lng + (a.client_lng - a.store_lng) * p + (Math.random() - .5) * .0004
-        ];
-      }
-      return [31.2001 + (Math.random() - .5) * .004, 29.9187 + (Math.random() - .5) * .004];
-    };
     const send = () => {
       const done = (lat, lng) => {
         lastPos.current = { lat, lng };
@@ -120,10 +108,11 @@ export default function DriverApp() {
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (p) => done(p.coords.latitude, p.coords.longitude),
-          () => { const [lat, lng] = simPos(); done(lat, lng); },
-          { timeout: 4000, maximumAge: 1000 }
+          () => {}, // GPS indisponible (intérieur d'un bâtiment…) : PAS de simulation —
+                    // on conserve la dernière position réelle (les badges de fraîcheur gèrent l'affichage)
+          { timeout: 4000, maximumAge: 1000, enableHighAccuracy: true }
         );
-      } else { const [lat, lng] = simPos(); done(lat, lng); }
+      }
     };
     send();
     const id = setInterval(send, 1000); // suivi à la seconde
