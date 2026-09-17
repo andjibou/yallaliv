@@ -1,4 +1,4 @@
-const CACHE = 'yallaliv-v3';
+const CACHE = 'yallaliv-v4'; // v4: network-first — l'app se met à jour à chaque ouverture (réseau d'abord)
 const ASSETS = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon-512.png'];
 
 // Ne pas cacher les assets de dev Vite (HMR)
@@ -20,18 +20,16 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.pathname.startsWith('/api')) return;
   if (isDevAsset(url)) return; // dev : laisser passer le réseau
+  // NETWORK-FIRST : on prend TOUJOURS la version du réseau quand il est là (donc chaque
+  // déploiement arrive dans l'app), et le cache ne sert qu'en secours hors-ligne.
   e.respondWith(
-    caches.match(e.request).then(
-      (hit) =>
-        hit ||
-        fetch(e.request)
-          .then((res) => {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
-            return res;
-          })
-          .catch(() => caches.match('/index.html'))
-    )
+    fetch(e.request)
+      .then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+        return res;
+      })
+      .catch(() => caches.match(e.request).then((hit) => hit || caches.match('/index.html')))
   );
 });
 
