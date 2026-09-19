@@ -81,7 +81,6 @@ export default function DriverApp() {
 
     // 📱 APP NATIVE ANDROID : service GPS NATIF (YallaGps) — envoi direct Java au serveur,
     // 1 position/seconde, indépendant du navigateur : survit au verrouillage et à l'arrière-plan.
-    const YG = window.Capacitor?.isNativePlatform?.() ? window.Capacitor.Plugins?.YallaGps : null;
     let nativeOk = false; // vrai dès que le service natif envoie lui-même les positions
     let ygStarted = false; let ygStopped = false;
     if (YG) {
@@ -129,7 +128,17 @@ export default function DriverApp() {
   // Écran maintenu allumé PENDANT une course (suivi GPS continu, téléphone posé sur le guidon).
   // Relâché dès que le livreur verrouille lui-même ou termine sa course. Non vital si indisponible.
   const isNative = !!window.Capacitor?.isNativePlatform?.();
-  const openAppSettings = () => { try { window.Capacitor.Plugins?.YallaGps?.openSettings?.().catch(() => {}); } catch {} };
+  const YG = isNative ? (window.Capacitor.Plugins?.YallaGps || null) : null;
+  const openAppSettings = () => { try { YG?.openSettings?.().catch(() => {}); } catch {} };
+  // Tableau de bord GPS (app native) : lit le service Java toutes les 4 s
+  const [gpsStatus, setGpsStatus] = useState(null);
+  useEffect(() => {
+    if (!YG) return;
+    const read = () => YG.status?.().then(setGpsStatus).catch(() => setGpsStatus({}));
+    read();
+    const it = setInterval(read, 4000);
+    return () => clearInterval(it);
+  }, []);
   const wakeRef = useRef(null);
   const enCourse = !!activeRef.current;
   useEffect(() => {
@@ -195,17 +204,27 @@ export default function DriverApp() {
   return (
     <div className="shell">
       <Top t={t} user={user} logout={logout} online={online} onToggle={toggleOnline} onAccount={() => setAcct(true)} />
-      {isNative && (
-        <div className="card" style={{ background: '#fffbeb', border: '1px solid #fcd34d', padding: '10px 14px', fontSize: 13 }}>
-          <b>📍 Suivi en arrière-plan</b> — pour rester visible écran verrouillé :
-          <ol style={{ margin: '6px 0 8px 18px', padding: 0 }}>
-            <li>Position → <b>« Autoriser tout le temps »</b></li>
-            <li>Batterie → <b>« Sans restriction »</b></li>
-            <li>Ne pas fermer l'app en la glissant (la notification « Suivi de position actif » doit rester)</li>
-          </ol>
-          <button className="btn" style={{ padding: '6px 12px', fontSize: 13 }} onClick={openAppSettings}>⚙️ Ouvrir les réglages</button>
+      {isNative && !YG && (
+        <div className="card" style={{ background: '#fee2e2', border: '1px solid #ef4444', padding: '10px 14px', fontSize: 13 }}>
+          🔴 <b>APK ANCIEN détecté</b> — cette application ne contient pas le service GPS natif (vérifie : réglages Android → YallaLiv → version doit être <b>3.0</b>). Installe le nouvel APK fourni par l'administrateur, puis reconnecte-toi.
         </div>
       )}
+      {YG && (() => {
+        const age = gpsStatus?.lastUploadAt ? Math.max(0, Math.round((Date.now() - gpsStatus.lastUploadAt) / 1000)) : null;
+        const ok = gpsStatus?.running && age != null && age < 20;
+        return (
+          <div className="card" style={{ background: ok ? '#d1fae5' : '#fffbeb', border: `1px solid ${ok ? '#34d399' : '#fcd34d'}`, padding: '10px 14px', fontSize: 13 }}>
+            <b>📍 Service GPS</b> : {gpsStatus == null ? '…' : gpsStatus.running ? 'ACTIF ✅' : 'arrêté'}
+            {age != null && <span> · dernier envoi <b>il y a {age} s</b></span>}
+            {gpsStatus?.apkVersion && <span> · APK v{gpsStatus.apkVersion}</span>}
+            {gpsStatus && !gpsStatus.permission && <span style={{ color: '#b91c1c' }}> · ⚠️ permission position manquante</span>}
+            <div style={{ marginTop: 6, opacity: 0.85 }}>
+              Position « <b>Autoriser tout le temps</b> » · Batterie « <b>Sans restriction</b> »
+              <button className="btn" style={{ padding: '3px 10px', fontSize: 12, marginLeft: 8 }} onClick={openAppSettings}>⚙️</button>
+            </div>
+          </div>
+        );
+      })()}
       <div className="stat-grid">
         <div className="stat hl"><div className="v" style={{ fontSize: 18 }}>{fmtMoney(stats?.today_earnings || 0)}</div><div className="k">💰 {t('today_earnings')}</div></div>
         <div className="stat"><div className="v" style={{ fontSize: 18 }}>{fmtMoney(stats?.earnings || 0)}</div><div className="k">🏆 {t('total_earnings')}</div></div>

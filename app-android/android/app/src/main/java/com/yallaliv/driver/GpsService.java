@@ -15,6 +15,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 
 import org.json.JSONObject;
 
@@ -38,11 +39,22 @@ public class GpsService extends Service {
 
     static final String CH_ID = "yallaliv_gps";
     static final String PREFS = "yallaliv_gps_prefs";
+    static final String VERSION = "3.0";
+    private PowerManager.WakeLock wl;
 
     @Override
     public void onCreate() {
         super.onCreate();
         startForeground(1, buildNotification());
+        // Wakelock partiel : garde le CPU (et le GPS) actif écran éteint.
+        // Certaines marques (Xiaomi, Oppo, Samsung…) suspendent le GPS au verrouillage sans ça.
+        try {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "yallaliv:gps");
+            wl.acquire();
+        } catch (Exception ignored) {
+        }
+        setStatus(true);
     }
 
     @Override
@@ -110,6 +122,16 @@ public class GpsService extends Service {
         new Thread(() -> upload(la, ln)).start();
     }
 
+    private void setStatus(boolean running) {
+        try {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putBoolean("running", running)
+                    .putString("version", VERSION)
+                    .apply();
+        } catch (Exception ignored) {
+        }
+    }
+
     private void upload(double lat, double lng) {
         try {
             HttpURLConnection c = (HttpURLConnection) new URL(apiUrl).openConnection();
@@ -127,6 +149,11 @@ public class GpsService extends Service {
             }
             c.getResponseCode();
             c.disconnect();
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putLong("lastUploadAt", System.currentTimeMillis())
+                    .putFloat("lastLat", (float) lat)
+                    .putFloat("lastLng", (float) lng)
+                    .apply();
         } catch (Exception ignored) {
         }
     }
@@ -157,6 +184,11 @@ public class GpsService extends Service {
 
     @Override
     public void onDestroy() {
+        setStatus(false);
+        try {
+            if (wl != null && wl.isHeld()) wl.release();
+        } catch (Exception ignored) {
+        }
         if (lm != null && listener != null) {
             try {
                 lm.removeUpdates(listener);

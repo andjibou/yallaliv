@@ -83,6 +83,18 @@ public class YallaGps extends Plugin {
     }
 
     @PluginMethod
+    public void status(PluginCall call) {
+        android.content.SharedPreferences prefs = getContext().getSharedPreferences(GpsService.PREFS, Context.MODE_PRIVATE);
+        JSObject r = new JSObject();
+        r.put("version", prefs.getString("version", null));
+        r.put("running", prefs.getBoolean("running", false));
+        r.put("lastUploadAt", prefs.getLong("lastUploadAt", 0));
+        r.put("permission", hasLocationPermission());
+        r.put("apkVersion", GpsService.VERSION);
+        call.resolve(r);
+    }
+
+    @PluginMethod
     public void openSettings(PluginCall call) {
         Intent i = new Intent(
                 Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
