@@ -68,8 +68,7 @@ public class YallaGps extends Plugin {
         // Arrêt VOLONTAIRE (bouton Hors ligne) : ne pas redémarrer automatiquement.
         Intent i = new Intent(getContext(), GpsService.class);
         i.putExtra("voluntaryStop", true);
-        getContext().startService(i); // transmet le drapeau au service...
-        getContext().stopService(i);  // ...puis l'arrête
+        getContext().startService(i); // le service lit le drapeau et s'arrête proprement lui-même
         call.resolve();
     }
 

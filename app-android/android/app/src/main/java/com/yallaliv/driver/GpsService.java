@@ -39,7 +39,7 @@ public class GpsService extends Service {
 
     static final String CH_ID = "yallaliv_gps";
     static final String PREFS = "yallaliv_gps_prefs";
-    static final String VERSION = "3.3";
+    static final String VERSION = "3.4";
     private PowerManager.WakeLock wl;
 
     @Override
@@ -61,6 +61,14 @@ public class GpsService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // Arrêt VOLONTAIRE (bouton Hors ligne) : traité EN PREMIER, avant tout autre contrôle,
+        // sinon le service pouvait redémarrer tout seul après un Hors ligne.
+        if (intent != null && intent.getBooleanExtra("voluntaryStop", false)) {
+            stillWanted = false;
+            setStatus(false);
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         if (intent != null) {
             apiUrl = intent.getStringExtra("url");
@@ -74,16 +82,15 @@ public class GpsService extends Service {
             token = prefs.getString("token", null);
         }
         if (apiUrl == null || token == null) {
-            stopSelf();
-            return START_STICKY;
-        }
-        if (intent != null && intent.getBooleanExtra("voluntaryStop", false)) {
-            stillWanted = false; // arrêt demandé depuis l'app (Hors ligne) → ne pas redémarrer
+            stillWanted = false; // rien à envoyer : ne pas boucler sur des redémarrages vides
             stopSelf();
             return START_NOT_STICKY;
         }
         stillWanted = true; // (re)démarrage = le livreur veut le suivi (défaut)
 
+        if (lm != null && listener != null) {
+            try { lm.removeUpdates(listener); } catch (Exception ignored) {} // évite les doublons au redémarrage
+        }
         lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         listener = new LocationListener() {
             @Override
@@ -214,7 +221,9 @@ public class GpsService extends Service {
             android.app.PendingIntent pi = android.app.PendingIntent.getService(
                     this, 1, new Intent(this, GpsService.class), android.app.PendingIntent.FLAG_IMMUTABLE);
             android.app.AlarmManager am = (android.app.AlarmManager) getSystemService(ALARM_SERVICE);
-            am.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP,
+            // ⚠️ setAndAllowWhileIdle (PAS setExact*…) : les alarmes « exactes » exigent
+            // une permission spéciale Android 12+ — sans elle le redémarrage échouait en silence.
+            am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP,
                     System.currentTimeMillis() + 1500, pi);
         } catch (Exception ignored) {
         }
