@@ -18,6 +18,11 @@ import com.getcapacitor.annotation.Permission;
 
 import androidx.activity.result.ActivityResult;
 import androidx.core.content.ContextCompat;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.URL;
+import androidx.core.content.FileProvider;
 
 /**
  * Plugin natif YallaGps — pont JS ↔ service GPS.
@@ -139,6 +144,42 @@ public class YallaGps extends Plugin {
         } catch (Exception e) {
             call.reject("OVERLAY_ERR");
         }
+    }
+
+    /** 🔄 Mise à jour automatique : télécharge le nouvel APK (hébergé sur le site) et
+     *  lance l'installation Android (une confirmation à l'écran, rien à réinstaller à la main). */
+    @PluginMethod
+    public void downloadAndInstall(PluginCall call) {
+        final String apkUrl = call.getString("url");
+        if (apkUrl == null) {
+            call.reject("MISSING_URL");
+            return;
+        }
+        final PluginCall fcall = call;
+        new Thread(() -> {
+            try {
+                File out = new File(getContext().getCacheDir(), "yallaliv-update.apk");
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection) new URL(apkUrl).openConnection();
+                c.setConnectTimeout(15000);
+                c.setReadTimeout(60000);
+                c.connect();
+                try (InputStream in = c.getInputStream(); FileOutputStream fos = new FileOutputStream(out)) {
+                    byte[] b = new byte[16384];
+                    int n;
+                    while ((n = in.read(b)) > 0) fos.write(b, 0, n);
+                }
+                c.disconnect();
+                Intent i = new Intent(Intent.ACTION_VIEW);
+                i.setDataAndType(FileProvider.getUriForFile(getContext(),
+                        getContext().getPackageName() + ".fileprovider", out),
+                        "application/vnd.android.package-archive");
+                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(i);
+                fcall.resolve();
+            } catch (Exception e) {
+                fcall.reject("INSTALL_ERR: " + e.getMessage());
+            }
+        }).start();
     }
 
     @PluginMethod

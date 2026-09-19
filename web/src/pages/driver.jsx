@@ -130,6 +130,16 @@ export default function DriverApp() {
   const isNative = !!window.Capacitor?.isNativePlatform?.();
   const YG = isNative ? (window.Capacitor.Plugins?.YallaGps || null) : null;
   const openAppSettings = () => { try { YG?.openSettings?.().catch(() => {}); } catch {} };
+  // 🔄 Version minimale de l'APK — si le téléphone a moins, proposer la mise à jour automatique
+  const APK_REQUIRED = '3.2';
+  const [installing, setInstalling] = useState(false);
+  const updateApp = () => {
+    setInstalling(true);
+    YG?.downloadAndInstall?.({ url: window.location.origin + '/apk/latest.apk' })
+      .catch((e) => toast('Mise à jour impossible : ' + (e?.message || e), 'err'))
+      .finally(() => setInstalling(false));
+  };
+
   // Tableau de bord GPS (app native) : lit le service Java toutes les 4 s
   const [gpsStatus, setGpsStatus] = useState(null);
   useEffect(() => {
@@ -174,7 +184,10 @@ export default function DriverApp() {
   const toggleOnline = async () => {
     const v = !online;
     setOnline(v);
-    try { await api('/driver/online', { method: 'PUT', body: { online: v } }); } catch (ex) { setOnline(!v); toast(ex.message, 'err'); }
+    try {
+      await api('/driver/online', { method: 'PUT', body: { online: v } });
+      if (!v) { try { YG?.stop?.().catch(() => {}); } catch {} } // Hors ligne → stoppe le GPS et la notification IMMÉDIATEMENT
+    } catch (ex) { setOnline(!v); toast(ex.message, 'err'); }
   };
   const accept = async (o) => {
     try {
@@ -224,7 +237,15 @@ export default function DriverApp() {
           🔴 <b>APK ANCIEN détecté</b> — cette application ne contient pas le service GPS natif (vérifie : réglages Android → YallaLiv → version doit être <b>3.0</b>). Installe le nouvel APK fourni par l'administrateur, puis reconnecte-toi.
         </div>
       )}
-      {YG && (() => {
+      {YG && gpsStatus?.apkVersion && gpsStatus.apkVersion < APK_REQUIRED && (
+        <div className="card" style={{ background: '#e0e7ff', border: '1px solid #6366f1', padding: '10px 14px', fontSize: 13 }}>
+          🔄 <b>Mise à jour de l'application disponible</b> (installée : v{gpsStatus.apkVersion} · requise : v{APK_REQUIRED})
+          <button className="btn" style={{ padding: '4px 12px', fontSize: 13, marginLeft: 10 }} disabled={installing} onClick={updateApp}>
+            {installing ? '⏳ Téléchargement…' : '🔄 Mettre à jour maintenant'}
+          </button>
+        </div>
+      )}
+      {YG && online && (() => {
         const age = gpsStatus?.lastUploadAt ? Math.max(0, Math.round((Date.now() - gpsStatus.lastUploadAt) / 1000)) : null;
         const ok = gpsStatus?.running && age != null && age < 20;
         return (

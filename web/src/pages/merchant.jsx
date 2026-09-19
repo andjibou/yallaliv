@@ -477,7 +477,7 @@ function Drivers() {
   };
 
   if (!drivers) return <Spinner />;
-  const withPos = drivers.filter((d) => d.lat != null);
+  const withPos = drivers.filter((d) => d.lat != null && (d.online || d.active?.length)); // hors ligne → retiré de la carte (sauf course en cours)
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const tv = drivers.find((d) => d.id === tripView); // position live (rafraichie toutes les 5s)
 

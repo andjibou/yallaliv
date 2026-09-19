@@ -39,7 +39,7 @@ public class GpsService extends Service {
 
     static final String CH_ID = "yallaliv_gps";
     static final String PREFS = "yallaliv_gps_prefs";
-    static final String VERSION = "3.1";
+    static final String VERSION = "3.2";
     private PowerManager.WakeLock wl;
 
     @Override
@@ -196,6 +196,20 @@ public class GpsService extends Service {
             }
         }
         super.onDestroy();
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        // App fermée en glissant : le service continue (stopWithTask=false).
+        // Ce filet de sécurité reprogramme un redémarrage si une marque agressive le tuait quand même.
+        try {
+            android.app.PendingIntent pi = android.app.PendingIntent.getService(
+                    this, 1, new Intent(this, GpsService.class), android.app.PendingIntent.FLAG_IMMUTABLE);
+            android.app.AlarmManager am = (android.app.AlarmManager) getSystemService(ALARM_SERVICE);
+            am.set(android.app.AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 1500, pi);
+        } catch (Exception ignored) {
+        }
+        super.onTaskRemoved(rootIntent);
     }
 
     @Override
