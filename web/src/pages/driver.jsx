@@ -161,6 +161,11 @@ export default function DriverApp() {
       if (!s?.permission) steps.push(() => YG.requestPermission?.().catch(() => {}));
       if (!s?.battery) steps.push(() => YG.requestBatteryExemption?.().catch(() => {}));
       if (!s?.overlay) steps.push(() => YG.requestOverlay?.().catch(() => {}));
+      // ④ survie à la fermeture de l'app (réglage constructeur) : ouvrir la fiche système
+      if (!(s?.battery && s?.running)) steps.push(() => {
+        toast('④ Active « Démarrage auto » / « Exécuter en arrière-plan » pour YallaLiv, puis reviens');
+        YG.openSettings?.().catch(() => {});
+      });
       steps.forEach((f, i) => setTimeout(f, 900 * (i + 1))); // enchaînées doucement
     }).catch(() => {});
   }, [!!YG]);
@@ -260,6 +265,11 @@ export default function DriverApp() {
                 { ok: !!gpsStatus.permission, label: '③ GPS en temps réel (chaque seconde)', act: () => YG.requestPermission?.().catch(() => {}) },
                 { ok: !!gpsStatus.battery, label: '① Rester éveillé (batterie « Sans restriction »)', act: () => YG.requestBatteryExemption?.().catch(() => {}) },
                 { ok: !!gpsStatus.overlay, label: '② Par-dessus les autres applications', act: () => YG.requestOverlay?.().catch(() => {}) },
+                (() => {
+                  const a4 = gpsStatus.lastUploadAt ? Math.round((Date.now() - gpsStatus.lastUploadAt) / 1000) : null;
+                  const ok4 = !!gpsStatus.battery && !!gpsStatus.running && a4 != null && a4 < 30;
+                  return { ok: ok4, label: '④ Continuer après fermeture de l\'app (Démarrage auto)', act: () => { toast('Dans la fiche Android de YallaLiv, active « Démarrage auto » / « Exécuter en arrière-plan », puis reviens'); YG.openSettings?.().catch(() => {}); } };
+                })(),
               ];
               return (
                 <div style={{ marginTop: 6 }}>

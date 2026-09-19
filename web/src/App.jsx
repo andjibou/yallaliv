@@ -45,7 +45,7 @@ export default function App() {
               <SwapModal />
               {/* Version du front — sert à VÉRIFIER que l'app charge bien la dernière version
                   (badge discret en bas à droite de chaque écran). À incrémenter à chaque déploiement. */}
-              <div style={{ position: 'fixed', bottom: 3, right: 8, fontSize: 10, opacity: 0.45, zIndex: 9999, pointerEvents: 'none' }}>YallaLiv v2026.09.19.7</div>
+              <div style={{ position: 'fixed', bottom: 3, right: 8, fontSize: 10, opacity: 0.45, zIndex: 9999, pointerEvents: 'none' }}>YallaLiv v2026.09.19.8</div>
               <Routes>
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
