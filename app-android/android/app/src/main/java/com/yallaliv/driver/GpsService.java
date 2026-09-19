@@ -39,7 +39,7 @@ public class GpsService extends Service {
 
     static final String CH_ID = "yallaliv_gps";
     static final String PREFS = "yallaliv_gps_prefs";
-    static final String VERSION = "3.0";
+    static final String VERSION = "3.1";
     private PowerManager.WakeLock wl;
 
     @Override

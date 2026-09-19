@@ -90,8 +90,55 @@ public class YallaGps extends Plugin {
         r.put("running", prefs.getBoolean("running", false));
         r.put("lastUploadAt", prefs.getLong("lastUploadAt", 0));
         r.put("permission", hasLocationPermission());
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+            r.put("battery", pm.isIgnoringBatteryOptimizations(getContext().getPackageName()));
+        } catch (Exception ignored) {
+        }
+        try {
+            r.put("overlay", android.provider.Settings.canDrawOverlays(getContext()));
+        } catch (Exception ignored) {
+        }
         r.put("apkVersion", GpsService.VERSION);
         call.resolve(r);
+    }
+
+    /** ① Rester éveillé : exemption d'optimisation de batterie (« Sans restriction »).
+     *  La boîte de dialogue SYSTÈME s'affiche — accordée une fois, valable pour toujours. */
+    @PluginMethod
+    public void requestBatteryExemption(PluginCall call) {
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+            if (pm.isIgnoringBatteryOptimizations(getContext().getPackageName())) {
+                call.resolve();
+                return;
+            }
+            Intent i = new Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:" + getContext().getPackageName()));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("BATTERY_ERR");
+        }
+    }
+
+    /** ② Afficher par-dessus les autres applications (écran de réglage Android). */
+    @PluginMethod
+    public void requestOverlay(PluginCall call) {
+        try {
+            if (android.provider.Settings.canDrawOverlays(getContext())) {
+                call.resolve();
+                return;
+            }
+            Intent i = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getContext().getPackageName()));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("OVERLAY_ERR");
+        }
     }
 
     @PluginMethod

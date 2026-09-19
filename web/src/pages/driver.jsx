@@ -139,6 +139,21 @@ export default function DriverApp() {
     const it = setInterval(read, 4000);
     return () => clearInterval(it);
   }, []);
+  // 🔐 Assistant d'autorisations (app native) : à l'arrivée dans l'espace livreur,
+  // on demande UNE SEULE FOIS chaque autorisation manquante (Android les mémorise pour toujours) :
+  // ③ Position « tout le temps » → ① Batterie « Sans restriction » → ② Par-dessus les autres apps.
+  const wizardDone = useRef(false);
+  useEffect(() => {
+    if (!YG || wizardDone.current) return;
+    wizardDone.current = true;
+    YG.status?.().then((s) => {
+      const steps = [];
+      if (!s?.permission) steps.push(() => YG.requestPermission?.().catch(() => {}));
+      if (!s?.battery) steps.push(() => YG.requestBatteryExemption?.().catch(() => {}));
+      if (!s?.overlay) steps.push(() => YG.requestOverlay?.().catch(() => {}));
+      steps.forEach((f, i) => setTimeout(f, 900 * (i + 1))); // enchaînées doucement
+    }).catch(() => {});
+  }, [!!YG]);
   const wakeRef = useRef(null);
   const enCourse = !!activeRef.current;
   useEffect(() => {
@@ -218,10 +233,25 @@ export default function DriverApp() {
             {age != null && <span> · dernier envoi <b>il y a {age} s</b></span>}
             {gpsStatus?.apkVersion && <span> · APK v{gpsStatus.apkVersion}</span>}
             {gpsStatus && !gpsStatus.permission && <span style={{ color: '#b91c1c' }}> · ⚠️ permission position manquante</span>}
-            <div style={{ marginTop: 6, opacity: 0.85 }}>
-              Position « <b>Autoriser tout le temps</b> » · Batterie « <b>Sans restriction</b> »
-              <button className="btn" style={{ padding: '3px 10px', fontSize: 12, marginLeft: 8 }} onClick={openAppSettings}>⚙️</button>
-            </div>
+
+            {gpsStatus && (() => {
+              const items = [
+                { ok: !!gpsStatus.permission, label: '③ GPS en temps réel (chaque seconde)', act: () => YG.requestPermission?.().catch(() => {}) },
+                { ok: !!gpsStatus.battery, label: '① Rester éveillé (batterie « Sans restriction »)', act: () => YG.requestBatteryExemption?.().catch(() => {}) },
+                { ok: !!gpsStatus.overlay, label: '② Par-dessus les autres applications', act: () => YG.requestOverlay?.().catch(() => {}) },
+              ];
+              return (
+                <div style={{ marginTop: 6 }}>
+                  {items.map((it) => (
+                    <div key={it.label} className="row" style={{ justifyContent: 'space-between', gap: 6, padding: '2px 0' }}>
+                      <span style={{ opacity: 0.9 }}>{it.ok ? '✅' : '⚠️'} {it.label}</span>
+                      {!it.ok && <button className="btn" style={{ padding: '2px 10px', fontSize: 12 }} onClick={it.act}>Activer</button>}
+                    </div>
+                  ))}
+                  <button className="btn" style={{ padding: '2px 10px', fontSize: 12, marginTop: 4 }} onClick={openAppSettings}>⚙️ Tous les réglages</button>
+                </div>
+              );
+            })()}
           </div>
         );
       })()}
