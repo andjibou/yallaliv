@@ -24,9 +24,10 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 
 /**
- * Service de premier plan YallaLiv : GPS toutes les secondes + envoi DIRECT au serveur
- * (java.net, sans passer par le navigateur/WebView). Tourne même écran verrouillé
- * ou application en arrière-plan, tant que le livreur est « En ligne ».
+ * Service de premier plan YallaLiv — GPS toutes les secondes + envoi DIRECT au serveur.
+ * ⚠️ v3.1.1 = RESTAURATION EXACTE de la v3.1 (validée sur le terrain) :
+ * pas de mécanisme de redémarrage, pas d'alarme, pas de drapeau d'arrêt —
+ * uniquement le service simple qui a fait ses preuves.
  */
 public class GpsService extends Service {
     private LocationManager lm;
@@ -39,7 +40,7 @@ public class GpsService extends Service {
 
     static final String CH_ID = "yallaliv_gps";
     static final String PREFS = "yallaliv_gps_prefs";
-    static final String VERSION = "3.4";
+    static final String VERSION = "3.1.1";
     private PowerManager.WakeLock wl;
 
     @Override
@@ -47,7 +48,6 @@ public class GpsService extends Service {
         super.onCreate();
         startForeground(1, buildNotification());
         // Wakelock partiel : garde le CPU (et le GPS) actif écran éteint.
-        // Certaines marques (Xiaomi, Oppo, Samsung…) suspendent le GPS au verrouillage sans ça.
         try {
             PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
             wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "yallaliv:gps");
@@ -57,18 +57,8 @@ public class GpsService extends Service {
         setStatus(true);
     }
 
-    private boolean stillWanted = true; // false seulement quand le livreur passe Hors ligne
-
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // Arrêt VOLONTAIRE (bouton Hors ligne) : traité EN PREMIER, avant tout autre contrôle,
-        // sinon le service pouvait redémarrer tout seul après un Hors ligne.
-        if (intent != null && intent.getBooleanExtra("voluntaryStop", false)) {
-            stillWanted = false;
-            setStatus(false);
-            stopSelf();
-            return START_NOT_STICKY;
-        }
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         if (intent != null) {
             apiUrl = intent.getStringExtra("url");
@@ -77,19 +67,16 @@ public class GpsService extends Service {
                 prefs.edit().putString("url", apiUrl).putString("token", token).apply();
             }
         } else {
-            // Redémarrage automatique (START_STICKY) après un arrêt système : on reprend les derniers réglages
+            // Redémarrage système (START_STICKY) : reprendre les derniers réglages connus
             apiUrl = prefs.getString("url", null);
             token = prefs.getString("token", null);
         }
         if (apiUrl == null || token == null) {
-            stillWanted = false; // rien à envoyer : ne pas boucler sur des redémarrages vides
             stopSelf();
-            return START_NOT_STICKY;
+            return START_STICKY;
         }
-        stillWanted = true; // (re)démarrage = le livreur veut le suivi (défaut)
-
         if (lm != null && listener != null) {
-            try { lm.removeUpdates(listener); } catch (Exception ignored) {} // évite les doublons au redémarrage
+            try { lm.removeUpdates(listener); } catch (Exception ignored) {} // pas d'écouteur en double
         }
         lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         listener = new LocationListener() {
@@ -121,8 +108,7 @@ public class GpsService extends Service {
     }
 
     /**
-     * Envoi au maximum 1 fois par seconde ; si le livreur ne bouge pas,
-     * un « battement de cœur » toutes les 8 s suffit (économise batterie et serveur).
+     * Envoi au maximum 1 fois par seconde ; livreur immobile → battement de cœur toutes les 8 s.
      */
     private void maybeUpload(double lat, double lng) {
         long now = System.currentTimeMillis();
@@ -199,9 +185,7 @@ public class GpsService extends Service {
 
     @Override
     public void onDestroy() {
-        // Destruction NON demandée par le bouton Hors ligne ? → on revient (le livreur est
-        // encore « En ligne » côté serveur, le suivi doit reprendre).
-        if (stillWanted) scheduleRestart(); else setStatus(false);
+        setStatus(false);
         try {
             if (wl != null && wl.isHeld()) wl.release();
         } catch (Exception ignored) {
@@ -213,28 +197,6 @@ public class GpsService extends Service {
             }
         }
         super.onDestroy();
-    }
-
-    /** Reprogramme un redémarrage du service dans ~1,5 s (réveil même en veille profonde). */
-    private void scheduleRestart() {
-        try {
-            android.app.PendingIntent pi = android.app.PendingIntent.getService(
-                    this, 1, new Intent(this, GpsService.class), android.app.PendingIntent.FLAG_IMMUTABLE);
-            android.app.AlarmManager am = (android.app.AlarmManager) getSystemService(ALARM_SERVICE);
-            // ⚠️ setAndAllowWhileIdle (PAS setExact*…) : les alarmes « exactes » exigent
-            // une permission spéciale Android 12+ — sans elle le redémarrage échouait en silence.
-            am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP,
-                    System.currentTimeMillis() + 1500, pi);
-        } catch (Exception ignored) {
-        }
-    }
-
-    @Override
-    public void onTaskRemoved(Intent rootIntent) {
-        // App fermée en glissant : le service continue (stopWithTask=false).
-        // Si une marque agressive tuait quand même, on reprogramme un redémarrage immédiat.
-        scheduleRestart();
-        super.onTaskRemoved(rootIntent);
     }
 
     @Override

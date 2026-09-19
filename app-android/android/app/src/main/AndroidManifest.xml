@@ -33,12 +33,9 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
-        <!-- stopWithTask=false : le service (et sa notification) SURVIVENT à la fermeture
-             de l'app (glisser) — il ne s'arrête QUE par le bouton Hors ligne dans l'app. -->
         <service
             android:name="com.yallaliv.driver.GpsService"
             android:exported="false"
-            android:stopWithTask="false"
             android:foregroundServiceType="location" />
     </application>
 

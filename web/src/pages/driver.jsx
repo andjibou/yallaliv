@@ -131,7 +131,7 @@ export default function DriverApp() {
   const YG = isNative ? (window.Capacitor.Plugins?.YallaGps || null) : null;
   const openAppSettings = () => { try { YG?.openSettings?.().catch(() => {}); } catch {} };
   // 🔄 Version minimale de l'APK — si le téléphone a moins, proposer la mise à jour automatique
-  const APK_REQUIRED = '3.2';
+  const APK_REQUIRED = '3.1.1'; // retour à la v3.1 validée (3.1.1)
   const [installing, setInstalling] = useState(false);
   const updateApp = () => {
     setInstalling(true);
@@ -239,7 +239,7 @@ export default function DriverApp() {
           🔴 <b>APK ANCIEN détecté</b> — cette application ne contient pas le service GPS natif (vérifie : réglages Android → YallaLiv → version doit être <b>3.0</b>). Installe le nouvel APK fourni par l'administrateur, puis reconnecte-toi.
         </div>
       )}
-      {YG && gpsStatus?.apkVersion && gpsStatus.apkVersion < APK_REQUIRED && (
+      {YG && gpsStatus?.apkVersion && gpsStatus.apkVersion !== APK_REQUIRED && (
         <div className="card" style={{ background: '#e0e7ff', border: '1px solid #6366f1', padding: '10px 14px', fontSize: 13 }}>
           🔄 <b>Mise à jour de l'application disponible</b> (installée : v{gpsStatus.apkVersion} · requise : v{APK_REQUIRED})
           <button className="btn" style={{ padding: '4px 12px', fontSize: 13, marginLeft: 10 }} disabled={installing} onClick={updateApp}>
