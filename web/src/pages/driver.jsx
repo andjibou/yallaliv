@@ -131,7 +131,7 @@ export default function DriverApp() {
   const YG = isNative ? (window.Capacitor.Plugins?.YallaGps || null) : null;
   const openAppSettings = () => { try { YG?.openSettings?.().catch(() => {}); } catch {} };
   // 🔄 Version minimale de l'APK — si le téléphone a moins, proposer la mise à jour automatique
-  const APK_REQUIRED = '3.1.3'; // v3.1 + anti-kill (ancre overlay + réveils)
+  const APK_REQUIRED = '3.1.4'; // v3.1 + anti-kill + redémarrage auto après extinction
   const [installing, setInstalling] = useState(false);
   const [brandHelp, setBrandHelp] = useState(false); // modal guide par marque
   const [brandSel, setBrandSel] = useState(null);
@@ -269,6 +269,13 @@ export default function DriverApp() {
                   const a4 = gpsStatus.lastUploadAt ? Math.round((Date.now() - gpsStatus.lastUploadAt) / 1000) : null;
                   const ok4 = !!gpsStatus.battery && !!gpsStatus.running;
                   return { ok: ok4, label: `④ Continuer après fermeture de l'app${detectedBrand ? ' · ' + BRANDS[detectedBrand].short : ''}`, act: () => { setBrandSel(detectedBrand || null); setBrandHelp(true); } };
+                })(),
+                (() => {
+                  // ⑤ : accordée à l'installation (RECEIVE_BOOT_COMPLETED) — suffit que l'APK soit à jour
+                  const p = (s) => String(s || '').split('.').map(Number);
+                  const a = p(gpsStatus.apkVersion), b = p(APK_REQUIRED);
+                  const ok5 = a.length >= 3 && b.length >= 3 && (a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] >= b[2]))));
+                  return { ok: ok5, label: '⑤ Redémarrage auto après extinction du téléphone', act: () => updateApp() };
                 })(),
               ];
               return (

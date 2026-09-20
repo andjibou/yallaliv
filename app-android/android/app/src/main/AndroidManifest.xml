@@ -38,6 +38,17 @@
             android:exported="false"
             android:stopWithTask="false"
             android:foregroundServiceType="location" />
+
+        <!-- ⑤ Redémarrage auto : le téléphone s'éteint batterie vide pendant un service →
+             au rallumage, le service GPS repart seul (si le livreur était En ligne). -->
+        <receiver
+            android:name="com.yallaliv.driver.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <!-- Permissions -->
@@ -52,4 +63,5 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 </manifest>
