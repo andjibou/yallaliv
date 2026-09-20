@@ -131,7 +131,7 @@ export default function DriverApp() {
   const YG = isNative ? (window.Capacitor.Plugins?.YallaGps || null) : null;
   const openAppSettings = () => { try { YG?.openSettings?.().catch(() => {}); } catch {} };
   // 🔄 Version minimale de l'APK — si le téléphone a moins, proposer la mise à jour automatique
-  const APK_REQUIRED = '3.1.4'; // v3.1 + anti-kill + redémarrage auto après extinction
+  const APK_REQUIRED = '3.1.5'; // v3.1 + anti-kill + redémarrage auto (bug running/wanted corrigé)
   const [installing, setInstalling] = useState(false);
   const [brandHelp, setBrandHelp] = useState(false); // modal guide par marque
   const [brandSel, setBrandSel] = useState(null);

@@ -40,7 +40,7 @@ public class GpsService extends Service {
 
     static final String CH_ID = "yallaliv_gps";
     static final String PREFS = "yallaliv_gps_prefs";
-    static final String VERSION = "3.1.4";
+    static final String VERSION = "3.1.5";
     private PowerManager.WakeLock wl;
     private android.view.View overlayAnchor; // ancre invisible : empêche les ROM agressives (MIUI, ColorOS…) de tuer l'app au glisser
 
@@ -65,7 +65,7 @@ public class GpsService extends Service {
             apiUrl = intent.getStringExtra("url");
             token = intent.getStringExtra("token");
             if (apiUrl != null && token != null) {
-                prefs.edit().putString("url", apiUrl).putString("token", token).apply();
+                prefs.edit().putString("url", apiUrl).putString("token", token).putBoolean("wanted", true).apply(); // VOLONTÉ de suivi (≠ running, effacé par onDestroy)
             }
         } else {
             // Redémarrage système (START_STICKY) : reprendre les derniers réglages connus
@@ -206,6 +206,7 @@ public class GpsService extends Service {
      *  Les ROM agressives ne tuent pas au glisser une app qui possède une vue overlay active. */
     private void addOverlayAnchor() {
         try {
+            if (overlayAnchor != null) return; // déjà posée (boot/alarme) — pas de doublon
             if (Build.VERSION.SDK_INT < 26 || !android.provider.Settings.canDrawOverlays(this)) return;
             android.view.WindowManager wm = (android.view.WindowManager) getSystemService(WINDOW_SERVICE);
             overlayAnchor = new android.view.View(this);
