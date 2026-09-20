@@ -133,6 +133,9 @@ export default function DriverApp() {
   // 🔄 Version minimale de l'APK — si le téléphone a moins, proposer la mise à jour automatique
   const APK_REQUIRED = '3.1.3'; // v3.1 + anti-kill (ancre overlay + réveils)
   const [installing, setInstalling] = useState(false);
+  const [brandHelp, setBrandHelp] = useState(false); // modal guide par marque
+  const [brandSel, setBrandSel] = useState(null);
+  const detectedBrand = detectBrand();
   const updateApp = () => {
     setInstalling(true);
     YG?.downloadAndInstall?.({ url: window.location.origin + '/apk/latest.apk' })
@@ -265,7 +268,7 @@ export default function DriverApp() {
                 (() => {
                   const a4 = gpsStatus.lastUploadAt ? Math.round((Date.now() - gpsStatus.lastUploadAt) / 1000) : null;
                   const ok4 = !!gpsStatus.battery && !!gpsStatus.running;
-                  return { ok: ok4, label: '④ Continuer après fermeture de l\'app (Démarrage auto)', act: () => { toast('Dans la fiche Android de YallaLiv, active « Démarrage auto » / « Exécuter en arrière-plan », puis reviens'); YG.openSettings?.().catch(() => {}); } };
+                  return { ok: ok4, label: `④ Continuer après fermeture de l'app${detectedBrand ? ' · ' + BRANDS[detectedBrand].short : ''}`, act: () => { setBrandSel(detectedBrand || null); setBrandHelp(true); } };
                 })(),
               ];
               return (
@@ -441,9 +444,86 @@ export default function DriverApp() {
           </>
         )}
       </Modal>
+
+      <Modal open={brandHelp} onClose={() => setBrandHelp(false)} title="📱 Rester actif après fermeture de l'app">
+        <div style={{ fontSize: 13 }}>
+          <p style={{ marginTop: 0 }}>
+            {detectedBrand
+              ? <>Marque détectée : <b>{BRANDS[detectedBrand].name}</b> — voici le chemin exact sur ton téléphone :</>
+              : <>Quelle est la <b>marque de ton téléphone</b> ? (pour t'indiquer le bon réglage)</>}
+          </p>
+          <div className="row wrap" style={{ gap: 6, marginBottom: 10 }}>
+            {Object.entries(BRANDS).map(([k, b]) => (
+              <button key={k} className="btn" style={{ padding: '4px 10px', fontSize: 12, outline: brandSel === k ? '2px solid #0e9f6e' : 'none' }} onClick={() => setBrandSel(k)}>{b.short}</button>
+            ))}
+          </div>
+          {brandSel && BRANDS[brandSel] && (
+            <ol style={{ margin: '6px 0 12px 18px', padding: 0 }}>
+              {BRANDS[brandSel].steps.map((s, i) => <li key={i} style={{ marginBottom: 5 }}>{s}</li>)}
+            </ol>
+          )}
+          {YG && <button className="btn" style={{ padding: '5px 12px', fontSize: 13 }} onClick={() => YG.openSettings?.().catch(() => {})}>⚙️ Ouvrir les réglages Android de YallaLiv</button>}
+          <p style={{ opacity: 0.75, marginBottom: 0, marginTop: 10 }}>
+            Une fois réglé : glisse l'app pour la fermer — si la notification « Suivi de position actif » reste, c'est gagné ✅
+          </p>
+        </div>
+      </Modal>
     </div>
   );
 }
+
+// 📱 Guide anti-kill par marque de téléphone (ROMs chinoises surtout).
+// Détection automatique depuis la chaîne du navigateur quand c'est possible,
+// sinon sélecteur manuel — le livreur voit LE chemin exact de SON téléphone.
+const BRANDS = {
+  xiaomi: { icon: '📱', short: 'Xiaomi', name: 'Xiaomi / Redmi / POCO', steps: [
+    'Ouvre l\'app « Sécurité » (ou « Security ») sur le téléphone',
+    'Permissions → Démarrage automatique',
+    'Active YallaLiv ✅',
+    'Bonus blindage : applications récentes → appui long sur YallaLiv → Épingler 🔒',
+  ] },
+  oppo: { icon: '📱', short: 'Oppo/Realme', name: 'Oppo / Realme', steps: [
+    'Paramètres → Applications → YallaLiv',
+    'Batterie → « Autoriser l\'activité en arrière-plan » (ou « Sans restriction »)',
+    'Bonus blindage : applications récentes → appui long sur YallaLiv → Épingler 🔒',
+  ] },
+  vivo: { icon: '📱', short: 'Vivo', name: 'Vivo / iQOO', steps: [
+    'Ouvre l\'app « i Manager »',
+    'Gestion des applications → Démarrage auto',
+    'Active YallaLiv ✅',
+    'Bonus blindage : applications récentes → appui long sur YallaLiv → Épingler 🔒',
+  ] },
+  infinix: { icon: '📱', short: 'Infinix/Tecno', name: 'Infinix / Tecno / itel', steps: [
+    'Ouvre l\'app « Phone Master » (ou Paramètres → Applications → YallaLiv)',
+    'Démarrage auto → Active YallaLiv ✅',
+    'Bonus blindage : applications récentes → appui long sur YallaLiv → Épingler 🔒',
+  ] },
+  huawei: { icon: '📱', short: 'Huawei/Honor', name: 'Huawei / Honor', steps: [
+    'Paramètres → Batterie → Démarrage des applications',
+    'YallaLiv → « Gérer manuellement » → active les 3 interrupteurs ✅',
+    'Bonus blindage : applications récentes → appui long sur YallaLiv → Épingler 🔒',
+  ] },
+  samsung: { icon: '📱', short: 'Samsung', name: 'Samsung', steps: [
+    'Normalement rien à faire ✅ (Samsung respecte le suivi)',
+    'Vérifie juste : Paramètres → Applications → YallaLiv → Batterie → « Non restreint »',
+    'Bonus blindage : applications récentes → appui long sur YallaLiv → Épingler 🔒',
+  ] },
+  other: { icon: '📱', short: 'Autre', name: 'Autre marque', steps: [
+    'Applications récentes → appui long sur YallaLiv → Épingler 🔒',
+    'Puis Paramètres → Applications → YallaLiv → cherche « Démarrage auto » / « Arrière-plan » → active',
+  ] },
+};
+const detectBrand = () => {
+  const ua = (navigator.userAgent || '');
+  if (/xiaomi|redmi|poco/i.test(ua)) return 'xiaomi';
+  if (/\bRMX\d/i.test(ua) || /realme/i.test(ua)) return 'oppo';
+  if (/\bCPH\d/i.test(ua) || /oppo/i.test(ua)) return 'oppo';
+  if (/vivo|iqoo/i.test(ua)) return 'vivo';
+  if (/infinix|tecno|itel/i.test(ua)) return 'infinix';
+  if (/huawei|honor/i.test(ua)) return 'huawei';
+  if (/\bSM-[A-Z]\d/i.test(ua)) return 'samsung';
+  return null; // inconnu → sélecteur manuel
+};
 
 function Top({ t, user, logout, online, onToggle, disabled, onAccount }) {
   const bell = async () => {
