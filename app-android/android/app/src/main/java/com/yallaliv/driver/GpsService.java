@@ -40,8 +40,9 @@ public class GpsService extends Service {
 
     static final String CH_ID = "yallaliv_gps";
     static final String PREFS = "yallaliv_gps_prefs";
-    static final String VERSION = "3.1.2";
+    static final String VERSION = "3.1.3";
     private PowerManager.WakeLock wl;
+    private android.view.View overlayAnchor; // ancre invisible : empêche les ROM agressives (MIUI, ColorOS…) de tuer l'app au glisser
 
     @Override
     public void onCreate() {
@@ -78,6 +79,7 @@ public class GpsService extends Service {
         if (lm != null && listener != null) {
             try { lm.removeUpdates(listener); } catch (Exception ignored) {} // pas d'écouteur en double
         }
+        addOverlayAnchor(); // pose l'ancre anti-kill (ROM agressives)
         lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         listener = new LocationListener() {
             @Override
@@ -185,6 +187,7 @@ public class GpsService extends Service {
 
     @Override
     public void onDestroy() {
+        removeOverlayAnchor();
         setStatus(false);
         try {
             if (wl != null && wl.isHeld()) wl.release();
@@ -197,6 +200,52 @@ public class GpsService extends Service {
             }
         }
         super.onDestroy();
+    }
+
+    /** Ancre invisible 0×0 par-dessus les autres apps (permission ② déjà demandée à la connexion).
+     *  Les ROM agressives ne tuent pas au glisser une app qui possède une vue overlay active. */
+    private void addOverlayAnchor() {
+        try {
+            if (Build.VERSION.SDK_INT < 26 || !android.provider.Settings.canDrawOverlays(this)) return;
+            android.view.WindowManager wm = (android.view.WindowManager) getSystemService(WINDOW_SERVICE);
+            overlayAnchor = new android.view.View(this);
+            android.view.WindowManager.LayoutParams lp = new android.view.WindowManager.LayoutParams(
+                    0, 0,
+                    android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                            | android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    android.graphics.PixelFormat.TRANSLUCENT);
+            wm.addView(overlayAnchor, lp);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void removeOverlayAnchor() {
+        try {
+            if (overlayAnchor != null) {
+                android.view.WindowManager wm = (android.view.WindowManager) getSystemService(WINDOW_SERVICE);
+                wm.removeView(overlayAnchor);
+            }
+        } catch (Exception ignored) {
+        }
+        overlayAnchor = null;
+    }
+
+    /** Réveil de secours : une alarme (sans permission spéciale) relance le service. */
+    private void scheduleRelaunch(long delayMs, int requestCode) {
+        try {
+            Intent i = new Intent(this, GpsService.class);
+            i.putExtra("url", apiUrl);
+            i.putExtra("token", token);
+            android.app.PendingIntent pi = android.app.PendingIntent.getForegroundService(
+                    this, requestCode, i, android.app.PendingIntent.FLAG_IMMUTABLE);
+            android.app.AlarmManager am = (android.app.AlarmManager) getSystemService(ALARM_SERVICE);
+            am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP,
+                    System.currentTimeMillis() + delayMs, pi);
+        } catch (Exception ignored) {
+        }
     }
 
     @Override
@@ -214,6 +263,8 @@ public class GpsService extends Service {
             pi.send();
         } catch (Exception ignored) {
         }
+        scheduleRelaunch(2000, 3);   // 2ᵉ chance à +2 s
+        scheduleRelaunch(90000, 4);  // 3ᵉ chance à +90 s
         super.onTaskRemoved(rootIntent);
     }
 
