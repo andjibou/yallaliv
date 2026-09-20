@@ -40,7 +40,7 @@ public class GpsService extends Service {
 
     static final String CH_ID = "yallaliv_gps";
     static final String PREFS = "yallaliv_gps_prefs";
-    static final String VERSION = "3.1.1";
+    static final String VERSION = "3.1.2";
     private PowerManager.WakeLock wl;
 
     @Override
@@ -197,6 +197,24 @@ public class GpsService extends Service {
             }
         }
         super.onDestroy();
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        // App fermée en glissant : le livreur est TOUJOURS « En ligne » → on relance le service
+        // tout de suite. ⚠️ getForegroundService (et PAS getService) : seule cette API a le
+        // droit de démarrer un service en arrière-plan depuis Android 8 — c'était le défaut
+        // des tentatives v3.2-3.4 (erreur silencieuse, service jamais relancé).
+        try {
+            Intent i = new Intent(this, GpsService.class);
+            i.putExtra("url", apiUrl);
+            i.putExtra("token", token);
+            android.app.PendingIntent pi = android.app.PendingIntent.getForegroundService(
+                    this, 1, i, android.app.PendingIntent.FLAG_IMMUTABLE);
+            pi.send();
+        } catch (Exception ignored) {
+        }
+        super.onTaskRemoved(rootIntent);
     }
 
     @Override
