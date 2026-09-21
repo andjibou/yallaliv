@@ -480,9 +480,10 @@ app.post('/api/orders', auth, requireRole('client', 'merchant', 'superadmin'), h
   // Visibilite par defaut : privee si le magasin a des livreurs personnels, sinon publique
   const privCount = await get(`SELECT COUNT(*) AS c FROM users WHERE role='driver' AND store_id=? AND status='active'`, [store.id]);
   const visibility = privCount.c > 0 ? 'private' : 'public';
-  const o = await get(`INSERT INTO orders(client_id,store_id,driver_id,status,payment,paid,subtotal,delivery_fee,commission,total,address,phone,note,client_lat,client_lng,promo_code,discount,visibility,created_at,updated_at)
-    VALUES(?,?,NULL,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`,
-    [req.user.id, store.id, payment, paid, round2(subtotal), store.delivery_fee, commission, total, String(address), String(phone), String(note), clat, clng, promoCode, discount, visibility, now, now]);
+  const pin = String(1000 + Math.floor(Math.random() * 9000)); // 🔑 code de remise : le client le donne au livreur
+  const o = await get(`INSERT INTO orders(client_id,store_id,driver_id,status,payment,paid,subtotal,delivery_fee,commission,total,address,phone,note,client_lat,client_lng,promo_code,discount,visibility,pin,created_at,updated_at)
+    VALUES(?,?,NULL,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`,
+    [req.user.id, store.id, payment, paid, round2(subtotal), store.delivery_fee, commission, total, String(address), String(phone), String(note), clat, clng, promoCode, discount, visibility, pin, now, now]);
   const oid = o.id;
   for (const r of rows) await run('INSERT INTO order_items(order_id,product_id,name,emoji,price,qty) VALUES(?,?,?,?,?,?)', [oid, ...r]);
   if (!req.user.phone && phone) await run('UPDATE users SET phone=? WHERE id=?', [String(phone), req.user.id]);   // mémorise le téléphone
@@ -491,7 +492,7 @@ app.post('/api/orders', auth, requireRole('client', 'merchant', 'superadmin'), h
     await run('UPDATE orders SET client_lat=?, client_lng=? WHERE id=?', [store.lat + j1, store.lng + j2, oid]);
   }
   pushTo([store.owner_id], `🧾 Nouvelle commande #${oid}`, `${req.user.name} · ${total} ${await getSetting('currency', 'EGP')}${promoCode ? ' · 🎁 ' + promoCode : ''}`);
-  res.json({ order_id: oid });
+  res.json({ order_id: oid, pin });
 }));
 
 const ORDER_WITH_JOINS = `
@@ -854,6 +855,9 @@ app.put('/api/driver/location', auth, requireRole('driver'), h(async (req, res) 
   res.json({ ok: true });
 }));
 
+// 🔑 Sécurité PIN : le livreur ne voit jamais le code (il doit le demander au client)
+const stripPin = (rows) => rows.map((r) => { const has = r.pin != null; delete r.pin; return { ...r, has_pin: has }; });
+
 app.get('/api/driver/available', auth, requireRole('driver'), h(async (req, res) => {
   // Livreur boutique : livraisons PRIVEES de son magasin uniquement
   // Livreur general : livraisons PUBLIQUES de toutes les boutiques uniquement
@@ -863,12 +867,12 @@ app.get('/api/driver/available', auth, requireRole('driver'), h(async (req, res)
   if (req.user.store_id) { sql += ' AND o.store_id=? AND o.visibility=?'; args.push(req.user.store_id, 'private'); }
   sql += ' ORDER BY o.created_at ASC';
   const orders = await all(sql, args);
-  res.json({ orders: await withItems(orders) });
+  res.json({ orders: await withItems(stripPin(orders)) });
 }));
 
 app.get('/api/driver/mine', auth, requireRole('driver'), h(async (req, res) => {
   const orders = await all(`${ORDER_WITH_JOINS} WHERE o.driver_id=? ORDER BY o.updated_at DESC LIMIT 100`, [req.user.id]);
-  res.json({ orders: await withItems(orders) });
+  res.json({ orders: await withItems(stripPin(orders)) });
 }));
 
 app.post('/api/driver/orders/:id/accept', auth, requireRole('driver'), h(async (req, res) => {
@@ -896,6 +900,9 @@ app.post('/api/driver/orders/:id/status', auth, requireRole('driver'), h(async (
   const next = req.body.status;
   const allowed = { assigned: ['picked_up'], picked_up: ['delivered'] };
   if (!allowed[o.status] || !allowed[o.status].includes(next)) return res.status(400).json({ error: 'Transition invalide' });
+  if (next === 'delivered' && o.pin && String(req.body.pin || '').trim() !== o.pin) {
+    return res.status(400).json({ error: 'Code PIN incorrect — demandez le code au client' });
+  }
   const paid = next === 'delivered' && o.payment === 'cash' ? 1 : o.paid;
   await run('UPDATE orders SET status=?, paid=?, updated_at=? WHERE id=?', [next, paid, Date.now(), o.id]);
   if (next === 'picked_up') pushTo([o.client_id], `Commande #${o.id}`, '📦 Colis récupéré — en route vers vous 🛵');

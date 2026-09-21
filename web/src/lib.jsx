@@ -3,6 +3,11 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 // ================= API =================
 // Messages d'erreur du serveur (français) traduits selon la langue choisie.
 const SERVER_ERRORS = {
+  'Code de remise': { en: 'Delivery code', ar: 'رمز التسليم' },
+  'Donnez ce code au livreur à la livraison': { en: 'Give this code to the driver at delivery', ar: 'أعطِ هذا الرمز للمندوب عند التسليم' },
+  'Livraison estimée': { en: 'Estimated delivery', ar: 'التوصيل المتوقع' },
+  'Arrive dans': { en: 'Arriving in', ar: 'يصل خلال' },
+  'Code PIN incorrect — demandez le code au client': { en: 'Wrong PIN — ask the client for the code', ar: 'رمز خاطئ — اطلب الرمز من العميل' },
   'Accès refusé': { en: 'Access denied', ar: 'تم رفض الوصول' },
   'Adresse et téléphone requis': { en: 'Address and phone required', ar: 'العنوان والهاتف مطلوبان' },
   'Attribution automatique : les livraisons publiques vous sont assignées par la plateforme': { en: 'Automatic dispatch: public deliveries are assigned to you by the platform', ar: 'الإسناد التلقائي: المنصّة تسند لك التوصيلات العامة' },
@@ -699,6 +704,20 @@ export async function enableNotifications() {
   if (typeof Notification === 'undefined') return 'unsupported';
   try { return await Notification.requestPermission(); } catch { return 'denied'; }
 }
+// 🛵 ETA : distance à vol d'oiseau (mètres) + fourchette de minutes (préparation par type + 22 km/h en ville)
+export function distM(lat1, lng1, lat2, lng2) {
+  const r = Math.PI / 180;
+  const dLat = (lat2 - lat1) * r, dLng = (lng2 - lng1) * r;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLng / 2) ** 2;
+  return Math.round(2 * 6371000 * Math.asin(Math.sqrt(a)));
+}
+export function etaRange(type, dist) {
+  const prep = { restaurant: 20, market: 15, pharmacy: 10 }[type] || 15;
+  const drive = dist == null ? 12 : Math.round((dist / 1000) * (60 / 22));
+  const mid = prep + drive + 4;
+  return [Math.max(10, Math.round((mid * 0.85) / 5) * 5), Math.round((mid * 1.3) / 5) * 5];
+}
+
 export function beep() {
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;

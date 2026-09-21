@@ -200,7 +200,10 @@ function Dashboard() {
                   <div className="muted small">#{o.id} · {fmtDate(o.created_at, lang)}</div>
                 </div>
               </div>
-              <StatusBadge status={o.status} />
+              <div className="row" style={{ gap: 6 }}>
+                {o.pin && <span className="badge">🔑 {o.pin}</span>}
+                <StatusBadge status={o.status} />
+              </div>
             </div>
             <div className="mt8" style={{ background: '#f8fafc', borderRadius: 12, padding: 10 }}>
               {o.items.map((it) => (

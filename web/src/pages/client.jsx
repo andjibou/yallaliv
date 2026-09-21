@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, Outlet, useSearchParams } from 'react-router-dom';
 import TrackMap from '../TrackMap.jsx';
-import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr } from '../lib.jsx';
+import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange } from '../lib.jsx';
 import { BottomNav, CartBar, StatusBadge, PayBadge, Stepper, Empty, Spinner, BackBtn, LangSwitch, Modal, Stars, SuggestBox, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import PickMap from '../PickMap.jsx';
@@ -206,6 +206,7 @@ export function ClientHome() {
                   <div className="row mt4" style={{ gap: 6 }}>
                     <span className="badge">{meta.e} {s.product_count} {t('products_count')}</span>
                     <span className="badge">{t('delivery_fee')} {fmtMoney(s.delivery_fee)}</span>
+                    <span className="badge">⏱ {etaRange(s.type, null).join('-')} min</span>
                   </div>
                 </div>
                 {!s.is_open && <span className="badge st-cancelled">{t('closed')}</span>}
@@ -457,6 +458,7 @@ export function CartPage() {
   const [busy, setBusy] = useState(false);
   const [gps, setGps] = useState(null);
   const [pickOpen, setPickOpen] = useState(false);
+  const [done, setDone] = useState(null); // 🔑 confirmation finale avec le code de remise
   const [card, setCard] = useState({ no: '', exp: '', cvc: '' });
   const [promoInput, setPromoInput] = useState('');
   const [promo, setPromo] = useState(null); // {code, discount, type, value}
@@ -500,7 +502,7 @@ export function CartPage() {
       const finalPhone = cPhone.trim();
       if (!user) await register({ name: acct.name.trim(), email: acct.email.trim(), password: acct.password, phone: finalPhone, role: 'client', skip_verify: true });   // invité -> compte créé ici (sans code email)
       if (payment === 'card') await new Promise((r) => setTimeout(r, 1300)); // passerelle simulée
-      await api('/orders', {
+      const r = await api('/orders', {
         method: 'POST',
         body: {
           store_id: store.id, address, phone: finalPhone, note, payment,
@@ -513,8 +515,7 @@ export function CartPage() {
       setPhone(finalPhone);
       setConfirmOpen(false);
       clear();
-      toast(payment === 'card' ? t('pay_ok') + ' · ' + t('order_placed') : t('order_placed'));
-      nav('/app/orders');
+      setDone({ id: r.order_id, pin: r.pin }); // 🔑 le client VOIT son code de remise avant tout
     } catch (ex) {
       toast(ex.message, 'err');
     }
@@ -656,10 +657,29 @@ export function CartPage() {
       )}
 
       {belowMin && <div className="banner warn mt12">⚠️ {t('min_order_error')} : {fmtMoney(store.min_order)}</div>}
+      {gps && store?.lat != null && (
+        <div className="banner ok mt12">🛵 {t('Livraison estimée')} : <b>{etaRange(store.type, distM(store.lat, store.lng, gps.lat, gps.lng)).join('-')} min</b></div>
+      )}
 
       <button className="btn primary block mt12 mb16" disabled={busy || belowMin || !address || !phone || !cardOk || !acctOk} onClick={openConfirm}>
         {busy && payment === 'card' ? t('processing_pay') : busy ? '...' : t('place_order')} · {fmtMoney(total)}
       </button>
+
+      <Modal open={!!done} onClose={() => { setDone(null); nav('/app/orders'); }} title={'✅ ' + t('order_placed')}>
+        {done && (
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 40 }}>🎉</div>
+            <div style={{ fontWeight: 800, margin: '6px 0' }}>Commande #{done.id}</div>
+            {done.pin && (
+              <>
+                <div className="muted small">{t('Donnez ce code au livreur à la livraison')}</div>
+                <div style={{ fontSize: 32, fontWeight: 900, letterSpacing: 6, margin: '8px 0', color: '#059669' }}>{done.pin}</div>
+              </>
+            )}
+            <button className="btn primary block" onClick={() => { setDone(null); nav('/app/orders'); }}>🧾 Voir mes commandes</button>
+          </div>
+        )}
+      </Modal>
 
       <Modal open={pickOpen} onClose={() => setPickOpen(false)} title={'🗺️ ' + t('choose_on_map')}>
         {pickOpen && (
@@ -776,6 +796,9 @@ export function ClientOrders() {
               <StatusBadge status={o.status} />
             </div>
             <Stepper status={o.status} />
+            {ACTIVE.includes(o.status) && o.pin && (
+              <div className="banner ok mt8">🔑 {t('Code de remise')} : <b style={{ fontSize: 17, letterSpacing: 2 }}>{o.pin}</b> — {t('Donnez ce code au livreur à la livraison')}</div>
+            )}
             <div className="divider" />
             {o.items.map((it) => (
               <div key={it.id} className="row spread small">
@@ -830,6 +853,23 @@ export function ClientOrders() {
                 <span className="small">🛵 {track.order.driver_name} · <a href={'tel:' + track.order.driver_phone}>{track.order.driver_phone}</a></span>
               )}
             </div>
+            <Stepper status={track.order.status} />
+            {(() => {
+              const o = track.order, pos = track.driver_pos;
+              const live = pos && ['assigned', 'picked_up'].includes(o.status) && o.client_lat != null
+                ? Math.max(1, Math.round((distM(pos.lat, pos.lng, o.client_lat, o.client_lng) / 1000) * (60 / 22) + 2)) : null;
+              const fixed = o.store_lat != null && o.client_lat != null
+                ? etaRange(o.store_type, distM(o.store_lat, o.store_lng, o.client_lat, o.client_lng)) : null;
+              if (live == null && !fixed) return null;
+              const eta = live != null
+                ? t('Arrive dans') + ' ~' + live + ' min'
+                : fixed ? t('Livraison estimée') + ' : ' + fixed[0] + '-' + fixed[1] + ' min' : null;
+              if (!eta) return null;
+              return <div className="banner ok mt8">🛵 <b>{eta}</b></div>;
+            })()}
+            {!['delivered', 'cancelled', 'rejected'].includes(track.order.status) && track.order.pin && (
+              <div className="banner warn mt8">🔑 {t('Code de remise')} : <b style={{ fontSize: 17, letterSpacing: 2 }}>{track.order.pin}</b></div>
+            )}
           </>
         )}
       </Modal>

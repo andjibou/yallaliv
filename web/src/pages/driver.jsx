@@ -134,6 +134,8 @@ export default function DriverApp() {
   const APK_REQUIRED = '3.1.5'; // v3.1 + anti-kill + redémarrage auto (bug running/wanted corrigé)
   const [installing, setInstalling] = useState(false);
   const [brandHelp, setBrandHelp] = useState(false); // modal guide par marque
+  const [pinAsk, setPinAsk] = useState(null); // 🔑 commande en cours de validation par code
+  const [pinCode, setPinCode] = useState('');
   const [brandSel, setBrandSel] = useState(null);
   const detectedBrand = detectBrand();
   const updateApp = () => {
@@ -203,13 +205,15 @@ export default function DriverApp() {
     api('/driver/available').then((d) => setAvail(d.orders)).catch(() => {});
     api('/driver/mine').then((d) => setMine(d.orders)).catch(() => {});
   };
-  const act = async (id, status) => {
+  const act = async (id, status, pin) => {
+    let ok = true;
     try {
-      await api(`/driver/orders/${id}/status`, { method: 'POST', body: { status } });
+      await api(`/driver/orders/${id}/status`, { method: 'POST', body: { status, pin } });
       if (status === 'delivered') toast(t('delivered_ok'));
-    } catch (ex) { toast(ex.message, 'err'); }
+    } catch (ex) { ok = false; toast(ex.message, 'err'); }
     api('/driver/mine').then((d) => setMine(d.orders)).catch(() => {});
     api('/driver/stats').then(setStats).catch(() => {});
+    return ok;
   };
 
   if (!approved) {
@@ -375,7 +379,7 @@ export default function DriverApp() {
               </div>
               <div className="row mt8">
                 {o.status === 'assigned' && <button className="btn blue block" onClick={() => act(o.id, 'picked_up')}>📦 {t('picked_up_btn')}</button>}
-                {o.status === 'picked_up' && <button className="btn primary block" onClick={() => act(o.id, 'delivered')}>🎉 {t('delivered_btn')}</button>}
+                {o.status === 'picked_up' && <button className="btn primary block" onClick={() => (o.has_pin ? setPinAsk(o) : act(o.id, 'delivered'))}>🎉 {t('delivered_btn')}{o.has_pin ? ' · 🔑' : ''}</button>}
               </div>
               <div className="row mt8 wrap">
                 <button className="btn ghost sm" onClick={() => setChat(o)}>💬 Chat — {o.client_name}</button>
@@ -458,6 +462,18 @@ export default function DriverApp() {
             )}
           </>
         )}
+      </Modal>
+
+      {/* 🔑 Preuve de livraison : code à 4 chiffres montré au client, saisi par le livreur */}
+      <Modal open={!!pinAsk} onClose={() => { setPinAsk(null); setPinCode(''); }} title="🔑 Code de remise du client">
+        <p className="muted small" style={{ marginTop: 0 }}>Demandez le code à 4 chiffres au client, puis validez la livraison.</p>
+        <input className="input" dir="ltr" inputMode="numeric" maxLength={4} placeholder="••••" value={pinCode}
+          style={{ fontSize: 26, fontWeight: 800, letterSpacing: 8, textAlign: 'center' }}
+          onChange={(e) => setPinCode(e.target.value.replace(/\D/g, '').slice(0, 4))} />
+        <button className="btn primary block mt8" disabled={pinCode.length !== 4}
+          onClick={async () => { const ok = await act(pinAsk.id, 'delivered', pinCode); if (ok) { setPinAsk(null); setPinCode(''); } }}>
+          🎉 Valider la livraison
+        </button>
       </Modal>
 
       <Modal open={brandHelp} onClose={() => setBrandHelp(false)} title="📱 Rester actif après fermeture de l'app">
