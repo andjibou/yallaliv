@@ -321,6 +321,11 @@ export default function DriverApp() {
                 <div className="small mt4">👤 {o.client_name} · <a href={'tel:' + o.phone}>📞 {o.phone}</a></div>
                 {o.items.map((it) => <div key={it.id} className="muted small mt4">{it.emoji} {it.name} × {it.qty}</div>)}
               </div>
+              <div className="row mt8 wrap" style={{ gap: 6 }}>
+                <a className="btn ghost sm" href={'tel:' + o.phone}>📞 Appeler</a>
+                <a className="btn ghost sm" href={waLink(o.phone)} target="_blank" rel="noopener">💬 WhatsApp</a>
+                <a className="btn ghost sm" href={navLink(o)} target="_blank" rel="noopener">🧭 Navigation</a>
+              </div>
               <div className="row mt8">
                 {o.store_lat != null && o.client_lat != null && (
                   <button className="btn blue grow" onClick={() => setRouteView(o)}>🗺️ {t('view_route')}</button>
@@ -374,6 +379,9 @@ export default function DriverApp() {
               </div>
               <div className="row mt8 wrap">
                 <button className="btn ghost sm" onClick={() => setChat(o)}>💬 Chat — {o.client_name}</button>
+                <a className="btn ghost sm" href={'tel:' + o.phone}>📞 Appeler</a>
+                <a className="btn ghost sm" href={waLink(o.phone)} target="_blank" rel="noopener">💬 WhatsApp</a>
+                <a className="btn ghost sm" href={navLink(o)} target="_blank" rel="noopener">🧭 Navigation</a>
                 {o.store_lat != null && o.client_lat != null && (
                   <button className="btn blue sm" onClick={() => setRouteView(o)}>🗺️ {t('view_route')}</button>
                 )}
@@ -478,6 +486,23 @@ export default function DriverApp() {
     </div>
   );
 }
+
+// 📞💬🧭 Liens rapides livreur : appel, WhatsApp, navigation GPS (Google Maps)
+const waLink = (ph) => {
+  let p = String(ph || '').replace(/\D/g, '');
+  if (p.startsWith('00')) p = p.slice(2);
+  if (p.startsWith('0')) p = '2' + p; // Égypte : 01xxxxxxxxx → 201xxxxxxxxx (format international)
+  return 'https://wa.me/' + p;
+};
+const navLink = (o) => {
+  // Destination intelligente : avant récupération → le magasin ; après récupération → le client
+  const dst = o.status === 'picked_up' && o.client_lat != null
+    ? o.client_lat + ',' + o.client_lng
+    : o.store_lat != null ? o.store_lat + ',' + o.store_lng : null;
+  return dst
+    ? 'https://www.google.com/maps/dir/?api=1&destination=' + dst + '&travelmode=driving'
+    : 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(o.address || o.store_address || '');
+};
 
 // 📱 Guide anti-kill par marque de téléphone (ROMs chinoises surtout).
 // Détection automatique depuis la chaîne du navigateur quand c'est possible,

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, pushSubscribe, processImage, ph as photoUrl } from '../lib.jsx';
+import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, alarm, pushSubscribe, processImage, ph as photoUrl } from '../lib.jsx';
 import { StatusBadge, PayBadge, Empty, Spinner, Modal, LangSwitch, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import { BarsChart, compactMoney } from '../Chart.jsx';
@@ -84,11 +84,22 @@ function Dashboard() {
   const [flt, setFlt] = useState('new');
   const [assign, setAssign] = useState(null); // {order, drivers} — attribution directe
   const seen = useRef(null);
+  const [alerts, setAlerts] = useState([]); // nouvelles commandes → overlay plein écran + alarme
+  const titleRef = useRef(null);
 
   useEffect(() => {
     api('/merchant/sales-daily').then((d) => setSeries(d.series)).catch(() => setSeries([]));
     api('/merchant/top-products').then((d) => setTop(d.top)).catch(() => setTop([]));
   }, []);
+
+  // 🚨 Titre d'onglet clignotant tant qu'une commande n'est pas traitée
+  useEffect(() => {
+    if (titleRef.current == null) titleRef.current = document.title;
+    if (!alerts.length) { document.title = titleRef.current; return; }
+    let on = true;
+    const iv = setInterval(() => { document.title = on ? '🚨 NOUVELLE COMMANDE !' : titleRef.current; on = !on; }, 800);
+    return () => { clearInterval(iv); document.title = titleRef.current; };
+  }, [alerts.length]);
 
   usePoll(() => {
     api('/merchant/store').then(setData).catch(() => {});
@@ -96,7 +107,11 @@ function Dashboard() {
       const pend = d.orders.filter((o) => o.status === 'pending');
       if (seen.current) {
         for (const o of pend) {
-          if (!seen.current[o.id]) { notif(`${t('new_order')} #${o.id}`, `${o.client_name} · ${fmtMoney(o.total)}`); beep(); }
+          if (!seen.current[o.id]) {
+            notif(`${t('new_order')} #${o.id}`, `${o.client_name} · ${fmtMoney(o.total)}`);
+            alarm(12);
+            setAlerts((a) => [...a, o]);
+          }
         }
       }
       const m = {};
@@ -272,6 +287,24 @@ function Dashboard() {
           </div>
         ))}
       </Modal>
+
+      {/* 🚨 Mode comptoir : overlay plein écran tant que la nouvelle commande n'est pas vue */}
+      {alerts[0] && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div className="card" style={{ maxWidth: 420, width: '100%', background: '#fff', border: '3px solid #ef4444', textAlign: 'center', padding: 20 }}>
+            <div style={{ fontSize: 44 }}>🚨</div>
+            <div style={{ fontSize: 21, fontWeight: 900, margin: '4px 0 2px' }}>NOUVELLE COMMANDE #{alerts[0].id}</div>
+            <div style={{ fontSize: 15, margin: '4px 0' }}>👤 {alerts[0].client_name}</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: '#059669', margin: '6px 0' }}>{fmtMoney(alerts[0].total)}</div>
+            <div className="small" style={{ opacity: 0.8 }}>🏁 {(alerts[0].address || '').slice(0, 60)}</div>
+            {alerts.length > 1 && <div className="small mt4">+ {alerts.length - 1} autre(s) commande(s) en attente</div>}
+            <div className="row mt12 wrap" style={{ justifyContent: 'center' }}>
+              <button className="btn primary" onClick={() => { act(alerts[0].id, 'accepted'); setAlerts((a) => a.slice(1)); }}>✅ Accepter la commande</button>
+              <button className="btn ghost" onClick={() => setAlerts((a) => a.slice(1))}>👀 Voir dans la liste</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ChatModal order={chat} onClose={() => setChat(null)} />
     </>

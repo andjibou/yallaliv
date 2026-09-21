@@ -713,6 +713,28 @@ export function beep() {
   } catch {}
 }
 
+// 🔔 Alerte forte marchand : n sonneries alternées (2 tons) + vibration — impossible à rater en cuisine
+export function alarm(times = 10) {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const c = new Ctx();
+    const g = c.createGain();
+    g.gain.value = 0.25;
+    g.connect(c.destination);
+    const t0 = c.currentTime;
+    for (let k = 0; k < times; k++) {
+      const o = c.createOscillator();
+      o.frequency.value = k % 2 ? 1245 : 880;
+      o.connect(g);
+      o.start(t0 + k * 0.45);
+      o.stop(t0 + k * 0.45 + 0.3);
+    }
+    setTimeout(() => { try { c.close(); } catch {} }, times * 450 + 600);
+    try { navigator.vibrate?.([400, 200, 400, 200, 400]); } catch {}
+  } catch {}
+}
+
 // ================= v3 : push web (VAPID) =================
 function urlB64ToUint8Array(b64) {
   const pad = '='.repeat((4 - (b64.length % 4)) % 4);
