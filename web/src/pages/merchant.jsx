@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, alarm, pushSubscribe, processImage, ph as photoUrl } from '../lib.jsx';
+import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, alarm, pushSubscribe, FieldErr, V, runV, hasErr, UpdatesBanner, processImage, ph as photoUrl } from '../lib.jsx';
 import { StatusBadge, PayBadge, Empty, Spinner, Modal, LangSwitch, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import { BarsChart, compactMoney } from '../Chart.jsx';
@@ -22,6 +22,7 @@ export default function MerchantApp() {
   return (
     <div className="shell">
       <Top onAccount={() => setAcct(true)} />
+      <UpdatesBanner role="merchant" />
       <div className="tabs">
         {tabs.map((x) => (
           <button key={x.id} className={'tab' + (tab === x.id ? ' on' : '')} onClick={() => setTab(x.id)}>{x.label}</button>
@@ -133,7 +134,7 @@ function Dashboard() {
   const pending = orders?.filter((o) => o.status === 'pending') || [];
   const INFLIGHT = ['accepted', 'preparing', 'ready', 'assigned', 'picked_up'];
   const inFlight = orders?.filter((o) => INFLIGHT.includes(o.status)) || [];
-  const done = orders?.filter((o) => ['delivered', 'rejected', 'cancelled'].includes(o.status)) || [];
+  const done = orders?.filter((o) => ['delivered', 'rejected', 'cancelled', 'refused'].includes(o.status)) || [];
   const fltList = flt === 'new' ? pending : flt === 'active' ? inFlight : done;
   const revenue = todays.filter((o) => !['rejected', 'cancelled'].includes(o.status)).reduce((s, o) => s + o.total, 0);
 
@@ -141,6 +142,14 @@ function Dashboard() {
     try { await api(`/merchant/orders/${id}/status`, { method: 'POST', body: { status, visibility } }); } catch (ex) { toast(ex.message, 'err'); }
     api('/merchant/orders').then((d) => setOrders(d.orders)).catch(() => {});
   };
+  // 🚫 Annulation à tout moment (même en cours de livraison) — le livreur est prévenu
+  const cancelOrder = async (o) => {
+    if (!window.confirm(`Annuler la commande #${o.id} ?` + (o.driver_id ? '\nLe livreur sera prévenu de ramener le colis au magasin.' : ''))) return;
+    try { await api(`/merchant/orders/${o.id}/cancel`, { method: 'POST' }); toast('Commande annulée'); }
+    catch (ex) { toast(ex.message, 'err'); }
+    api('/merchant/orders').then((d) => setOrders(d.orders)).catch(() => {});
+  };
+
   const setVis = async (o, visibility) => {
     try { await api(`/merchant/orders/${o.id}/visibility`, { method: 'POST', body: { visibility } }); toast(t('store_updated')); } catch (ex) { toast(ex.message, 'err'); }
     api('/merchant/orders').then((d) => setOrders(d.orders)).catch(() => {});
@@ -231,7 +240,7 @@ function Dashboard() {
                 <button className="btn primary sm" onClick={() => act(o.id, 'accepted')}>✅ {t('accept')}</button>
                 <button className="btn danger sm" onClick={() => act(o.id, 'rejected')}>✕ {t('reject')}</button>
               </>}
-              {o.status === 'accepted' && <button className="btn blue sm" onClick={() => act(o.id, 'preparing')}>👨‍🍳 {t('start_preparing')}</button>}
+              {o.status === 'accepted' && <button className="btn blue sm" onClick={() => act(o.id, 'preparing')}>🛠️ {t('start_preparing')}</button>}
               {o.status === 'preparing' && <>
                 <button className="btn amber sm" onClick={() => act(o.id, 'ready', 'private')}>🔒 {t('ready_private')}</button>
                 <button className="btn blue sm" onClick={() => act(o.id, 'ready', 'public')}>🌍 {t('ready_public')}</button>
@@ -245,6 +254,9 @@ function Dashboard() {
                 </button>
                 <button className="btn soft sm" onClick={() => openAssign(o)}>👤 {t('assign_to')}</button>
               </>}
+              {['pending', 'accepted', 'preparing', 'ready', 'assigned', 'picked_up'].includes(o.status) && (
+                <button className="btn danger sm" onClick={() => cancelOrder(o)}>🚫 {t('cancel')}</button>
+              )}
               <button className="btn ghost sm" onClick={() => setChat(o)}>💬 Chat</button>
             </div>
             <LastMsgLine o={o} />
@@ -321,6 +333,8 @@ function Products() {
   const t = useT();
   const [data, setData] = useState(null);
   const [edit, setEdit] = useState(null); // null | {..product} | EMPTY_P
+  const [pErr, setPErr] = useState({});   // erreurs par champ produit
+  const [pendGal, setPendGal] = useState([]);   // 🖼️ galerie en attente (nouveau produit : envoyée à l'enregistrement)
   const [photo, setPhoto] = useState(null); // dataURL en attente d'envoi
   const [busy, setBusy] = useState(false);
   const [galleryBusy, setGalleryBusy] = useState(false);
@@ -342,8 +356,11 @@ function Products() {
 
   const addGallery = async (files) => {
     if (!edit?.id) return toast(t('save_first_photos'), 'err');
-    const list = [...files];
+    const room = 5 - (edit.photos || []).length;   // 🖼️ limite : 5 photos max par produit
+    if (room <= 0) return toast(t('max_photos'), 'err');
+    const list = [...files].slice(0, room);
     if (!list.length) return;
+    if (files.length > room) toast(t('max_photos'), 'err');
     setGalleryBusy(true);
     let ok = 0;
     for (const f of list) {
@@ -356,12 +373,37 @@ function Products() {
     if (ok > 0) toast(ok === 1 ? t('photo_added') : t('photos_n_added').replace('{n}', ok));
     refresh();
   };
+  // 🖼️ Choix de photos de galerie : produit DÉJÀ SAUVÉ → envoi immédiat (comportement actuel)
+  // produit NOUVEAU → file d'attente locale avec aperçu, envoyée automatiquement à l'enregistrement
+  const onGalleryPick = async (files) => {
+    const list = [...files];
+    if (!list.length) return;
+    if (edit?.id) return addGallery(files);
+    const room = 5 - pendGal.length;   // 🖼️ limite : 5 photos max par produit
+    if (room <= 0) return toast(t('max_photos'), 'err');
+    const roomList = list.slice(0, room);
+    if (list.length > room) toast(t('max_photos'), 'err');
+    setGalleryBusy(true);
+    const add = [];
+    for (const f of roomList) {
+      const r = await processImage(f);
+      if (r.error) { toast((r.error === 'too_big' ? t('img_err_big') : t('img_err_format')) + ' · ' + f.name, 'err'); continue; }
+      add.push(r);
+    }
+    setGalleryBusy(false);
+    if (add.length) setPendGal((g) => [...g, ...add]);
+  };
+
   const delGallery = async (ph) => {
     try { await api(`/merchant/products/${edit.id}/photos/${ph.id}`, { method: 'DELETE' }); toast(t('photo_removed')); refresh(); }
     catch (ex) { toast(ex.message, 'err'); }
   };
 
   const save = async () => {
+    const v = V(t);
+    const e = runV({ name: v.name(t('product_name')), price: v.num(t('price'), 0, '45.50') }, edit);
+    setPErr(e);
+    if (hasErr(e)) return;
     setBusy(true);
     try {
       const body = { ...edit, price: parseFloat(edit.price), category: edit.category || 'Général' };
@@ -372,8 +414,17 @@ function Products() {
         try { await api(`/merchant/products/${saved.id}/photo`, { method: 'PUT', body: { thumb: photo.thumb, display: photo.display } }); }
         catch (ex) { toast(ex.message, 'err'); }
       }
+      if (!edit.id && pendGal.length) {
+        let ok = 0;
+        for (const r of pendGal) {
+          try { await api(`/merchant/products/${saved.id}/photos`, { method: 'POST', body: { thumb: r.thumb, display: r.display } }); ok++; }
+          catch (ex) { toast(ex.message, 'err'); }
+        }
+        if (ok > 0) toast(ok === 1 ? t('photo_added') : t('photos_n_added').replace('{n}', ok));
+      }
       toast(t('saved'));
       setPhoto(null);
+      setPendGal([]);
       setEdit(null);
       refresh();
     } catch (ex) { toast(ex.message, 'err'); }
@@ -388,7 +439,7 @@ function Products() {
       <StatusBanner store={data.store} />
       <div className="row spread mb12">
         <div className="h2">📦 {t('products')} ({data.products.length})</div>
-        <button className="btn primary sm" onClick={() => { setEdit({ ...EMPTY_P }); setPhoto(null); }}>＋ {t('add_product')}</button>
+        <button className="btn primary sm" onClick={() => { setEdit({ ...EMPTY_P }); setPhoto(null); setPendGal([]); }}>＋ {t('add_product')}</button>
       </div>
       <div className="card">
         {data.products.length === 0 && <Empty e="📦" text={t('no_data')} />}
@@ -408,7 +459,7 @@ function Products() {
         ))}
       </div>
 
-      <Modal open={!!edit} onClose={() => { setEdit(null); setPhoto(null); }} title={edit?.id ? t('edit') : t('add_product')}>
+      <Modal open={!!edit} onClose={() => { setEdit(null); setPhoto(null); setPendGal([]); }} title={edit?.id ? t('edit') : t('add_product')}>
         {edit && (
           <>
             <div className="label mb8">🖼️ {t('main_photo')}</div>
@@ -427,29 +478,36 @@ function Products() {
               </div>
             </div>
 
-            {edit.id && (
-              <div className="mb12">
-                <div className="label mb8">🖼️ {t('more_photos')} ({(edit.photos || []).length})</div>
-                <div className="row wrap" style={{ gap: 10 }}>
-                  {(edit.photos || []).map((ph) => (
+            <div className="mb12">
+              <div className="label mb8">🖼️ {t('more_photos')} ({edit.id ? (edit.photos || []).length : pendGal.length})</div>
+              <div className="row wrap" style={{ gap: 10 }}>
+                {edit.id
+                  ? (edit.photos || []).map((ph) => (
                     <div key={ph.id} style={{ position: 'relative' }}>
                       <img className="p-photo" src={photoUrl(ph.photo, 'thumb')} alt="" />
                       <button className="btn danger sm" style={{ position: 'absolute', top: -7, insetInlineEnd: -7, padding: '2px 7px', minWidth: 0 }}
                         onClick={() => delGallery(ph)}>✕</button>
                     </div>
+                  ))
+                  : pendGal.map((r, i) => (
+                    <div key={i} style={{ position: 'relative' }}>
+                      <img className="p-photo" src={r.display} alt="" />
+                      <button className="btn danger sm" style={{ position: 'absolute', top: -7, insetInlineEnd: -7, padding: '2px 7px', minWidth: 0 }}
+                        onClick={() => setPendGal((g) => g.filter((_, x) => x !== i))}>✕</button>
+                    </div>
                   ))}
-                  <label className={'btn blue sm' + (galleryBusy ? ' soft' : '')} style={{ width: 48, height: 48, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 12, pointerEvents: galleryBusy ? 'none' : 'auto' }}>
-                    {galleryBusy ? '⏳' : '＋'}
-                    <input type="file" accept="image/*" multiple hidden onChange={(e) => { addGallery(e.target.files); e.target.value = ''; }} />
-                  </label>
-                </div>
-                <span className="muted small">{t('gallery_hint')}</span>
+                <label className={'btn blue sm' + (galleryBusy ? ' soft' : '')} style={{ width: 48, height: 48, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 12, pointerEvents: galleryBusy ? 'none' : 'auto' }}>
+                  {galleryBusy ? '⏳' : '＋'}
+                  <input type="file" accept="image/*" multiple hidden onChange={(e) => { onGalleryPick(e.target.files); e.target.value = ''; }} />
+                </label>
               </div>
-            )}
+              <span className="muted small">{edit.id ? t('gallery_hint') : t('gallery_pending_hint')}</span>
+            </div>
             <div className="row">
               <div className="field grow">
                 <label className="label">{t('product_name')}</label>
-                <input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+                <input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} placeholder="ex. : Sandwich falafel" />
+                <FieldErr e={pErr.name} />
               </div>
             </div>
             <div className="row">
@@ -459,7 +517,8 @@ function Products() {
               </div>
               <div className="field" style={{ width: 130 }}>
                 <label className="label">{t('price')}</label>
-                <input className="input" type="number" min="0" step="0.5" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} />
+                <input className="input" type="number" min="0" step="0.5" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} placeholder="ex. : 45.50" />
+                <FieldErr e={pErr.price} />
               </div>
             </div>
             <div className="field">
@@ -650,6 +709,7 @@ function StoreSettings() {
   const [busy, setBusy] = useState(false);
   const [pickOpen, setPickOpen] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [sErr, setSErr] = useState({});   // erreurs par champ reglages magasin
 
   usePoll(() => {
     api('/merchant/store').then((d) => {
@@ -714,6 +774,7 @@ function StoreSettings() {
           <div className="field grow">
             <label className="label">{t('store_name')}</label>
             <input className="input" value={form.name} onChange={(e) => set('name', e.target.value)} />
+            <FieldErr e={sErr.name} />
           </div>
         </div>
         <div className="field">
@@ -723,7 +784,8 @@ function StoreSettings() {
         <div className="row">
           <div className="field grow">
             <label className="label">📞 {t('phone')}</label>
-            <input className="input" value={form.phone || ''} onChange={(e) => set('phone', e.target.value)} />
+            <input className="input" value={form.phone || ''} onChange={(e) => set('phone', e.target.value)} placeholder="ex. : 0100 123 4567" />
+            <FieldErr e={sErr.phone} />
           </div>
           <div className="field" style={{ width: 140 }}>
             <label className="label">{t('price')} 🎨</label>
@@ -744,17 +806,25 @@ function StoreSettings() {
           <div className="field grow">
             <label className="label">🛵 {t('fee_lbl')}</label>
             <input className="input" type="number" min="0" step="0.5" value={form.delivery_fee} onChange={(e) => set('delivery_fee', e.target.value)} />
+            <FieldErr e={sErr.delivery_fee} />
           </div>
           <div className="field grow">
             <label className="label">🧾 {t('min_lbl')}</label>
             <input className="input" type="number" min="0" step="1" value={form.min_order} onChange={(e) => set('min_order', e.target.value)} />
+            <FieldErr e={sErr.min_order} />
           </div>
         </div>
         <label className="check mb12">
           <input type="checkbox" checked={!!form.is_open} onChange={(e) => set('is_open', e.target.checked)} />
           {t('open_toggle')}
         </label>
-        <button className="btn primary block" disabled={busy} onClick={save}>{t('save')}</button>
+        <button className="btn primary block" disabled={busy} onClick={() => {
+    const v = V(t);
+    const e = runV({ name: v.name(t('store_name')), phone: v.phone(), delivery_fee: v.num(t('fee_lbl'), 0, '25'), min_order: v.num(t('min_lbl'), 0, '50') }, form);
+    setSErr(e);
+    if (hasErr(e)) return;
+    save();
+  }}>{t('save')}</button>
       </div>
 
       <Modal open={pickOpen} onClose={() => setPickOpen(false)} title={'🗺️ ' + t('choose_on_map')}>

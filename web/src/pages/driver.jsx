@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { api, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, pushSubscribe } from '../lib.jsx';
+import { api, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, pushSubscribe , UpdatesBanner } from '../lib.jsx';
 import { Empty, Spinner, LangSwitch, StatusBadge, PayBadge, Modal } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import RouteMap, { DualRouteMap, TourMap, buildTour } from '../RouteMap.jsx';
@@ -131,11 +131,13 @@ export default function DriverApp() {
   const YG = isNative ? (window.Capacitor.Plugins?.YallaGps || null) : null;
   const openAppSettings = () => { try { YG?.openSettings?.().catch(() => {}); } catch {} };
   // 🔄 Version minimale de l'APK — si le téléphone a moins, proposer la mise à jour automatique
-  const APK_REQUIRED = '3.1.5'; // v3.1 + anti-kill + redémarrage auto (bug running/wanted corrigé)
+  const APK_REQUIRED = '3.1.6'; // + bouton retour téléphone + notifications locales APK
   const [installing, setInstalling] = useState(false);
   const [brandHelp, setBrandHelp] = useState(false); // modal guide par marque
   const [pinAsk, setPinAsk] = useState(null); // 🔑 commande en cours de validation par code
   const [pinCode, setPinCode] = useState('');
+  const [refuseAsk, setRefuseAsk] = useState(null); // ↩️ colis refusé par le client
+  const [refuseReason, setRefuseReason] = useState('');
   const [brandSel, setBrandSel] = useState(null);
   const detectedBrand = detectBrand();
   const updateApp = () => {
@@ -246,6 +248,7 @@ export default function DriverApp() {
           🔴 <b>APK ANCIEN détecté</b> — cette application ne contient pas le service GPS natif (vérifie : réglages Android → YallaLiv → version doit être <b>3.0</b>). Installe le nouvel APK fourni par l'administrateur, puis reconnecte-toi.
         </div>
       )}
+      <UpdatesBanner role="driver" />
       {YG && gpsStatus?.apkVersion && gpsStatus.apkVersion !== APK_REQUIRED && (
         <div className="card" style={{ background: '#e0e7ff', border: '1px solid #6366f1', padding: '10px 14px', fontSize: 13 }}>
           🔄 <b>Mise à jour de l'application disponible</b> (installée : v{gpsStatus.apkVersion} · requise : v{APK_REQUIRED})
@@ -380,6 +383,7 @@ export default function DriverApp() {
               <div className="row mt8">
                 {o.status === 'assigned' && <button className="btn blue block" onClick={() => act(o.id, 'picked_up')}>📦 {t('picked_up_btn')}</button>}
                 {o.status === 'picked_up' && <button className="btn primary block" onClick={() => (o.has_pin ? setPinAsk(o) : act(o.id, 'delivered'))}>🎉 {t('delivered_btn')}{o.has_pin ? ' · 🔑' : ''}</button>}
+                {['assigned', 'picked_up'].includes(o.status) && <button className="btn danger sm" onClick={() => { setRefuseAsk(o); setRefuseReason(''); }}>↩️ Refus client</button>}
               </div>
               <div className="row mt8 wrap">
                 <button className="btn ghost sm" onClick={() => setChat(o)}>💬 Chat — {o.client_name}</button>
@@ -462,6 +466,22 @@ export default function DriverApp() {
             )}
           </>
         )}
+      </Modal>
+
+      {/* ↩️ Colis refusé par le client : motif optionnel, le magasin est prévenu */}
+      <Modal open={!!refuseAsk} onClose={() => { setRefuseAsk(null); setRefuseReason(''); }} title="↩️ Colis refusé par le client ?">
+        <p className="muted small" style={{ marginTop: 0 }}>Le magasin sera prévenu que le colis retourne au magasin.</p>
+        <div className="field">
+          <label className="label">📝 Motif (optionnel)</label>
+          <textarea className="textarea" rows={2} value={refuseReason} onChange={(e) => setRefuseReason(e.target.value)} placeholder="ex. : client absent, a changé d'avis..." />
+        </div>
+        <button className="btn danger block mt8" onClick={async () => {
+          let ok = true;
+          try { await api(`/driver/orders/${refuseAsk.id}/refuse`, { method: 'POST', body: { reason: refuseReason } }); toast('Refus enregistré — retour au magasin'); }
+          catch (ex) { ok = false; toast(ex.message, 'err'); }
+          api('/driver/mine').then((d) => setMine(d.orders)).catch(() => {});
+          if (ok) { setRefuseAsk(null); setRefuseReason(''); }
+        }}>↩️ Confirmer le refus</button>
       </Modal>
 
       {/* 🔑 Preuve de livraison : code à 4 chiffres montré au client, saisi par le livreur */}

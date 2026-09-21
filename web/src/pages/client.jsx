@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, Outlet, useSearchParams } from 'react-router-dom';
 import TrackMap from '../TrackMap.jsx';
-import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange } from '../lib.jsx';
+import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner } from '../lib.jsx';
 import { BottomNav, CartBar, StatusBadge, PayBadge, Stepper, Empty, Spinner, BackBtn, LangSwitch, Modal, Stars, SuggestBox, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
-import PickMap from '../PickMap.jsx';
+import PickMap, { reverseGeocode } from '../PickMap.jsx';
 import AccountSettings from '../AccountSettings.jsx';
 import { StoresMap } from '../RouteMap.jsx';
 
@@ -13,6 +13,7 @@ const TYPE_META = { restaurant: { e: '🍽️', c: '#ef6c4d' }, market: { e: '�
 export function ClientLayout() {
   return (
     <div className="app-client">
+      <UpdatesBanner role="client" />
       <Outlet />
       <CartBar />
       <BottomNav />
@@ -459,6 +460,7 @@ export function CartPage() {
   const [gps, setGps] = useState(null);
   const [pickOpen, setPickOpen] = useState(false);
   const [done, setDone] = useState(null); // 🔑 confirmation finale avec le code de remise
+  const [coErr, setCoErr] = useState({});  // ⚠️ erreurs par champ du checkout
   const [card, setCard] = useState({ no: '', exp: '', cvc: '' });
   const [promoInput, setPromoInput] = useState('');
   const [promo, setPromo] = useState(null); // {code, discount, type, value}
@@ -470,7 +472,15 @@ export function CartPage() {
   const useGps = () => {
     if (!navigator.geolocation) return toast(t('gps_fail'), 'err');
     navigator.geolocation.getCurrentPosition(
-      (p) => { setGps({ lat: p.coords.latitude, lng: p.coords.longitude }); toast(t('gps_ok')); },
+      async (p) => {
+        setGps({ lat: p.coords.latitude, lng: p.coords.longitude });
+        toast(t('gps_ok'));
+        // 📍 remplir automatiquement le champ adresse avec la position trouvée
+        try {
+          const a = await reverseGeocode(p.coords.latitude, p.coords.longitude);
+          if (a) setAddress(a.split(',').slice(0, 3).join(', '));
+        } catch {}
+      },
       () => toast(t('gps_fail'), 'err'),
       { timeout: 6000 }
     );
@@ -494,9 +504,22 @@ export function CartPage() {
   // « Commander » ouvre D'ABORD une dernière confirmation avec le numéro de téléphone
   // (pré-rempli, modifiable). À la confirmation, le numéro est mémorisé sur le compte :
   // il ne sera plus jamais demandé (juste affiché, modifiable, à chaque commande).
-  const openConfirm = () => { setCPhone(phone || user?.phone || ''); setConfirmOpen(true); };
+  const openConfirm = () => {
+    const v = V(t);
+    const errs = runV({
+      address: v.req(t('address'), '12 rue Saad Zaghloul, Alexandrie', 5),
+      phone: v.phone(),
+    }, { address, phone });
+    setCoErr(errs);
+    if (hasErr(errs)) return;
+    setCPhone(phone || user?.phone || ''); setConfirmOpen(true);
+  };
 
   const placeOrder = async () => {
+    const v = V(t);
+    const perr = v.phone()(String(cPhone || '').trim());
+    setCoErr({ phone: perr });
+    if (perr) return;
     setBusy(true);
     try {
       const finalPhone = cPhone.trim();
@@ -585,7 +608,8 @@ export function CartPage() {
       <div className="card mb12">
         <div className="field">
           <label className="label">📍 {t('address')}</label>
-          <textarea className="textarea" value={address} onChange={(e) => setAddress(e.target.value)} placeholder={t('address_ph')} />
+          <textarea className="textarea" value={address} onChange={(e) => setAddress(e.target.value)} placeholder={t('address_ph') + ' — ex. : 12 rue Saad Zaghloul, Alexandrie'} />
+          <FieldErr e={coErr.address} />
         </div>
         <div className="row mt12 wrap" style={{ gap: 8 }}>
           <button type="button" className="btn ghost sm" onClick={useGps}>🛰️ {t('use_gps')}</button>
@@ -594,7 +618,8 @@ export function CartPage() {
         </div>
         <div className="field mt12">
           <label className="label">📞 {t('phone')}</label>
-          <input className="input" dir="ltr" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+20 100 000 0000" />
+          <input className="input" dir="ltr" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="ex. : 0100 123 4567" />
+          <FieldErr e={coErr.phone} />
           {user && !user.phone && <div className="banner warn mt8" style={{ padding: '6px 10px' }}>📞 {t('phone_needed_note')}</div>}
         </div>
         <div className="field">
@@ -661,7 +686,7 @@ export function CartPage() {
         <div className="banner ok mt12">🛵 {t('Livraison estimée')} : <b>{etaRange(store.type, distM(store.lat, store.lng, gps.lat, gps.lng)).join('-')} min</b></div>
       )}
 
-      <button className="btn primary block mt12 mb16" disabled={busy || belowMin || !address || !phone || !cardOk || !acctOk} onClick={openConfirm}>
+      <button className="btn primary block mt12 mb16" disabled={busy || belowMin || !cardOk || !acctOk} onClick={openConfirm}>
         {busy && payment === 'card' ? t('processing_pay') : busy ? '...' : t('place_order')} · {fmtMoney(total)}
       </button>
 
@@ -699,7 +724,8 @@ export function CartPage() {
         <p className="muted small" style={{ marginTop: 0 }}>{t('confirm_phone_msg')}</p>
         <div className="field">
           <label className="label">📞 {t('phone')}</label>
-          <input className="input" dir="ltr" type="tel" value={cPhone} onChange={(e) => setCPhone(e.target.value)} placeholder="+20 100 000 0000" style={{ fontSize: 17, fontWeight: 700 }} />
+          <input className="input" dir="ltr" type="tel" value={cPhone} onChange={(e) => setCPhone(e.target.value)} placeholder="ex. : 0100 123 4567" style={{ fontSize: 17, fontWeight: 700 }} />
+          <FieldErr e={coErr.phone} />
         </div>
         <button className="btn primary block mt8" disabled={busy || cPhone.replace(/\D/g, '').length < 8} onClick={placeOrder}>
           {busy ? (payment === 'card' ? t('processing_pay') : '...') : '✅ ' + t('confirm_order_btn')} · {fmtMoney(total)}
@@ -817,7 +843,7 @@ export function ClientOrders() {
               {['assigned', 'picked_up'].includes(o.status) && (
                 <button className="btn blue sm" onClick={() => openTrack(o)}>🗺️ {t('view_map')}</button>
               )}
-              {!['cancelled', 'rejected'].includes(o.status) && (
+              {!['cancelled', 'rejected', 'refused'].includes(o.status) && (
                 <button className="btn ghost sm" onClick={() => setChat(o)}>💬 {t('detail')}</button>
               )}
               {o.status === 'pending' && (
@@ -908,9 +934,18 @@ export function ClientProfile() {
   const [pOpen, setPOpen] = useState(false);                                  // formulaire « Devenir partenaire »
   const [pForm, setPForm] = useState({ name: '', type: 'restaurant', phone: '', address: '', lat: null, lng: null });
   const [pBusy, setPBusy] = useState(false);
+  const [pErr, setPErr] = useState({});   // ⚠️ erreurs par champ du formulaire partenaire
   const [pMapOpen, setPMapOpen] = useState(false);                           // choix de la position sur la carte
 
   const submitPartner = async () => {
+    const v = V(t);
+    const errs = runV({
+      name: v.name(t('store_name')),
+      phone: v.phone(),
+      address: v.req(t('address'), '12 rue Saad Zaghloul, Alexandrie', 5),
+    }, pForm);
+    setPErr(errs);
+    if (hasErr(errs)) return;   // les erreurs s'affichent SOUS chaque champ fautif
     setPBusy(true);
     try {
       const d = await api('/partner', { method: 'POST', body: {
@@ -977,7 +1012,8 @@ export function ClientProfile() {
       <Modal open={pOpen} onClose={() => setPOpen(false)} title={'🏪 ' + t('partner_title')}>
         <div className="field">
           <label className="label">{t('store_name')}</label>
-          <input className="input" value={pForm.name} onChange={(e) => setPForm((f) => ({ ...f, name: e.target.value }))} />
+          <input className="input" value={pForm.name} onChange={(e) => setPForm((f) => ({ ...f, name: e.target.value }))} placeholder="ex. : Restaurant Al Nil" />
+          <FieldErr e={pErr.name} />
         </div>
         <div className="field">
           <label className="label">{t('store_type')}</label>
@@ -992,18 +1028,20 @@ export function ClientProfile() {
         </div>
         <div className="field">
           <label className="label">{t('phone')}</label>
-          <input className="input" dir="ltr" value={pForm.phone} onChange={(e) => setPForm((f) => ({ ...f, phone: e.target.value }))} placeholder="+20 ..." />
+          <input className="input" dir="ltr" value={pForm.phone} onChange={(e) => setPForm((f) => ({ ...f, phone: e.target.value }))} placeholder="ex. : 0100 123 4567" />
+          <FieldErr e={pErr.phone} />
         </div>
         <div className="field">
           <label className="label">{t('address')}</label>
-          <textarea className="textarea" rows={2} value={pForm.address} onChange={(e) => setPForm((f) => ({ ...f, address: e.target.value }))} placeholder={t('address_ph')} />
+          <textarea className="textarea" rows={2} value={pForm.address} onChange={(e) => setPForm((f) => ({ ...f, address: e.target.value }))} placeholder={t('address_ph') + ' — ex. : 12 rue Saad Zaghloul, Alexandrie'} />
+          <FieldErr e={pErr.address} />
         </div>
         <div className="row wrap mt4" style={{ gap: 8 }}>
           <button type="button" className="btn blue sm" onClick={() => setPMapOpen(true)}>🗺️ {t('choose_on_map')}</button>
           {pForm.lat != null && <span className="badge b-active">✓ {t('loc_defined')}</span>}
         </div>
         <p className="muted small">⏳ {t('pending_store')} · {t('partner_missing_note')}</p>
-        <button className="btn primary block mt8" disabled={pBusy || !pForm.name.trim() || !pForm.phone.trim() || !pForm.address.trim()} onClick={submitPartner}>
+        <button className="btn primary block mt8" disabled={pBusy} onClick={submitPartner}>
           {pBusy ? '...' : t('partner_submit')}
         </button>
       </Modal>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast } from '../lib.jsx';
+import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast , FieldErr, V, runV, hasErr } from '../lib.jsx';
 import { Empty, Spinner, LangSwitch, StatusBadge, PayBadge, Modal, ErrorBoundary } from '../ui.jsx';
 import AccountSettings from '../AccountSettings.jsx';
 import { BarsChart, compactMoney } from '../Chart.jsx';
@@ -369,10 +369,15 @@ function GeneralDrivers() {
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
 
+  const [dErr, setDErr] = useState({});   // erreurs par champ livreur
   const refresh = () => api('/admin/drivers').then((d) => setDrivers(Array.isArray(d?.drivers) ? d.drivers : [])).catch(() => {});
   usePoll(refresh, 8000);
 
   const create = async () => {
+    const v = V(t);
+    const e = runV({ name: v.name(t('name')), email: v.emailOpt(), phone: v.phone(), password: v.pass(5) }, form);
+    setDErr(e);
+    if (hasErr(e)) return;
     setBusy(true);
     try {
       await api('/admin/drivers', { method: 'POST', body: form });
@@ -430,16 +435,19 @@ function GeneralDrivers() {
           <>
             <div className="field">
               <label className="label">{t('name')}</label>
-              <input className="input" value={form.name} onChange={(e) => set('name', e.target.value)} />
+              <input className="input" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="ex. : Ahmed Ali" />
+              <FieldErr e={dErr.name} />
             </div>
             <div className="field">
               <label className="label">{t('email')}</label>
               <input className="input" type="email" dir="ltr" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="livreur@email.com" />
+              <FieldErr e={dErr.email} />
             </div>
             <div className="row">
               <div className="field grow">
                 <label className="label">{t('phone')}</label>
-                <input className="input" dir="ltr" value={form.phone} onChange={(e) => set('phone', e.target.value)} />
+                <input className="input" dir="ltr" value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="ex. : 0100 123 4567" />
+                <FieldErr e={dErr.phone} />
               </div>
               <div className="field grow">
                 <label className="label">{t('vehicle')}</label>
@@ -450,7 +458,8 @@ function GeneralDrivers() {
             </div>
             <div className="field">
               <label className="label">{t('password')}</label>
-              <input className="input" type="text" value={form.password} onChange={(e) => set('password', e.target.value)} placeholder="min 5" />
+              <input className="input" type="text" value={form.password} onChange={(e) => set('password', e.target.value)} placeholder="ex. : 5 caractères minimum" />
+              <FieldErr e={dErr.password} />
             </div>
             <button className="btn primary block" disabled={busy || !form.name || !form.email || form.password.length < 5} onClick={create}>{t('save')}</button>
           </>
@@ -468,9 +477,19 @@ function Promos() {
   const [busy, setBusy] = useState(false);
   usePoll(() => api('/admin/promos').then((d) => setPromos(d.promos)).catch(() => {}), 10000);
 
+  const [prErr, setPrErr] = useState({});   // erreurs par champ promo
   const refresh = () => api('/admin/promos').then((d) => setPromos(d.promos)).catch(() => {});
 
   const create = async () => {
+    const v = V(t);
+    const e = runV({
+      code: v.req('Code', 'ETE25', 3),
+      value: v.num('Valeur', 0.01, '10'),
+      min_order: v.num('Commande minimum', 0, '0'),
+      max_uses: v.num("Nombre d'utilisations", 0, '100'),
+    }, form);
+    setPrErr(e);
+    if (hasErr(e)) return;
     setBusy(true);
     try {
       await api('/admin/promos', { method: 'POST', body: { ...form, value: parseFloat(form.value), min_order: parseFloat(form.min_order), max_uses: parseInt(form.max_uses) } });
@@ -497,6 +516,7 @@ function Promos() {
           <div className="field grow">
             <label className="label">{t('promo_title')}</label>
             <input className="input" style={{ textTransform: 'uppercase' }} value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="ETE25" />
+            <FieldErr e={prErr.code} />
           </div>
           <div className="field" style={{ width: 150 }}>
             <label className="label">{t('store_type')}</label>
@@ -508,16 +528,19 @@ function Promos() {
           <div className="field" style={{ width: 110 }}>
             <label className="label">{t('price')}</label>
             <input className="input" type="number" min="0" value={form.value} onChange={(e) => set('value', e.target.value)} />
+            <FieldErr e={prErr.value} />
           </div>
         </div>
         <div className="row">
           <div className="field grow">
             <label className="label">{t('promo_min')}</label>
             <input className="input" type="number" min="0" value={form.min_order} onChange={(e) => set('min_order', e.target.value)} />
+            <FieldErr e={prErr.min_order} />
           </div>
           <div className="field grow">
             <label className="label">{t('promo_max')}</label>
             <input className="input" type="number" min="0" value={form.max_uses} onChange={(e) => set('max_uses', e.target.value)} />
+            <FieldErr e={prErr.max_uses} />
           </div>
         </div>
         <button className="btn primary block" disabled={busy || !form.code || !form.value} onClick={create}>{t('save')}</button>

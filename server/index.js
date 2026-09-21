@@ -274,9 +274,9 @@ app.post('/api/partner', auth, h(async (req, res) => {
   if (req.user.role !== 'client') return res.status(403).json({ error: 'Accès refusé' });
   const { store_name, store_type = 'market', store_address = '' } = req.body;
   const store_phone = String(req.body.store_phone || req.user.phone || '').trim();
-  if (!store_name || !String(store_name).trim()) return res.status(400).json({ error: 'Nom du magasin requis' });
-  if (!store_phone || store_phone.replace(/\D/g, '').length < 8) return res.status(400).json({ error: 'Téléphone requis' });
-  if (!store_address || !String(store_address).trim()) return res.status(400).json({ error: 'Adresse du magasin requise' });
+  if (!store_name || !String(store_name).trim()) return res.status(400).json({ error: 'Nom du magasin requis (ex. : Restaurant Al Nil)' });
+  if (String(store_phone || '').replace(/\D/g, '').length < 10) return res.status(400).json({ error: 'Téléphone invalide (ex. : 0100 123 4567)' });
+  if (!store_address || !String(store_address).trim()) return res.status(400).json({ error: 'Adresse du magasin requise (ex. : 12 rue Saad Zaghloul, Alexandrie)' });
   if (!req.user.phone) await run('UPDATE users SET phone=? WHERE id=?', [store_phone, req.user.id]);   // complète le compte
   const validTypes = ['restaurant', 'market', 'pharmacy', 'home', 'clothes', 'electronics'];
   const type = validTypes.includes(store_type) ? store_type : 'market';
@@ -442,7 +442,8 @@ app.get('/api/stores/:id', h(async (req, res) => {
 app.post('/api/orders', auth, requireRole('client', 'merchant', 'superadmin'), h(async (req, res) => {
   const { store_id, items, address, phone, note = '', payment = 'cash' } = req.body;
   if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: 'Panier vide' });
-  if (!address || !phone) return res.status(400).json({ error: 'Adresse et téléphone requis' });
+  if (!String(address || '').trim()) return res.status(400).json({ error: 'Adresse de livraison requise (ex. : 12 rue Saad Zaghloul, Alexandrie)' });
+  if (String(phone || '').replace(/\D/g, '').length < 10) return res.status(400).json({ error: 'Téléphone invalide (ex. : 0100 123 4567)' });
   const store = await get(`SELECT * FROM stores WHERE id=? AND status='approved'`, [store_id]);
   if (!store) return res.status(400).json({ error: 'Magasin indisponible' });
   if (!store.is_open) return res.status(400).json({ error: 'Magasin fermé actuellement' });
@@ -572,7 +573,8 @@ app.post('/api/merchant/products', auth, requireRole('merchant'), h(async (req, 
   const store = await get('SELECT * FROM stores WHERE owner_id=?', [req.user.id]);
   if (!store) return res.status(404).json({ error: 'Aucun magasin' });
   const { name, category = 'Général', description = '', price, emoji = '📦', available = true } = req.body;
-  if (!name || price === undefined || isNaN(parseFloat(price))) return res.status(400).json({ error: 'Nom et prix valides requis' });
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'Nom du produit requis (ex. : Sandwich falafel)' });
+  if (price === undefined || isNaN(parseFloat(price)) || parseFloat(price) < 0) return res.status(400).json({ error: 'Prix invalide (ex. : 45.50)' });
   const p = await get('INSERT INTO products(store_id,name,category,description,price,emoji,available,created_at) VALUES(?,?,?,?,?,?,?,?) RETURNING *',
     [store.id, String(name).trim(), String(category), String(description), round2(parseFloat(price)), String(emoji).slice(0, 4), available ? 1 : 0, Date.now()]);
   res.json({ product: p });
@@ -624,6 +626,24 @@ app.post('/api/merchant/orders/:id/status', auth, requireRole('merchant'), h(asy
 // Attribution DIRECTE d'une livraison prete a un livreur PRIVE du magasin.
 // Si le livreur a deja une course : 1er appel -> needs_confirm ; force:true -> attribution quand meme
 // + calcul du plan : store_first (retour magasin d'abord) ou finish_current_first (terminer sa course d'abord).
+// 🚫 Annulation par le magasin : à TOUT moment (même en cours de livraison).
+// Si un livreur est en route : il reçoit un message — le colis doit retourner au magasin.
+app.post('/api/merchant/orders/:id/cancel', auth, requireRole('merchant'), h(async (req, res) => {
+  const store = await get('SELECT * FROM stores WHERE owner_id=?', [req.user.id]);
+  if (!store) return res.status(404).json({ error: 'Aucun magasin' });
+  const o = await get('SELECT * FROM orders WHERE id=? AND store_id=?', [req.params.id, store.id]);
+  if (!o) return res.status(404).json({ error: 'Commande introuvable' });
+  if (['delivered', 'cancelled', 'rejected', 'refused'].includes(o.status)) return res.status(400).json({ error: 'Commande déjà terminée' });
+  await run(`UPDATE orders SET status='cancelled', updated_at=? WHERE id=?`, [Date.now(), o.id]);
+  if (o.driver_id) {
+    pushTo([o.driver_id], `🚨 Commande #${o.id} annulée par le magasin`, o.status === 'picked_up'
+      ? `Le colis doit RETOURNER au magasin ${store.name} — il est en votre possession`
+      : `Livraison annulée — inutile d'aller la chercher`);
+  }
+  pushTo([o.client_id], `Commande #${o.id}`, '🚫 Votre commande a été annulée par le magasin');
+  res.json({ ok: true });
+}));
+
 app.post('/api/merchant/orders/:id/assign', auth, requireRole('merchant'), h(async (req, res) => {
   const store = await get('SELECT * FROM stores WHERE owner_id=?', [req.user.id]);
   const o = await get('SELECT * FROM orders WHERE id=? AND store_id=?', [req.params.id, store?.id]);
@@ -911,6 +931,21 @@ app.post('/api/driver/orders/:id/status', auth, requireRole('driver'), h(async (
   res.json({ ok: true });
 }));
 
+// ↩️ Colis refusé par le client (signalé par le livreur, motif optionnel)
+app.post('/api/driver/orders/:id/refuse', auth, requireRole('driver'), h(async (req, res) => {
+  const o = await get('SELECT * FROM orders WHERE id=? AND driver_id=?', [req.params.id, req.user.id]);
+  if (!o) return res.status(404).json({ error: 'Commande introuvable' });
+  if (!['assigned', 'picked_up'].includes(o.status)) return res.status(400).json({ error: 'Transition invalide' });
+  const reason = String(req.body.reason || '').trim().slice(0, 300);
+  await run(`UPDATE orders SET status='refused', refuse_reason=?, updated_at=? WHERE id=?`, [reason, Date.now(), o.id]);
+  const store = await get('SELECT * FROM stores WHERE id=?', [o.store_id]);
+  pushTo([store?.owner_id].filter(Boolean), `↩️ Commande #${o.id} refusée par le client`,
+    (reason ? 'Motif : ' + reason + ' · ' : '') + 'Le colis retourne au magasin ' + (store?.name || ''));
+  pushTo([o.client_id], `Commande #${o.id}`, '↩️ Colis refusé à la livraison');
+  if (!req.user.store_id) dispatchPublicOrders(); // un slot se libère
+  res.json({ ok: true });
+}));
+
 app.post('/api/driver/orders/:id/ack', auth, requireRole('driver'), h(async (req, res) => {
   const r = await run(`UPDATE orders SET acknowledged=1 WHERE id=? AND driver_id=? AND status='assigned'`, [req.params.id, req.user.id]);
   res.json({ ok: r.rowCount > 0 });
@@ -964,6 +999,8 @@ app.post('/api/merchant/products/:id/photos', auth, requireRole('merchant'), h(a
   const store = await get('SELECT * FROM stores WHERE owner_id=?', [req.user.id]);
   const p = await get('SELECT * FROM products WHERE id=? AND store_id=?', [req.params.id, store?.id]);
   if (!p) return res.status(404).json({ error: 'Produit introuvable' });
+  const cnt = await get('SELECT COUNT(*) AS c FROM product_photos WHERE product_id=?', [p.id]);
+  if (cnt.c >= 5) return res.status(400).json({ error: 'Maximum 5 photos par produit' });   // 🖼️ limite appliquée aussi côté serveur
   const url = await savePhoto(req.body);
   if (!url) return res.status(400).json({ error: 'Image invalide (PNG/JPG/WebP) ou trop lourde' });
   const ph = await get('INSERT INTO product_photos(product_id,photo,created_at) VALUES(?,?,?) RETURNING *', [p.id, url, Date.now()]);

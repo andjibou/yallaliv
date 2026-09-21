@@ -94,8 +94,8 @@ export function Modal({ open, onClose, title, children }) {
 
 export function StatusBadge({ status }) {
   const t = useT();
-  const icons = { pending: '⏳', accepted: '👍', preparing: '👨‍🍳', ready: '✅', assigned: '🛵', picked_up: '📦', delivered: '🎉', rejected: '❌', cancelled: '🚫' };
-  return <span className={'badge st-' + status}>{icons[status] || ''} {t('st_' + status)}</span>;
+  const icons = { pending: '⏳', accepted: '👍', preparing: '🛠️', ready: '✅', assigned: '🛵', picked_up: '📦', delivered: '🎉', rejected: '❌', cancelled: '🚫', refused: '↩️' };
+  return <span className={'badge st-' + (status === 'refused' ? 'cancelled' : status)}>{icons[status] || ''} {t('st_' + status)}</span>;
 }
 
 export function PayBadge({ o }) {
@@ -110,7 +110,7 @@ export function PayBadge({ o }) {
 export function Stepper({ status }) {
   const t = useT();
   const steps = ['pending', 'accepted', 'preparing', 'ready', 'assigned', 'picked_up', 'delivered'];
-  if (['rejected', 'cancelled'].includes(status)) return null;
+  if (['rejected', 'cancelled', 'refused'].includes(status)) return null;
   const idx = steps.indexOf(status);
   return (
     <div className="stepper">

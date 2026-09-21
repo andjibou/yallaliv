@@ -12,4 +12,17 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(YallaGps.class);
         super.onCreate(savedInstanceState);
     }
+
+    // 🔙 Bouton RETOUR du téléphone : navigue en arrière dans l'app (comme le bouton
+    // retour de l'interface). S'il n'y a plus rien à quoi revenir : l'app passe en
+    // arrière-plan SANS être quittée (le suivi GPS et la notification restent actifs).
+    @Override
+    public void onBackPressed() {
+        android.webkit.WebView wv = (bridge != null) ? bridge.getWebView() : null;
+        if (wv != null && wv.canGoBack()) {
+            wv.goBack();
+        } else {
+            moveTaskToBack(true); // ne tue PAS l'app : arrière-plan propre
+        }
+    }
 }

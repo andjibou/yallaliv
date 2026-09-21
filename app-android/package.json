@@ -5,7 +5,8 @@
   "description": "YallaLiv Livreur — application Android (site existant + GPS arrière-plan natif)",
   "dependencies": {
     "@capacitor/android": "^8.5.2",
-    "@capacitor/core": "^8.5.2"
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/local-notifications": "^8.3.1"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.2"

@@ -8,6 +8,13 @@ const SERVER_ERRORS = {
   'Livraison estimée': { en: 'Estimated delivery', ar: 'التوصيل المتوقع' },
   'Arrive dans': { en: 'Arriving in', ar: 'يصل خلال' },
   'Code PIN incorrect — demandez le code au client': { en: 'Wrong PIN — ask the client for the code', ar: 'رمز خاطئ — اطلب الرمز من العميل' },
+  'Maximum 5 photos par produit': { en: 'Maximum 5 photos per product', ar: 'بحد أقصى 5 صور لكل منتج' },
+  'Nom du magasin requis (ex. : Restaurant Al Nil)': { en: 'Store name required (e.g. Al Nil Restaurant)', ar: 'اسم المتجر مطلوب (مثال: مطعم النيل)' },
+  'Téléphone invalide (ex. : 0100 123 4567)': { en: 'Invalid phone (e.g. 0100 123 4567)', ar: 'رقم هاتف غير صالح (مثال: 0100 123 4567)' },
+  'Adresse du magasin requise (ex. : 12 rue Saad Zaghloul, Alexandrie)': { en: 'Store address required (e.g. 12 Saad Zaghloul St, Alexandria)', ar: 'عنوان المتجر مطلوب (مثال: 12 شارع سعد زغلول، الإسكندرية)' },
+  'Adresse de livraison requise (ex. : 12 rue Saad Zaghloul, Alexandrie)': { en: 'Delivery address required (e.g. 12 Saad Zaghloul St, Alexandria)', ar: 'عنوان التوصيل مطلوب (مثال: 12 شارع سعد زغلول، الإسكندرية)' },
+  'Nom du produit requis (ex. : Sandwich falafel)': { en: 'Product name required (e.g. Falafel Sandwich)', ar: 'اسم المنتج مطلوب (مثال: سندويتش فلافل)' },
+  'Prix invalide (ex. : 45.50)': { en: 'Invalid price (e.g. 45.50)', ar: 'سعر غير صالح (مثال: 45.50)' },
   'Accès refusé': { en: 'Access denied', ar: 'تم رفض الوصول' },
   'Adresse et téléphone requis': { en: 'Address and phone required', ar: 'العنوان والهاتف مطلوبان' },
   'Attribution automatique : les livraisons publiques vous sont assignées par la plateforme': { en: 'Automatic dispatch: public deliveries are assigned to you by the platform', ar: 'الإسناد التلقائي: المنصّة تسند لك التوصيلات العامة' },
@@ -43,7 +50,7 @@ const SERVER_ERRORS = {
   'Email déjà utilisé': { en: 'Email already in use', ar: 'البريد الإلكتروني مستخدم' },
   'Email ou mot de passe incorrect': { en: 'Incorrect email or password', ar: 'بريد إلكتروني أو كلمة مرور غير صحيحة' },
   'Email valide requis': { en: 'Valid email required', ar: 'بريد إلكتروني صحيح مطلوب' },
-  'Erreur serveur': { en: 'Server error', ar: 'خطأ في الخادم' },
+  'Erreur serveur': { en: 'Server error — please retry', ar: 'خطأ في الخادم — أعد المحاولة' },
   'Image invalide (PNG/JPG/WebP) ou trop lourde': { en: 'Invalid image (PNG/JPG/WebP) or too large', ar: 'صورة غير صالحة (PNG/JPG/WebP) أو كبيرة جداً' },
   'Impossible de modifier un super admin': { en: 'Cannot modify a super admin', ar: 'لا يمكن تعديل المدير العام' },
   'La commande doit être prête et non attribuée': { en: 'The order must be ready and unassigned', ar: 'يجب أن يكون الطلب جاهزاً وغير مُسند' },
@@ -84,7 +91,7 @@ const SERVER_ERR_PREFIXES = [   // messages dynamiques (préfixe + valeur)
 ];
 let CUR_LANG = 'fr';
 export function trErr(msg) {   // traduit un message serveur (français) dans la langue actuelle
-  if (!msg) return CUR_LANG === 'ar' ? 'خطأ' : CUR_LANG === 'en' ? 'Error' : 'Erreur';
+  if (!msg) return CUR_LANG === 'ar' ? 'خطأ في الخادم — أعد المحاولة' : CUR_LANG === 'en' ? 'Server error — please retry' : 'Erreur serveur — réessaie';
   const e = SERVER_ERRORS[msg];
   if (e) return e[CUR_LANG] || msg;
   for (const p of SERVER_ERR_PREFIXES) if (msg.startsWith(p.k)) return (p.v[CUR_LANG] || p.k) + msg.slice(p.k.length);
@@ -109,6 +116,10 @@ export async function api(path, opts = {}) {
 // ================= i18n =================
 const DICT = {
   fr: {
+    v_required: 'obligatoire', v_too_short: 'trop court', v_example: 'exemple',
+    v_phone_bad: 'numéro invalide — exemple : 0100 123 4567',
+    v_email_bad: 'email invalide — exemple : nom@gmail.com',
+    v_price_bad: 'valeur invalide — exemple', v_pass_short: 'Mot de passe trop court (5 caractères minimum)',
     tagline: 'Livraison rapide de tout ce que vous aimez',
     login_title: 'Connexion', login_sub: 'Content de te revoir !', email: 'Email', password: 'Mot de passe',
     btn_login: 'Se connecter', no_account: 'Pas de compte ?', link_register: 'Créer un compte',
@@ -152,7 +163,7 @@ const DICT = {
     min_order_error: 'Commande minimum non atteinte', store_closed: 'Ce magasin est fermé actuellement',
     menu: 'Catalogue', items: 'articles', view_cart: 'Voir le panier',
     st_pending: 'En attente', st_accepted: 'Acceptée', st_preparing: 'En préparation', st_ready: 'Prête',
-    st_assigned: 'Livreur en route', st_picked_up: 'Colis récupéré', st_delivered: 'Livrée', st_rejected: 'Refusée', st_cancelled: 'Annulée',
+    st_assigned: 'Livreur en route', st_picked_up: 'Colis récupéré', st_delivered: 'Livrée', st_rejected: 'Refusée', st_cancelled: 'Annulée', st_refused: 'Refused at delivery', st_refused: 'Refusée à la livraison',
     dashboard: 'Tableau de bord', products: 'Produits', store_settings: 'Magasin', new_orders: 'Nouvelles commandes',
     revenue: 'Revenu', today: 'Aujourd\u2019hui', orders: 'Commandes', accept: 'Accepter', reject: 'Refuser',
     start_preparing: 'Préparer', mark_ready: 'Prête', client: 'Client', driver: 'Livreur', add_product: 'Ajouter un produit',
@@ -214,7 +225,7 @@ const DICT = {
     general_drivers: 'Livreurs généraux', create_gdriver: 'Créer un livreur général', gdriver_created: 'Livreur général créé ✓',
     gdriver_badge: 'Général', gdriver_note: 'Ces livreurs sont créés par vous seul et voient uniquement les livraisons publiées dans l\u2019espace public. Les boutiques ne voient leurs coordonnées que s\u2019ils prennent une livraison chez elles.',
     main_photo: 'Photo principale', more_photos: 'Autres photos', gallery_hint: 'Le client les verra dans la fiche produit',
-    save_first_photos: 'Enregistrez d\u2019abord le produit pour ajouter des photos', photo_added: 'Photo ajoutée ✓', photo_removed: 'Photo supprimée', driver_suspended_ok: 'Livreur suspendu', driver_delete_q: 'Supprimer ce livreur ?',
+    max_photos: 'Maximum 5 photos par produit', save_first_photos: 'Enregistrez d\u2019abord le produit pour ajouter des photos', gallery_pending_hint: 'Ajoutées automatiquement à l\u2019enregistrement du produit', photo_added: 'Photo ajoutée ✓', photo_removed: 'Photo supprimée', driver_suspended_ok: 'Livreur suspendu', driver_delete_q: 'Supprimer ce livreur ?',
     retry_in: 'Trop de tentatives — réessayez dans', offline_route: 'ligne directe (itinéraire routier indisponible hors ligne)',
     address_ph: 'Rue, quartier, étage...', guest_order_title: 'Créez votre compte pour finaliser',
     partner_title: 'Devenir partenaire', partner_desc: 'Ouvrez votre magasin sur YallaLiv : vos produits, vos livraisons, vos clients.',
@@ -233,6 +244,10 @@ const DICT = {
     login_profile_cta: 'Connectez-vous à votre compte'
   },
   ar: {
+    v_required: 'مطلوب', v_too_short: 'قصير جداً', v_example: 'مثال',
+    v_phone_bad: 'رقم غير صالح — مثال: 0100 123 4567',
+    v_email_bad: 'بريد غير صالح — مثال: nom@gmail.com',
+    v_price_bad: 'قيمة غير صالحة — مثال', v_pass_short: 'كلمة المرور قصيرة (5 أحرف على الأقل)',
     tagline: 'توصيل سريع لكل ما تحب',
     login_title: 'تسجيل الدخول', login_sub: 'أهلاً بعودتك!', email: 'البريد الإلكتروني', password: 'كلمة المرور',
     btn_login: 'دخول', no_account: 'ليس لديك حساب؟', link_register: 'إنشاء حساب',
@@ -276,7 +291,7 @@ const DICT = {
     min_order_error: 'لم يصل بعد الحد الأدنى للطلب', store_closed: 'هذا المتجر مغلق حالياً',
     menu: 'المنتجات', items: 'منتجات', view_cart: 'عرض السلة',
     st_pending: 'قيد الانتظار', st_accepted: 'مقبول', st_preparing: 'قيد التحضير', st_ready: 'جاهز',
-    st_assigned: 'السائق في الطريق', st_picked_up: 'تم استلام الطلب', st_delivered: 'تم التوصيل', st_rejected: 'مرفوض', st_cancelled: 'ملغي',
+    st_assigned: 'السائق في الطريق', st_picked_up: 'تم استلام الطلب', st_delivered: 'تم التوصيل', st_rejected: 'مرفوض', st_cancelled: 'ملغي', st_refused: 'مرفوضة عند التسليم',
     dashboard: 'لوحة التحكم', products: 'المنتجات', store_settings: 'المتجر', new_orders: 'طلبات جديدة',
     revenue: 'الإيرادات', today: 'اليوم', orders: 'الطلبات', accept: 'قبول', reject: 'رفض',
     start_preparing: 'تحضير', mark_ready: 'جاهز', client: 'العميل', driver: 'السائق', add_product: 'إضافة منتج',
@@ -338,7 +353,7 @@ const DICT = {
     general_drivers: 'السائقون العامون', create_gdriver: 'إنشاء سائق عام', gdriver_created: 'تم إنشاء السائق العام ✓',
     gdriver_badge: 'عام', gdriver_note: 'هؤلاء السائقون ينشئهم المدير العام وحده، ويرون الطلبات المنشورة في الفضاء العام فقط. المتاجر لا ترى بياناتهم إلا إذا أخذوا توصيلة منها.',
     main_photo: 'الصورة الرئيسية', more_photos: 'صور أخرى', gallery_hint: 'سيراها العميل في صفحة المنتج',
-    save_first_photos: 'احفظ المنتج أولاً ثم أضف الصور', photo_added: 'تمت إضافة الصورة ✓', photo_removed: 'تم حذف الصورة', driver_suspended_ok: 'تم إيقاف السائق', driver_delete_q: 'حذف هذا السائق؟',
+    max_photos: 'بحد أقصى 5 صور لكل منتج', save_first_photos: 'احفظ المنتج أولاً ثم أضف الصور', gallery_pending_hint: 'ستُضاف تلقائياً عند حفظ المنتج', photo_added: 'تمت إضافة الصورة ✓', photo_removed: 'تم حذف الصورة', driver_suspended_ok: 'تم إيقاف السائق', driver_delete_q: 'حذف هذا السائق؟',
     retry_in: 'محاولات كثيرة — أعد المحاولة خلال', offline_route: 'خط مباشر (المسار الطرقي غير متاح دون اتصال)',
     address_ph: 'الشارع، الحي، الطابق...', guest_order_title: 'أنشئ حسابك لإتمام الطلب',
     partner_title: 'كن شريكاً', partner_desc: 'افتح متجرك على يلا ليف: منتجاتك، توصيلاتك، عملاؤك.',
@@ -357,6 +372,10 @@ const DICT = {
     login_profile_cta: 'سجّل الدخول إلى حسابك'
   },
   en: {
+    v_required: 'required', v_too_short: 'too short', v_example: 'example',
+    v_phone_bad: 'invalid number — example: 0100 123 4567',
+    v_email_bad: 'invalid email — example: nom@gmail.com',
+    v_price_bad: 'invalid value — example', v_pass_short: 'Password too short (5 characters minimum)',
     tagline: 'Fast delivery of everything you love',
     login_title: 'Sign in', login_sub: 'Welcome back!', email: 'Email', password: 'Password',
     btn_login: 'Sign in', no_account: 'No account yet?', link_register: 'Create an account',
@@ -461,7 +480,7 @@ const DICT = {
     general_drivers: 'General drivers', create_gdriver: 'Create general driver', gdriver_created: 'General driver created ✓',
     gdriver_badge: 'General', gdriver_note: 'These drivers are created by you only and see only deliveries published in the public space. Stores see their contact details only if they pick up one of their deliveries.',
     main_photo: 'Main photo', more_photos: 'More photos', gallery_hint: 'Customers will see them on the product page',
-    save_first_photos: 'Save the product first to add photos', photo_added: 'Photo added ✓', photo_removed: 'Photo removed', driver_suspended_ok: 'Driver suspended', driver_delete_q: 'Delete this driver?',
+    max_photos: 'Maximum 5 photos per product', save_first_photos: 'Save the product first to add photos', gallery_pending_hint: 'Added automatically when you save the product', photo_added: 'Photo added ✓', photo_removed: 'Photo removed', driver_suspended_ok: 'Driver suspended', driver_delete_q: 'Delete this driver?',
     retry_in: 'Too many attempts — retry in', offline_route: 'direct line (road route unavailable offline)',
     address_ph: 'Street, area, floor...', guest_order_title: 'Create your account to finish',
     partner_title: 'Become a partner', partner_desc: 'Open your store on YallaLiv: your products, your deliveries, your customers.',
@@ -697,6 +716,12 @@ export const ph = (src, variant) => (typeof src === 'string' && src.startsWith('
 
 export function notif(title, body) {
   try {
+    // 📱 APK : notification locale native (le WebView ne supporte pas le Web Push)
+    const LN = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
+    if (LN) {
+      LN.schedule({ notifications: [{ id: Math.floor(Math.random() * 1e9), title, body, schedule: { at: new Date(Date.now() + 150) } }] }).catch(() => {});
+      return;
+    }
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification(title, { body });
   } catch {}
 }
@@ -717,6 +742,92 @@ export function etaRange(type, dist) {
   const mid = prep + drive + 4;
   return [Math.max(10, Math.round((mid * 0.85) / 5) * 5), Math.round((mid * 1.3) / 5) * 5];
 }
+
+// 🆕 Mises à jour par interface : chaque rôle ne voit que LES SIENNES (bannière « Quoi de neuf »)
+export const UPDATES = {
+  client: [
+    { v: '2026.09.21.6', items: [
+      '🛰️ Bouton GPS : l’adresse de livraison se remplit automatiquement',
+      '⏱️ Délai estimé affiché (cartes, commande, suivi en direct)',
+      '🔑 Code de remise à 4 chiffres à donner au livreur',
+      '🗺️ Suivi de commande avec timeline en temps réel',
+      '⚠️ Erreurs de formulaires expliquées avec exemples',
+    ] },
+  ],
+  merchant: [
+    { v: '2026.09.21.6', items: [
+      '🔔 Alarme forte + écran plein écran à chaque nouvelle commande',
+      '🚫 Annulation possible à tout moment (même en cours de livraison)',
+      '🖼️ Photos produit : « Autres photos » dès l’ajout (maximum 5)',
+      '🛠️ Emoji de préparation universel (valable tous magasins)',
+      '⚠️ Erreurs de formulaires expliquées avec exemples',
+    ] },
+  ],
+  driver: [
+    { v: '2026.09.21.6', items: [
+      '📞💬🧭 Boutons Appeler / WhatsApp / Navigation sur chaque course',
+      '🔑 Code de remise du client obligatoire pour valider la livraison',
+      '↩️ Signalement « colis refusé par le client » avec motif',
+      '🔙 Bouton retour du téléphone : ne quitte plus l’app (APK 3.1.6)',
+      '🔔 Notifications Android natives dans l’app (APK 3.1.6)',
+    ] },
+  ],
+};
+
+export function UpdatesBanner({ role }) {
+  const [seen, setSeen] = useState(() => { try { return localStorage.getItem('yl_upd_' + role) || ''; } catch { return ''; } });
+  const latest = (UPDATES[role] || [])[0];
+  if (!latest || seen === latest.v) return null;
+  const ok = () => { try { localStorage.setItem('yl_upd_' + role, latest.v); } catch {} setSeen(latest.v); };
+  return (
+    <div className="card" style={{ background: '#e0e7ff', border: '1px solid #6366f1', padding: '10px 14px', fontSize: 13, marginBottom: 10 }}>
+      <div style={{ fontWeight: 800, marginBottom: 4 }}>🎉 Nouveautés de cette version</div>
+      <ul style={{ margin: '0 0 8px 16px', padding: 0 }}>
+        {latest.items.map((x, i) => <li key={i} style={{ marginBottom: 3 }}>{x}</li>)}
+      </ul>
+      <button className="btn sm" style={{ background: '#6366f1', color: '#fff' }} onClick={ok}>✓ Vu</button>
+    </div>
+  );
+}
+
+// ⚠️ Erreur sous un champ : texte rouge à l'endroit EXACT de la faute
+export function FieldErr({ e }) {
+  return e ? <div className="small" style={{ color: '#dc2626', fontWeight: 700, marginTop: 3 }}>⚠️ {e}</div> : null;
+}
+
+// Validateurs réutilisables : chaque message indique le champ fautif + un EXEMPLE concret
+export const V = (t) => ({
+  req: (label, ex, min = 1) => (v) => {
+    const s = String(v ?? '').trim();
+    if (!s) return label + ' — ' + t('v_required') + (ex ? ' (' + t('v_example') + ' : ' + ex + ')' : '');
+    if (s.length < min) return label + ' — ' + t('v_too_short');
+    return null;
+  },
+  name: (label, min = 2) => (v) => {
+    const s = String(v ?? '').trim();
+    return !s ? label + ' — ' + t('v_required') : s.length < min ? label + ' — ' + t('v_too_short') : null;
+  },
+  phone: (label) => (v) => {
+    const d = String(v ?? '').replace(/\D/g, '');
+    return d.length < 10 || d.length > 13 ? (label || t('phone')) + ' — ' + t('v_phone_bad') : null;
+  },
+  email: (label) => (v) => {
+    const s = String(v ?? '').trim();
+    if (!s) return (label || t('email')) + ' — ' + t('v_required');
+    return !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s) ? (label || t('email')) + ' — ' + t('v_email_bad') : null;
+  },
+  emailOpt: (label) => (v) => {
+    const s = String(v ?? '').trim();
+    return s && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s) ? (label || t('email')) + ' — ' + t('v_email_bad') : null;
+  },
+  pass: (min = 5) => (v) => (String(v ?? '').length < min ? t('v_pass_short') : null),
+  num: (label, min = 0, ex = '45.50') => (v) => {
+    const n = parseFloat(v);
+    return isNaN(n) || n < min ? label + ' — ' + t('v_price_bad') + ' : ' + ex : null;
+  },
+});
+export const runV = (rules, values) => { const e = {}; for (const k of Object.keys(rules)) { const m = rules[k](values ? values[k] : undefined); if (m) e[k] = m; } return e; };
+export const hasErr = (e) => Object.keys(e || {}).length > 0;
 
 export function beep() {
   try {
@@ -762,6 +873,12 @@ function urlB64ToUint8Array(b64) {
 }
 export async function pushSubscribe() {
   try {
+    // 📱 APK : activer les notifications locales natives (Web Push indisponible en WebView)
+    const LN = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
+    if (LN) {
+      const r = await LN.requestPermissions().catch(() => null);
+      return r && r.display === 'granted' ? 'granted' : 'denied';
+    }
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return 'unsupported';
     const perm = await enableNotifications();
     if (perm !== 'granted') return perm === 'denied' ? 'denied' : 'failed';

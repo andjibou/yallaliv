@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useT, useAuth, useLang, homeFor, toast, api } from '../lib.jsx';
+import { useT, useAuth, useLang, homeFor, toast, api , FieldErr, V, runV, hasErr } from '../lib.jsx';
 import { LangSwitch, Spinner, Modal } from '../ui.jsx';
 
 function Brand({ t, small }) {
@@ -98,12 +98,15 @@ export function Login() {
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
   const [err, setErr] = useState('');
+  const [fErr, setFErr] = useState({});   // ⚠️ erreurs par champ (connexion / oublié)
   const [busy, setBusy] = useState(false);
   const [forgot, setForgot] = useState(null); // {step, email, devCode, busy}
   const [fForm, setFForm] = useState({ email: '', code: '', np: '' });
 
   const sendCode = async () => {
-    if (!fForm.email.includes('@')) return toast('Email invalide', 'err');
+    const emErr = V(t).email()(fForm.email);
+    setFErr({ email: emErr });
+    if (emErr) return;
     setForgot((f) => ({ ...f, busy: true }));
     try {
       const r = await api('/auth/forgot', { method: 'POST', body: { email: fForm.email } });
@@ -113,6 +116,8 @@ export function Login() {
   const doReset = async () => {
     setForgot((f) => ({ ...f, busy: true }));
     try {
+      if (fForm.code.replace(/\D/g, '').length < 6) return toast('Code à 6 chiffres requis (ex. : 123456)', 'err');
+      if (String(fForm.np || '').length < 5) return toast(V(t).pass()(fForm.np), 'err');
       await api('/auth/reset', { method: 'POST', body: { email: forgot.email, code: fForm.code, new_password: fForm.np } });
       toast(t('reset_ok'));
       setForgot(null);
@@ -124,7 +129,12 @@ export function Login() {
 
   const submit = async (e) => {
     e.preventDefault();
-    setErr(''); setBusy(true);
+    setErr('');
+    const v = V(t);
+    const fe = runV({ email: v.req(t('email_or_phone')), pass: v.req(t('password')) }, { email, pass });
+    setFErr(fe);
+    if (hasErr(fe)) return;
+    setBusy(true);
     try {
       const u = await login(email, pass);
       nav(homeFor(u));
@@ -143,10 +153,12 @@ export function Login() {
           <div className="field">
             <label className="label">{t('email_or_phone')}</label>
             <input className="input" type="text" dir="ltr" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="nom@email.com · +20 100 000 0000" />
+            <FieldErr e={fErr.email} />
           </div>
           <div className="field">
             <label className="label">{t('password')}</label>
             <input className="input" type="password" value={pass} onChange={(e) => setPass(e.target.value)} required placeholder="••••••" />
+            <FieldErr e={fErr.pass} />
           </div>
           <button className="btn primary block" disabled={busy || lock.locked}>{busy ? '...' : lock.locked ? '⏳ ' + lock.fmt() : t('btn_login')}</button>
           <div style={{ textAlign: 'center', marginTop: 10 }}>
@@ -184,7 +196,8 @@ export function Login() {
             <p className="muted small">{t('reset_desc')}</p>
             <div className="field">
               <label className="label">{t('email')}</label>
-              <input className="input" type="email" dir="ltr" value={fForm.email} onChange={(e) => setFForm((f) => ({ ...f, email: e.target.value }))} />
+              <input className="input" type="email" dir="ltr" value={fForm.email} onChange={(e) => setFForm((f) => ({ ...f, email: e.target.value }))} placeholder="ex. : nom@gmail.com" />
+              <FieldErr e={fErr.email} />
             </div>
             <RetryBanner lock={lock} t={t} />
             <button className="btn primary block" disabled={forgot.busy || lock.locked || !fForm.email.includes('@')} onClick={sendCode}>{forgot.busy ? '...' : lock.locked ? '⏳ ' + lock.fmt() : '📨 ' + t('send_code')}</button>
@@ -232,6 +245,7 @@ export function Register() {
   const [via, setVia] = useState('email');   // inscription par email ou par téléphone
   const [pass2, setPass2] = useState('');     // confirmation du mot de passe
   const [err, setErr] = useState('');
+  const [rErr, setRErr] = useState({});   // ⚠️ erreurs par champ (inscription)
   const [busy, setBusy] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -246,6 +260,15 @@ export function Register() {
   const submit = async (e) => {
     e?.preventDefault?.();
     setErr('');
+    const v = V(t);
+    const fe = runV({
+      name: v.name(t('name')),
+      ...(via === 'email' ? { email: v.email(t('email')) } : { phone: v.phone(t('phone')) }),
+      password: v.pass(5),
+      pass2: (x) => (x !== form.password ? t('password_mismatch') : null),
+    }, { ...form, pass2 });
+    setRErr(fe);
+    if (hasErr(fe)) return;
     if (form.password !== pass2) return setErr(t('password_mismatch'));   // les 2 saisies doivent correspondre
     setBusy(true);
     try {
@@ -305,7 +328,8 @@ export function Register() {
         <form onSubmit={submit}>
           <div className="field">
             <label className="label">{t('name')}</label>
-            <input className="input" value={form.name} onChange={(e) => set('name', e.target.value)} required />
+            <input className="input" value={form.name} onChange={(e) => set('name', e.target.value)} required placeholder="ex. : Ahmed Ali" />
+            <FieldErr e={rErr.name} />
           </div>
           <div className="row mb12" style={{ gap: 8 }}>
             <button type="button" className={'chip' + (via === 'email' ? ' on' : '')} onClick={() => setVia('email')}>📧 {t('via_email')}</button>
@@ -314,22 +338,26 @@ export function Register() {
           {via === 'email' ? (
             <div className="field">
               <label className="label">{t('email')}</label>
-              <input className="input" type="email" dir="ltr" value={form.email} onChange={(e) => set('email', e.target.value)} required placeholder="nom@email.com" />
+              <input className="input" type="email" dir="ltr" value={form.email} onChange={(e) => set('email', e.target.value)} required placeholder="ex. : nom@gmail.com" />
+              <FieldErr e={rErr.email} />
             </div>
           ) : (
             <div className="field">
               <label className="label">{t('phone')}</label>
-              <input className="input" type="tel" dir="ltr" value={form.phone} onChange={(e) => set('phone', e.target.value)} required placeholder="+20 100 000 0000" />
+              <input className="input" type="tel" dir="ltr" value={form.phone} onChange={(e) => set('phone', e.target.value)} required placeholder="ex. : 0100 123 4567" />
+              <FieldErr e={rErr.phone} />
               <div className="muted small mt4">{t('phone_no_email_note')}</div>
             </div>
           )}
           <div className="field">
             <label className="label">{t('password')}</label>
-            <input className="input" type="password" value={form.password} onChange={(e) => set('password', e.target.value)} required minLength={5} />
+            <input className="input" type="password" value={form.password} onChange={(e) => set('password', e.target.value)} required minLength={5} placeholder="5 caractères minimum" />
+            <FieldErr e={rErr.password} />
           </div>
           <div className="field">
             <label className="label">{t('confirm_password')}</label>
             <input className="input" type="password" value={pass2} onChange={(e) => setPass2(e.target.value)} required minLength={5} />
+            <FieldErr e={rErr.pass2} />
             {pass2 && form.password && pass2 !== form.password && (
               <div className="banner err mt4" style={{ padding: '5px 10px' }}>⚠️ {t('password_mismatch')}</div>
             )}

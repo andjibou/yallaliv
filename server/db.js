@@ -235,6 +235,7 @@ export async function initDb() {
   await run("ALTER TABLE orders ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'").catch(() => {});
   await run('ALTER TABLE orders ADD COLUMN acknowledged INTEGER NOT NULL DEFAULT 0').catch(() => {});
   await run('ALTER TABLE orders ADD COLUMN pin TEXT').catch(() => {});   // 🔑 preuve de remise (P0.4)
+  await run('ALTER TABLE orders ADD COLUMN refuse_reason TEXT').catch(() => {});   // ↩️ motif de refus client
   await run('ALTER TABLE stores ADD COLUMN photo TEXT').catch(() => {});
   await run('ALTER TABLE users ALTER COLUMN email DROP NOT NULL').catch(() => {});   // comptes par telephone (email NULL)
   await run("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_unique ON users (REPLACE(phone, ' ', '')) WHERE phone <> ''")
