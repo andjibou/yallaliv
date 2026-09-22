@@ -1,3 +1,4 @@
+import * as XLSX from 'xlsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, alarm, pushSubscribe, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, processImage, ph as photoUrl } from '../lib.jsx';
@@ -332,6 +333,9 @@ function Products() {
   const [edit, setEdit] = useState(null); // null | {..product} | EMPTY_P
   const [pErr, setPErr] = useState({});   // erreurs par champ produit
   const [pendGal, setPendGal] = useState([]);   // 🖼️ galerie en attente (nouveau produit : envoyée à l'enregistrement)
+  const [xl, setXl] = useState(null);   // 📥 import Excel : {rows, replace, cols, name, price, qty, header}
+  const fileXl = useRef(null);
+  const xlMode = useRef(false);   // false = premier import · true = mise à jour (remplace les produits Excel)
   const [photo, setPhoto] = useState(null); // dataURL en attente d'envoi
   const [busy, setBusy] = useState(false);
   const [galleryBusy, setGalleryBusy] = useState(false);
@@ -391,6 +395,38 @@ function Products() {
     if (add.length) setPendGal((g) => [...g, ...add]);
   };
 
+  // 📥 Lecture du fichier Excel CÔTÉ NAVIGATEUR (le fichier n'est jamais envoyé au serveur)
+  const onXlFile = async (file, replace) => {
+    if (!file) return;
+    try {
+      const wb = XLSX.read(await file.arrayBuffer());
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+      if (!rows.length) return toast('Fichier vide ou illisible', 'err');
+      const cols = Math.max(3, ...rows.map((r) => r.length));
+      setXl({ rows, replace, cols, name: 'A', price: 'B', qty: '', header: true });
+    } catch (ex) { toast('Fichier illisible (xlsx / xls / csv attendu)', 'err'); }
+  };
+  const colIdx = (L) => (L ? L.charCodeAt(0) - 65 : -1);
+  const doImport = async () => {
+    const ni = colIdx(xl.name), pi = colIdx(xl.price), qi = colIdx(xl.qty);
+    if (ni < 0 || pi < 0) return toast('Choisis les colonnes des noms et des prix', 'err');
+    const start = xl.header ? 1 : 0;
+    const out = [];
+    for (let i = start; i < xl.rows.length; i++) {
+      const r = xl.rows[i] || [];
+      out.push({ name: r[ni], price: r[pi], qty: qi >= 0 ? r[qi] : null });
+    }
+    setBusy(true);
+    try {
+      const r = await api('/merchant/products/import', { method: 'POST', body: { rows: out, replace: xl.replace } });
+      toast(`✅ ${r.inserted} produit(s) importé(s)` + (r.deleted ? ` · ${r.deleted} ancien(s) remplacé(s)` : '') + (r.skipped ? ` · ${r.skipped} ligne(s) vide(s) ignorée(s)` : ''));
+      setXl(null);
+      refresh();
+    } catch (ex) { toast(ex.message, 'err'); }
+    setBusy(false);
+  };
+
   const delGallery = async (ph) => {
     try { await api(`/merchant/products/${edit.id}/photos/${ph.id}`, { method: 'DELETE' }); toast(t('photo_removed')); refresh(); }
     catch (ex) { toast(ex.message, 'err'); }
@@ -403,7 +439,7 @@ function Products() {
     if (hasErr(e)) return;
     setBusy(true);
     try {
-      const body = { ...edit, price: parseFloat(edit.price), category: edit.category || 'Général' };
+      const body = { ...edit, price: parseFloat(edit.price), qty: edit.qty === '' || edit.qty == null ? null : parseInt(edit.qty, 10), category: edit.category || 'Général' };
       let saved;
       if (edit.id) saved = (await api('/merchant/products/' + edit.id, { method: 'PUT', body })).product;
       else saved = (await api('/merchant/products', { method: 'POST', body })).product;
@@ -436,7 +472,12 @@ function Products() {
       <StatusBanner store={data.store} />
       <div className="row spread mb12">
         <div className="h2">📦 {t('products')} ({data.products.length})</div>
-        <button className="btn primary sm" onClick={() => { setEdit({ ...EMPTY_P }); setPhoto(null); setPendGal([]); }}>＋ {t('add_product')}</button>
+        <div className="row wrap" style={{ gap: 6 }}>
+          <button className="btn primary sm" onClick={() => { setEdit({ ...EMPTY_P }); setPhoto(null); setPendGal([]); }}>＋ {t('add_product')}</button>
+          <button className="btn blue sm" onClick={() => { xlMode.current = false; fileXl.current?.click(); }}>📥 Excel</button>
+          <button className="btn amber sm" onClick={() => { xlMode.current = true; fileXl.current?.click(); }}>🔄 Mettre à jour (Excel)</button>
+          <input ref={fileXl} type="file" accept=".xlsx,.xls,.csv" hidden onChange={(e) => { onXlFile(e.target.files[0], xlMode.current); e.target.value = ''; }} />
+        </div>
       </div>
       <div className="card">
         {data.products.length === 0 && <Empty e="📦" text={t('no_data')} />}
@@ -446,7 +487,7 @@ function Products() {
               ? <img className="p-photo" src={photoUrl(p.photo, 'thumb')} alt="" loading="lazy" />
               : <NoPhoto w={46} h={46} />}
             <div className="grow">
-              <div style={{ fontWeight: 700 }}>{p.name} {!p.available && <span className="badge st-cancelled">{t('closed')}</span>}</div>
+              <div style={{ fontWeight: 700 }}>{p.name} {p.via_excel ? <span className="badge" style={{ background: '#e0e7ff', color: '#4338ca' }}>📥 Excel</span> : null} {!p.available && <span className="badge st-cancelled">{t('closed')}</span>}</div>
               <div className="muted small">{p.category}</div>
               <div className="small" style={{ color: 'var(--brand-dark)', fontWeight: 800 }}>{fmtMoney(p.price)}</div>
             </div>
@@ -455,6 +496,64 @@ function Products() {
           </div>
         ))}
       </div>
+
+      {/* 📥 Import Excel : choisir les colonnes, aperçu, puis enregistrer (seul le CONTENU est stocké, jamais le fichier) */}
+      <Modal open={!!xl} onClose={() => setXl(null)} title={xl?.replace ? '🔄 Mettre à jour depuis Excel' : '📥 Importer un fichier Excel'}>
+        {xl && (
+          <div style={{ fontSize: 13 }}>
+            {xl.replace && (
+              <div className="banner warn mb12">⚠️ Les produits déjà importés par Excel seront REMPLACÉS par ce fichier. Les produits ajoutés manuellement ne seront PAS touchés.</div>
+            )}
+            <p className="muted small" style={{ marginTop: 0 }}>Indique quelle colonne contient quoi (A = 1ʳᵉ colonne, B = 2ᵉ…) :</p>
+            <div className="row wrap" style={{ gap: 8, marginBottom: 8 }}>
+              <div className="field grow">
+                <label className="label">🏷️ Colonne des noms</label>
+                <select className="select" value={xl.name} onChange={(e) => setXl({ ...xl, name: e.target.value })}>
+                  {Array.from({ length: xl.cols }, (_, i) => String.fromCharCode(65 + i)).map((L) => <option key={L} value={L}>{L}</option>)}
+                </select>
+              </div>
+              <div className="field grow">
+                <label className="label">💰 Colonne des prix</label>
+                <select className="select" value={xl.price} onChange={(e) => setXl({ ...xl, price: e.target.value })}>
+                  {Array.from({ length: xl.cols }, (_, i) => String.fromCharCode(65 + i)).map((L) => <option key={L} value={L}>{L}</option>)}
+                </select>
+              </div>
+              <div className="field grow">
+                <label className="label">📦 Colonne des quantités (optionnel)</label>
+                <select className="select" value={xl.qty} onChange={(e) => setXl({ ...xl, qty: e.target.value })}>
+                  <option value="">—</option>
+                  {Array.from({ length: xl.cols }, (_, i) => String.fromCharCode(65 + i)).map((L) => <option key={L} value={L}>{L}</option>)}
+                </select>
+              </div>
+            </div>
+            <label className="check mb12">
+              <input type="checkbox" checked={xl.header} onChange={(e) => setXl({ ...xl, header: e.target.checked })} />
+              La première ligne contient les titres (à ignorer)
+            </label>
+            <div className="label mb4">👀 Aperçu (5 premières lignes) :</div>
+            <div style={{ overflowX: 'auto', border: '1px solid var(--line)', borderRadius: 10, marginBottom: 10 }}>
+              <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc' }}>
+                    {Array.from({ length: xl.cols }, (_, i) => <th key={i} style={{ padding: '4px 8px', textAlign: 'start', borderBottom: '1px solid var(--line)' }}>{String.fromCharCode(65 + i)}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {xl.rows.slice(0, 5).map((r, i) => (
+                    <tr key={i}>
+                      {Array.from({ length: xl.cols }, (_, j) => <td key={j} style={{ padding: '4px 8px', borderBottom: '1px solid var(--line)' }}>{String(r[j] ?? '').slice(0, 18)}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <button className="btn primary block" disabled={busy} onClick={doImport}>
+              {busy ? '...' : (xl.replace ? '🔄 Remplacer les produits Excel par ces données' : `📥 Importer (${Math.max(0, xl.rows.length - (xl.header ? 1 : 0))} lignes)`)}
+            </button>
+            <p className="muted small" style={{ marginBottom: 0, marginTop: 8 }}>💡 Après l'import, tu peux modifier chaque produit (photos, description…). Les lignes vides sont ignorées automatiquement.</p>
+          </div>
+        )}
+      </Modal>
 
       <Modal open={!!edit} onClose={() => { setEdit(null); setPhoto(null); setPendGal([]); }} title={edit?.id ? t('edit') : t('add_product')}>
         {edit && (
@@ -516,6 +615,10 @@ function Products() {
                 <label className="label">{t('price')}</label>
                 <input className="input" type="number" min="0" step="0.5" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} placeholder="ex. : 45.50" />
                 <FieldErr e={pErr.price} />
+              </div>
+              <div className="field" style={{ width: 130 }}>
+                <label className="label">📦 Quantité</label>
+                <input className="input" type="number" min="0" step="1" value={edit.qty ?? ''} onChange={(e) => setEdit({ ...edit, qty: e.target.value })} placeholder="vide = illimité" />
               </div>
             </div>
             <div className="field">

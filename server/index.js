@@ -638,8 +638,9 @@ app.post('/api/merchant/products', auth, requireRole('merchant'), h(async (req, 
   const { name, category = 'Général', description = '', price, emoji = '📦', available = true } = req.body;
   if (!name || !String(name).trim()) return res.status(400).json({ error: 'Nom du produit requis (ex. : Sandwich falafel)' });
   if (price === undefined || isNaN(parseFloat(price)) || parseFloat(price) < 0) return res.status(400).json({ error: 'Prix invalide (ex. : 45.50)' });
-  const p = await get('INSERT INTO products(store_id,name,category,description,price,emoji,available,created_at) VALUES(?,?,?,?,?,?,?,?) RETURNING *',
-    [store.id, String(name).trim(), String(category), String(description), round2(parseFloat(price)), String(emoji).slice(0, 4), available ? 1 : 0, Date.now()]);
+  const qty = (req.body.qty === '' || req.body.qty == null || isNaN(parseInt(req.body.qty))) ? null : Math.max(0, parseInt(req.body.qty));
+  const p = await get('INSERT INTO products(store_id,name,category,description,price,qty,emoji,available,created_at) VALUES(?,?,?,?,?,?,?,?,?) RETURNING *',
+    [store.id, String(name).trim(), String(category), String(description), round2(parseFloat(price)), qty, String(emoji).slice(0, 4), available ? 1 : 0, Date.now()]);
   res.json({ product: p });
 }));
 
@@ -648,9 +649,12 @@ app.put('/api/merchant/products/:id', auth, requireRole('merchant'), h(async (re
   const p = await get('SELECT * FROM products WHERE id=? AND store_id=?', [req.params.id, store?.id]);
   if (!p) return res.status(404).json({ error: 'Produit introuvable' });
   const { name, category, description, price, emoji, available } = req.body;
-  const out = await get('UPDATE products SET name=?, category=?, description=?, price=?, emoji=?, available=? WHERE id=? RETURNING *',
+  const qty = (req.body.qty === '' || req.body.qty == null || isNaN(parseInt(req.body.qty))) ? null : Math.max(0, parseInt(req.body.qty));
+  const out = await get('UPDATE products SET name=?, category=?, description=?, price=?, qty=?, emoji=?, available=? WHERE id=? RETURNING *',
     [String(name ?? p.name).trim(), String(category ?? p.category), String(description ?? p.description),
-      price !== undefined ? round2(parseFloat(price) || p.price) : p.price, String(emoji ?? p.emoji).slice(0, 4),
+      price !== undefined ? round2(parseFloat(price) || p.price) : p.price,
+      req.body.qty === undefined ? p.qty : qty,
+      String(emoji ?? p.emoji).slice(0, 4),
       available === undefined ? p.available : (available ? 1 : 0), p.id]);
   res.json({ product: out });
 }));
@@ -661,6 +665,42 @@ app.delete('/api/merchant/products/:id', auth, requireRole('merchant'), h(async 
   if (!p) return res.status(404).json({ error: 'Produit introuvable' });
   await run('DELETE FROM products WHERE id=?', [p.id]);
   res.json({ ok: true });
+}));
+
+// 📥 Import produits depuis Excel — le FICHIER n'est jamais stocké : seul le contenu est enregistré.
+// replace=1 : remplace UNIQUEMENT les produits importés par Excel (les produits ajoutés manuellement ne sont PAS touchés).
+app.post('/api/merchant/products/import', auth, requireRole('merchant'), h(async (req, res) => {
+  const store = await get('SELECT * FROM stores WHERE owner_id=?', [req.user.id]);
+  if (!store) return res.status(404).json({ error: 'Aucun magasin' });
+  const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
+  const replace = !!req.body.replace;
+  const clean = [];
+  let skipped = 0;
+  for (const r of rows) {
+    const name = String(r?.name ?? '').trim();
+    const price = parseFloat(String(r?.price ?? '').replace(',', '.'));
+    const q = parseInt(r?.qty, 10);
+    const qty = isNaN(q) ? null : Math.max(0, q);
+    if (!name || isNaN(price) || price < 0) { skipped++; continue; }   // lignes vides / invalides ignorées
+    clean.push([store.id, name, round2(price), qty, Date.now()]);
+  }
+  if (!clean.length) return res.status(400).json({ error: 'Aucune ligne valide (vérifie les colonnes choisies)' });
+  let deleted = 0;
+  if (replace) {
+    const olds = await all('SELECT * FROM products WHERE store_id=? AND via_excel=1', [store.id]);
+    for (const o of olds) {
+      const phs = await all('SELECT photo FROM product_photos WHERE product_id=?', [o.id]);
+      for (const ph of phs) { if (ph.photo?.startsWith('/api/photos/')) { try { await dropPhoto(ph.photo); } catch {} } }
+      await run('DELETE FROM product_photos WHERE product_id=?', [o.id]);
+      if (o.photo?.startsWith('/api/photos/')) { try { await dropPhoto(o.photo); } catch {} }
+    }
+    const d = await run('DELETE FROM products WHERE store_id=? AND via_excel=1', [store.id]);
+    deleted = d.rowCount || 0;
+  }
+  for (const c of clean) {
+    await run('INSERT INTO products(store_id,name,price,qty,via_excel,created_at) VALUES(?,?,?,?,1,?)', c);
+  }
+  res.json({ ok: true, inserted: clean.length, deleted, skipped });
 }));
 
 app.get('/api/merchant/orders', auth, requireRole('merchant'), h(async (req, res) => {

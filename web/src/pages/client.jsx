@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, Outlet, useSearchParams } from 'react-router-dom';
 import TrackMap from '../TrackMap.jsx';
-import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag } from '../lib.jsx';
+import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton } from '../lib.jsx';
 import { BottomNav, CartBar, StatusBadge, PayBadge, Stepper, Empty, Spinner, BackBtn, LangSwitch, Modal, Stars, SuggestBox, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import PickMap, { reverseGeocode } from '../PickMap.jsx';
@@ -130,6 +130,7 @@ export function ClientHome() {
           <div className="brand-name">Yalla<span className="accent">Liv</span></div>
           <div className="muted small ellipsis">{t('home_title')} {user?.name?.split(' ')[0]} 👋</div>
         </div>
+        <BellButton />
         <LangSwitch />
       </div>
 
@@ -188,6 +189,7 @@ export function ClientHome() {
                     ? <img className="prod-photo" src={photoUrl(p.photo, 'thumb')} alt="" loading="lazy" />
                     : <NoPhoto full h={96} radius={10} />}
                   <div className="ellipsis" style={{ fontWeight: 800, marginTop: 6 }}>{p.name}</div>
+                  {p.qty != null && <div className="muted small" style={{ marginTop: 2 }}>📦 {p.qty} dispo.</div>}
                   <div className="row mt4" style={{ gap: 6, alignItems: 'center' }}>
                     {p.store_photo
                       ? <img src={photoUrl(p.store_photo, 'thumb')} alt="" style={{ width: 22, height: 22, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} />
@@ -393,7 +395,7 @@ export function StorePage() {
                   <div className="grow" style={{ cursor: 'pointer' }} onClick={() => openDetail(p)}>
                     <div style={{ fontWeight: 700 }}>{p.name} <span className="muted" style={{ fontWeight: 400 }}>ℹ️</span></div>
                     {p.description && <div className="muted small ellipsis">{p.description}</div>}
-                    <div className="small" style={{ color: 'var(--brand-dark)', fontWeight: 800 }}>{fmtMoney(p.price)}</div>
+                    <div className="small" style={{ color: 'var(--brand-dark)', fontWeight: 800 }}>{fmtMoney(p.price)} {p.qty != null && <span className="muted" style={{ fontWeight: 400 }}>· 📦 {p.qty}</span>}</div>
                   </div>
                   {q > 0 ? (
                     <div className="qty-stepper">

@@ -116,7 +116,7 @@ export async function api(path, opts = {}) {
 // ================= i18n =================
 const DICT = {
   fr: {
-    notif_activate: 'Activer les notifications', later: 'Plus tard',
+    notif_activate: 'Activer les notifications', notif_disable: 'Désactiver les notifications', later: 'Plus tard',
     notif_blocked_hint: 'Notifications bloquées — clique sur l’icône 🔒 / ⓘ près de l’adresse dans ton navigateur, puis Autoriser les notifications.',
     notif_nag_client: 'Reçois une alerte à chaque étape de ta commande : acceptée, en préparation, en route, livrée !',
     notif_nag_merchant: 'Ne rate JAMAIS une commande : alerte sonore + notification même onglet fermé.',
@@ -249,7 +249,7 @@ const DICT = {
     login_profile_cta: 'Connectez-vous à votre compte'
   },
   ar: {
-    notif_activate: 'تفعيل الإشعارات', later: 'لاحقاً',
+    notif_activate: 'تفعيل الإشعارات', notif_disable: 'إيقاف الإشعارات', later: 'لاحقاً',
     notif_blocked_hint: 'الإشعارات محظورة — اضغط على أيقونة 🔒 / ⓘ بجانب العنوان في المتصفح ثم اسمح بالإشعارات.',
     notif_nag_client: 'تلقَّ تنبيهاً عند كل خطوة لطلبك: تم القبول، قيد التحضير، في الطريق، تم التوصيل!',
     notif_nag_merchant: 'لا تفوّت أي طلب أبداً: تنبيه صوتي + إشعار حتى مع إغلاق التبويب.',
@@ -382,7 +382,7 @@ const DICT = {
     login_profile_cta: 'سجّل الدخول إلى حسابك'
   },
   en: {
-    notif_activate: 'Enable notifications', later: 'Later',
+    notif_activate: 'Enable notifications', notif_disable: 'Disable notifications', later: 'Later',
     notif_blocked_hint: 'Notifications blocked — tap the 🔒 / ⓘ icon near the address bar, then Allow notifications.',
     notif_nag_client: 'Get an alert at every step of your order: accepted, preparing, on the way, delivered!',
     notif_nag_merchant: 'Never miss an order: sound alert + notification even with the tab closed.',
@@ -575,7 +575,7 @@ export function AuthProvider({ children }) {
     setUser(d.user);
     return d.user;
   };
-  const logout = () => { localStorage.removeItem('yl_token'); setUser(null); };
+  const logout = () => { try { if (user) localStorage.removeItem('yl_last_path_' + user.id); } catch {} localStorage.removeItem('yl_token'); setUser(null); };
   return <AuthCtx.Provider value={{ user, setUser, ready, login, register, logout }}>{children}</AuthCtx.Provider>;
 }
 export const useAuth = () => useContext(AuthCtx);
@@ -799,28 +799,59 @@ export function initNativePush() {
     if (!PN || initNativePush._done) return;
     initNativePush._done = true;
     PN.addListener('registration', (t) => {
+      try { localStorage.setItem('yl_fcm_token', t.value); } catch {}
       try { api('/push/subscribe', { method: 'POST', body: { fcm_token: t.value } }); } catch {}
     });
     PN.addListener('pushNotificationReceived', (n) => notif(n.title || 'YallaLiv', n.body || ''));
     PN.addListener('registrationError', () => {});
-    PN.checkPermissions().then((p) => { if (p.receive === 'granted') { try { PN.register(); } catch {} } }).catch(() => {});
+    // ne PAS réactiver tout seul si l'utilisateur a désactivé les notifications (bouton cloche)
+    let optedOut = false;
+    try { optedOut = localStorage.getItem('yl_notif_off') === '1'; } catch {}
+    if (!optedOut) PN.checkPermissions().then((p) => { if (p.receive === 'granted') { try { PN.register(); } catch {} } }).catch(() => {});
   } catch {}
 }
+
+// les notifications sont-elles désactivées VOLONTAIREMENT (bouton cloche) ?
+export const notifOptedOut = () => { try { return localStorage.getItem('yl_notif_off') === '1'; } catch { return false; } };
 
 // 🔔 Cloche avec marqueur rouge tant que les notifications ne sont PAS activées
 export function BellButton() {
   const t = useT();
   const [st, setSt] = useState('checking');
   useEffect(() => { notifStatus().then(setSt); }, []);
+  // 🔔 BOUTON TOGGLE : activé -> clic = DÉSACTIVER · désactivé/bloqué -> clic = ACTIVER
   const bell = async () => {
-    const r = await pushSubscribe();
-    toast(r === 'granted' ? t('push_on') : r === 'denied' ? t('notif_off') : t('push_fail'), r === 'granted' ? 'ok' : 'err');
+    const off = st !== 'granted' || notifOptedOut();
+    if (!off) {
+      // ---- désactiver ----
+      try { localStorage.setItem('yl_notif_off', '1'); } catch {}
+      const PN = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.PushNotifications;
+      if (PN) {
+        try {
+          const tk = (localStorage.getItem('yl_fcm_token') || '');
+          if (tk) await api('/push/unsubscribe', { method: 'POST', body: { endpoint: 'fcm:' + tk } });
+        } catch {}
+        try { await PN.unregister(); } catch {}
+      } else {
+        try {
+          const reg = await navigator.serviceWorker?.getRegistration();
+          const sub = await reg?.pushManager?.getSubscription();
+          if (sub) { await api('/push/unsubscribe', { method: 'POST', body: { endpoint: sub.endpoint } }); await sub.unsubscribe(); }
+        } catch {}
+      }
+      toast(t('notif_off'), 'ok');
+    } else {
+      // ---- activer ----
+      try { localStorage.removeItem('yl_notif_off'); } catch {}
+      const r = await pushSubscribe();
+      toast(r === 'granted' ? t('push_on') : r === 'denied' ? t('notif_off') : t('push_fail'), r === 'granted' ? 'ok' : 'err');
+    }
     notifStatus().then(setSt);
   };
-  const off = st === 'denied' || st === 'prompt';
+  const off = st !== 'granted' || notifOptedOut();
   return (
-    <button className="icon-btn" onClick={bell} title={off ? t('notif_enable') : t('push_on')} style={{ position: 'relative' }}>
-      🔔
+    <button className="icon-btn" onClick={bell} title={off ? t('notif_enable') : t('notif_disable')} style={{ position: 'relative' }}>
+      {off ? '🔕' : '🔔'}
       {off && <span style={{ position: 'absolute', top: -2, insetInlineEnd: -2, width: 10, height: 10, borderRadius: 99, background: '#dc2626', border: '2px solid #fff' }}></span>}
     </button>
   );
@@ -842,6 +873,7 @@ export function NotifNag({ role }) {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
   if (st !== 'prompt' && st !== 'denied') return null;
+  if (st === 'prompt' && notifOptedOut()) return null;   // l'utilisateur a choisi de les couper : on ne harcèle pas
   if (hidden) return null;
   const later = () => { try { localStorage.setItem('yl_notif_nag_' + role, String(Date.now())); } catch {} setHidden(true); };
   return (

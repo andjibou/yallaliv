@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { LangProvider, SettingsProvider, AuthProvider, CartProvider, useAuth, homeFor, Toasts , initNativePush } from './lib.jsx';
 import { ErrorBoundary } from './ui.jsx';
 import { SwapModal, Spinner } from './ui.jsx';
@@ -18,10 +18,35 @@ function Require({ roles, children }) {
   return children;
 }
 
+// 🔁 Mémorise le dernier écran visité (par compte) : réouvrir l'app y revient directement
+function LastPathSaver() {
+  const { user } = useAuth();
+  const loc = useLocation();
+  useEffect(() => {
+    if (!user) return;
+    if (!loc.pathname.startsWith('/login') && !loc.pathname.startsWith('/register')) {
+      try { localStorage.setItem('yl_last_path_' + user.id, loc.pathname + loc.search); } catch {}
+    }
+  }, [user?.id, loc.pathname, loc.search]);
+  return null;
+}
+
 function Root() {
   const { user, ready } = useAuth();
   if (!ready) return <div className="center-screen"><Spinner /></div>;
-  return <Navigate to={user ? homeFor(user) : '/app'} />;   // visiteur -> espace client direct (sans compte)
+  if (!user) return <Navigate to="/app" />;   // visiteur -> espace client direct (sans compte)
+  // L'utilisateur rouvre l'app (tuée depuis les récents) : retour LÀ OÙ IL ÉTAIT
+  let last = null;
+  try { last = localStorage.getItem('yl_last_path_' + user.id); } catch {}
+  if (last) {
+    const ok =
+      (last.startsWith('/driver') && user.role === 'driver') ||
+      (last.startsWith('/merchant') && user.role === 'merchant') ||
+      (last.startsWith('/admin') && user.role === 'superadmin') ||
+      (last.startsWith('/app') && ['client', 'merchant', 'superadmin'].includes(user.role));
+    if (ok) return <Navigate to={last} />;
+  }
+  return <Navigate to={homeFor(user)} />;
 }
 
 // Espace client ouvert aux INVITÉS (navigation, magasins, panier — compte créé à la commande)
@@ -42,11 +67,12 @@ export default function App() {
         <AuthProvider>
           <CartProvider>
             <BrowserRouter>
+              <LastPathSaver />
               <Toasts />
               <SwapModal />
               {/* Version du front — sert à VÉRIFIER que l'app charge bien la dernière version
                   (badge discret en bas à droite de chaque écran). À incrémenter à chaque déploiement. */}
-              <div style={{ position: 'fixed', bottom: 3, right: 8, fontSize: 10, opacity: 0.45, zIndex: 9999, pointerEvents: 'none' }}>YallaLiv v2026.09.22.1</div>
+              <div style={{ position: 'fixed', bottom: 3, right: 8, fontSize: 10, opacity: 0.45, zIndex: 9999, pointerEvents: 'none' }}>YallaLiv v2026.09.22.3</div>
               <Routes>
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />

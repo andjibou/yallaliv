@@ -236,6 +236,8 @@ export async function initDb() {
   await run('ALTER TABLE orders ADD COLUMN acknowledged INTEGER NOT NULL DEFAULT 0').catch(() => {});
   await run('ALTER TABLE orders ADD COLUMN pin TEXT').catch(() => {});   // 🔑 preuve de remise (P0.4)
   await run('ALTER TABLE orders ADD COLUMN refuse_reason TEXT').catch(() => {});   // ↩️ motif de refus client
+  await run('ALTER TABLE products ADD COLUMN qty INTEGER').catch(() => {});              // 📦 quantité visible par le client (NULL = illimité)
+  await run('ALTER TABLE products ADD COLUMN via_excel INTEGER NOT NULL DEFAULT 0').catch(() => {});   // 📥 importé par Excel (remplaçable par un nouvel import)
   await run("ALTER TABLE push_subscriptions ADD COLUMN kind TEXT NOT NULL DEFAULT 'web'").catch(() => {});   // 🔔 'web' (VAPID) ou 'fcm' (APK)
   await run('ALTER TABLE push_subscriptions ADD COLUMN fcm_token TEXT').catch(() => {});
   await run('ALTER TABLE stores ADD COLUMN photo TEXT').catch(() => {});
