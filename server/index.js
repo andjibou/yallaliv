@@ -157,19 +157,26 @@ app.get(/^\/api\/photos\/(\d+)(?:\/(thumb|full))?$/, h(async (req, res) => {
 }));
 
 // ---------- Push (VAPID) ----------
-let VAPID = null;
-async function initVapid() {
-  let pub = await getSetting('vapid_public', '');
-  let priv = await getSetting('vapid_private', '');
-  if (!pub || !priv) {
-    const keys = webpush.generateVAPIDKeys();
-    pub = keys.publicKey; priv = keys.privateKey;
-    await setSetting('vapid_public', pub);
-    await setSetting('vapid_private', priv);
-    console.log('🔐 Clés VAPID générées (push notifications)');
+let VAPID = null, VAPID_INIT = null;
+// 🛡️ Idempotent + retentable : les requêtes « froides » attendent ici au lieu de crasher
+// (race condition : instance Vercel fraîche + base Neon endormie -> VAPID pas encore prêt)
+function initVapid() {
+  if (!VAPID_INIT) {
+    VAPID_INIT = (async () => {
+      let pub = await getSetting('vapid_public', '');
+      let priv = await getSetting('vapid_private', '');
+      if (!pub || !priv) {
+        const keys = webpush.generateVAPIDKeys();
+        pub = keys.publicKey; priv = keys.privateKey;
+        await setSetting('vapid_public', pub);
+        await setSetting('vapid_private', priv);
+        console.log('🔐 Clés VAPID générées (push notifications)');
+      }
+      VAPID = { subject: 'mailto:admin@yallaliv.com', publicKey: pub, privateKey: priv };
+      webpush.setVapidDetails(VAPID.subject, VAPID.publicKey, VAPID.privateKey);
+    })().catch((e) => { console.error('VAPID init:', (e && e.message) || e); VAPID_INIT = null; });
   }
-  VAPID = { subject: 'mailto:admin@yallaliv.com', publicKey: pub, privateKey: priv };
-  webpush.setVapidDetails(VAPID.subject, VAPID.publicKey, VAPID.privateKey);
+  return VAPID_INIT;
 }
 // ---------- 🔔 FCM : notifications Android reçues même app fermée (comme WhatsApp) ----------
 let FCM_AT = null, FCM_AT_EXP = 0;
@@ -214,6 +221,7 @@ function pushTo(userIds, title, body, url = '/') {
   (async () => {
     const ids = [...new Set((userIds || []).filter(Boolean))];
     if (!ids.length) return;
+    if (!VAPID) { await initVapid(); if (!VAPID) return; }   // 🛡️ pas encore prêt -> FCM passe, web push attend le prochain envoi
     const subs = await all(`SELECT * FROM push_subscriptions WHERE user_id IN (${ids.map(() => '?').join(',')})`, ids);
     for (const s of subs) {
       if (s.endpoint && s.endpoint.startsWith('fcm:')) {
@@ -422,7 +430,8 @@ app.get('/api/auth/me', auth, h(async (req, res) => {
 
 // ---------- PUBLIC ----------
 app.get('/api/settings/public', h(async (req, res) => {
-  res.json({ app_name: await getSetting('app_name', 'YallaLiv'), currency: await getSetting('currency', 'EGP'), vapid_public: VAPID.publicKey });
+  if (!VAPID) await initVapid();   // 🛡️ attend l'initialisation (instance froide)
+  res.json({ app_name: await getSetting('app_name', 'YallaLiv'), currency: await getSetting('currency', 'EGP'), vapid_public: VAPID ? VAPID.publicKey : null });
 }));
 
 app.post('/api/push/subscribe', auth, h(async (req, res) => {

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { LangProvider, SettingsProvider, AuthProvider, CartProvider, useAuth, homeFor, Toasts , initNativePush } from './lib.jsx';
 import { ErrorBoundary } from './ui.jsx';
