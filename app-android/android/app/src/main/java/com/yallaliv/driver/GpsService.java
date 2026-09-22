@@ -40,7 +40,7 @@ public class GpsService extends Service {
 
     static final String CH_ID = "yallaliv_gps";
     static final String PREFS = "yallaliv_gps_prefs";
-    static final String VERSION = "3.1.6";
+    static final String VERSION = "3.1.8";
     private PowerManager.WakeLock wl;
     private android.view.View overlayAnchor; // ancre invisible : empêche les ROM agressives (MIUI, ColorOS…) de tuer l'app au glisser
 

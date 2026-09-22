@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, NavLink, useLocation } from 'react-router-dom';
-import { useT, useLang, useCart, fmtMoney } from './lib.jsx';
+import { useT, useLang, useCart, fmtMoney , useBackClose } from './lib.jsx';
 
 /** Placeholder neutre pour un produit sans photo (aucun emoji). */
 export function NoPhoto({ w = 46, h = 46, radius = 12, full = false, style }) {
@@ -78,6 +78,8 @@ export class ErrorBoundary extends React.Component {
 }
 
 export function Modal({ open, onClose, title, children }) {
+  // ← bouton retour (téléphone/navigateur) : ferme la fenêtre au lieu de quitter la page
+  useBackClose(open, onClose);
   if (!open) return null;
   return (
     <div className="modal-backdrop" onClick={onClose}>

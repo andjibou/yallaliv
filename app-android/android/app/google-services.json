@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "919361663362",
+    "project_id": "yallaliv-44bef",
+    "storage_bucket": "yallaliv-44bef.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:919361663362:android:54a6931573c4b9e43cdf9b",
+        "android_client_info": {
+          "package_name": "com.yallaliv.driver"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBPCRhzpbi0fKMDpr6v1JwcA_9Ue3pLIJo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

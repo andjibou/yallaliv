@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, Outlet, useSearchParams } from 'react-router-dom';
 import TrackMap from '../TrackMap.jsx';
-import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner } from '../lib.jsx';
+import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag } from '../lib.jsx';
 import { BottomNav, CartBar, StatusBadge, PayBadge, Stepper, Empty, Spinner, BackBtn, LangSwitch, Modal, Stars, SuggestBox, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import PickMap, { reverseGeocode } from '../PickMap.jsx';
@@ -14,6 +14,7 @@ export function ClientLayout() {
   return (
     <div className="app-client">
       <UpdatesBanner role="client" />
+      <NotifNag role="client" />
       <Outlet />
       <CartBar />
       <BottomNav />
@@ -38,13 +39,30 @@ export function ClientHome() {
   const [gQty, setGQty] = useState(1);
   const [gBig, setGBig] = useState(null);
 
+  const prevVT = useRef(view + '|' + type);
   useEffect(() => {
     const next = new URLSearchParams();
     if (view !== 'stores') next.set('v', view);
     if (type !== 'all') next.set('t', type);
     if (q.trim()) next.set('q', q.trim());
-    if (sp.toString() !== next.toString()) setSp(next, { replace: true });
+    if (sp.toString() !== next.toString()) {
+      // changer de VUE ou de filtre = vraie navigation (le retour y revient) · la recherche tape = remplacement
+      const isNav = prevVT.current !== view + '|' + type;
+      prevVT.current = view + '|' + type;
+      setSp(next, { replace: !isNav });
+    }
   }, [view, type, q]);
+  // ← bouton retour : l'URL rechange → re-synchroniser la vue affichée
+  useEffect(() => {
+    const sync = () => {
+      const v = sp.get('v');
+      setView(v === 'map' || v === 'products' ? v : 'stores');
+      setType(sp.get('t') || 'all');
+      setQ(sp.get('q') || '');
+    };
+    window.addEventListener('popstate', sync);
+    return () => window.removeEventListener('popstate', sync);
+  }, [sp]);
 
   // Ouvre la FICHE PRODUIT (pas le magasin) : charge le produit complet + sa boutique
   const openProduct = async (p) => {

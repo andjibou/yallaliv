@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, alarm, pushSubscribe, FieldErr, V, runV, hasErr, UpdatesBanner, processImage, ph as photoUrl } from '../lib.jsx';
+import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, alarm, pushSubscribe, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, processImage, ph as photoUrl } from '../lib.jsx';
 import { StatusBadge, PayBadge, Empty, Spinner, Modal, LangSwitch, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import { BarsChart, compactMoney } from '../Chart.jsx';
@@ -23,6 +23,7 @@ export default function MerchantApp() {
     <div className="shell">
       <Top onAccount={() => setAcct(true)} />
       <UpdatesBanner role="merchant" />
+      <NotifNag role="merchant" />
       <div className="tabs">
         {tabs.map((x) => (
           <button key={x.id} className={'tab' + (tab === x.id ? ' on' : '')} onClick={() => setTab(x.id)}>{x.label}</button>
@@ -46,10 +47,6 @@ function Top({ onAccount }) {
   const t = useT();
   const nav = useNavigate();
   const { user, logout } = useAuth();
-  const bell = async () => {
-    const r = await pushSubscribe();
-    toast(r === 'granted' ? t('push_on') : r === 'denied' ? t('notif_off') : t('push_fail'), r === 'granted' ? 'ok' : 'err');
-  };
   return (
     <div className="topbar">
       <div className="logo">🏪</div>
@@ -59,7 +56,7 @@ function Top({ onAccount }) {
       </div>
       <LangSwitch />
       <button className="icon-btn" onClick={() => nav('/app')} title={t('switch_client')}>🛍️</button>
-      <button className="icon-btn" onClick={bell} title={t('notif_enable')}>🔔</button>
+      <BellButton />
       <button className="icon-btn" onClick={onAccount} title={t('account_settings')}>👤</button>
       <button className="icon-btn" onClick={logout} title={t('logout')}>🚪</button>
     </div>

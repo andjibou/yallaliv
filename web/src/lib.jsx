@@ -116,6 +116,11 @@ export async function api(path, opts = {}) {
 // ================= i18n =================
 const DICT = {
   fr: {
+    notif_activate: 'Activer les notifications', later: 'Plus tard',
+    notif_blocked_hint: 'Notifications bloquées — clique sur l’icône 🔒 / ⓘ près de l’adresse dans ton navigateur, puis Autoriser les notifications.',
+    notif_nag_client: 'Reçois une alerte à chaque étape de ta commande : acceptée, en préparation, en route, livrée !',
+    notif_nag_merchant: 'Ne rate JAMAIS une commande : alerte sonore + notification même onglet fermé.',
+    notif_nag_driver: 'Reçois les nouvelles courses et assignations instantanément, même app en arrière-plan.',
     v_required: 'obligatoire', v_too_short: 'trop court', v_example: 'exemple',
     v_phone_bad: 'numéro invalide — exemple : 0100 123 4567',
     v_email_bad: 'email invalide — exemple : nom@gmail.com',
@@ -244,6 +249,11 @@ const DICT = {
     login_profile_cta: 'Connectez-vous à votre compte'
   },
   ar: {
+    notif_activate: 'تفعيل الإشعارات', later: 'لاحقاً',
+    notif_blocked_hint: 'الإشعارات محظورة — اضغط على أيقونة 🔒 / ⓘ بجانب العنوان في المتصفح ثم اسمح بالإشعارات.',
+    notif_nag_client: 'تلقَّ تنبيهاً عند كل خطوة لطلبك: تم القبول، قيد التحضير، في الطريق، تم التوصيل!',
+    notif_nag_merchant: 'لا تفوّت أي طلب أبداً: تنبيه صوتي + إشعار حتى مع إغلاق التبويب.',
+    notif_nag_driver: 'استلم الطلبات الجديدة والإسنادات فوراً، حتى والتطبيق في الخلفية.',
     v_required: 'مطلوب', v_too_short: 'قصير جداً', v_example: 'مثال',
     v_phone_bad: 'رقم غير صالح — مثال: 0100 123 4567',
     v_email_bad: 'بريد غير صالح — مثال: nom@gmail.com',
@@ -372,6 +382,11 @@ const DICT = {
     login_profile_cta: 'سجّل الدخول إلى حسابك'
   },
   en: {
+    notif_activate: 'Enable notifications', later: 'Later',
+    notif_blocked_hint: 'Notifications blocked — tap the 🔒 / ⓘ icon near the address bar, then Allow notifications.',
+    notif_nag_client: 'Get an alert at every step of your order: accepted, preparing, on the way, delivered!',
+    notif_nag_merchant: 'Never miss an order: sound alert + notification even with the tab closed.',
+    notif_nag_driver: 'Get new rides and assignments instantly, even with the app in background.',
     v_required: 'required', v_too_short: 'too short', v_example: 'example',
     v_phone_bad: 'invalid number — example: 0100 123 4567',
     v_email_bad: 'invalid email — example: nom@gmail.com',
@@ -743,10 +758,121 @@ export function etaRange(type, dist) {
   return [Math.max(10, Math.round((mid * 0.85) / 5) * 5), Math.round((mid * 1.3) / 5) * 5];
 }
 
+// ← Bouton retour (téléphone / navigateur) : toute fenêtre ouverte DANS une page devient
+// une vraie étape d'historique — le retour la FERME au lieu de quitter la page.
+export function useBackClose(open, close) {
+  useEffect(() => {
+    if (!open) return;
+    let closedByPop = false;
+    try { window.history.pushState({ ylOverlay: Date.now() }, ''); } catch { return; }
+    const onPop = () => { closedByPop = true; close?.(); };
+    window.addEventListener('popstate', onPop);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      try { if (!closedByPop && window.history.state && window.history.state.ylOverlay) window.history.back(); } catch {}
+    };
+  }, [open]);
+}
+
+// 🔔 État des notifications (APK : natives · navigateur : Web Push)
+export async function notifStatus() {
+  try {
+    const PN = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.PushNotifications;
+    if (PN) {
+      const r = await PN.checkPermissions();
+      return r.receive === 'granted' ? 'granted' : r.receive === 'denied' ? 'denied' : 'prompt';
+    }
+    const LN = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
+    if (LN) {
+      const r = await LN.checkPermissions();
+      return r.display === 'granted' ? 'granted' : r.display === 'denied' ? 'denied' : 'prompt';
+    }
+    if (typeof Notification === 'undefined') return 'unsupported';
+    return Notification.permission;
+  } catch { return 'unsupported'; }
+}
+
+// 🔔 FCM (APK) : branche les événements UNE fois + ré-enregistre le token à chaque démarrage
+export function initNativePush() {
+  try {
+    const PN = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.PushNotifications;
+    if (!PN || initNativePush._done) return;
+    initNativePush._done = true;
+    PN.addListener('registration', (t) => {
+      try { api('/push/subscribe', { method: 'POST', body: { fcm_token: t.value } }); } catch {}
+    });
+    PN.addListener('pushNotificationReceived', (n) => notif(n.title || 'YallaLiv', n.body || ''));
+    PN.addListener('registrationError', () => {});
+    PN.checkPermissions().then((p) => { if (p.receive === 'granted') { try { PN.register(); } catch {} } }).catch(() => {});
+  } catch {}
+}
+
+// 🔔 Cloche avec marqueur rouge tant que les notifications ne sont PAS activées
+export function BellButton() {
+  const t = useT();
+  const [st, setSt] = useState('checking');
+  useEffect(() => { notifStatus().then(setSt); }, []);
+  const bell = async () => {
+    const r = await pushSubscribe();
+    toast(r === 'granted' ? t('push_on') : r === 'denied' ? t('notif_off') : t('push_fail'), r === 'granted' ? 'ok' : 'err');
+    notifStatus().then(setSt);
+  };
+  const off = st === 'denied' || st === 'prompt';
+  return (
+    <button className="icon-btn" onClick={bell} title={off ? t('notif_enable') : t('push_on')} style={{ position: 'relative' }}>
+      🔔
+      {off && <span style={{ position: 'absolute', top: -2, insetInlineEnd: -2, width: 10, height: 10, borderRadius: 99, background: '#dc2626', border: '2px solid #fff' }}></span>}
+    </button>
+  );
+}
+
+// 🔔 Rappel à chaque ouverture tant que les notifications ne sont pas activées (tous rôles)
+export function NotifNag({ role }) {
+  const t = useT();
+  const [st, setSt] = useState('checking');
+  const [hidden, setHidden] = useState(true);
+  const show = () => {
+    try { const last = +localStorage.getItem('yl_notif_nag_' + role) || 0; setHidden(Date.now() - last < 30 * 60 * 1000); } catch { setHidden(false); }
+  };
+  useEffect(() => {
+    notifStatus().then(setSt);
+    show();
+    const onVis = () => { if (document.visibilityState === 'visible') { notifStatus().then(setSt); show(); } };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+  if (st !== 'prompt' && st !== 'denied') return null;
+  if (hidden) return null;
+  const later = () => { try { localStorage.setItem('yl_notif_nag_' + role, String(Date.now())); } catch {} setHidden(true); };
+  return (
+    <div className="card" style={{ background: '#fffbeb', border: '1px solid #f59e0b', padding: '10px 14px', fontSize: 13, marginBottom: 10 }}>
+      <div style={{ fontWeight: 800, marginBottom: 2 }}>🔔 {t('notif_enable')}</div>
+      <div className="muted small" style={{ marginBottom: 8 }}>
+        {st === 'denied'
+          ? t('notif_blocked_hint')
+          : role === 'merchant' ? t('notif_nag_merchant') : role === 'driver' ? t('notif_nag_driver') : t('notif_nag_client')}
+      </div>
+      <div className="row" style={{ gap: 8 }}>
+        {st === 'prompt' && (
+          <button className="btn primary sm" onClick={async () => {
+            const r = await pushSubscribe();
+            toast(r === 'granted' ? t('push_on') : r === 'denied' ? t('notif_off') : t('push_fail'), r === 'granted' ? 'ok' : 'err');
+            notifStatus().then(setSt);
+            if (r === 'granted') later();
+          }}>🔔 {t('notif_activate')}</button>
+        )}
+        <button className="btn ghost sm" onClick={later}>{t('later')}</button>
+      </div>
+    </div>
+  );
+}
+
 // 🆕 Mises à jour par interface : chaque rôle ne voit que LES SIENNES (bannière « Quoi de neuf »)
 export const UPDATES = {
   client: [
-    { v: '2026.09.21.6', items: [
+    { v: '2026.09.21.7', items: [
+      '← Le bouton retour ferme les fenêtres ouvertes (fiches, chat…)',
+      '🔔 Rappel d’activation des notifications jusqu’à ce que tu les actives',
       '🛰️ Bouton GPS : l’adresse de livraison se remplit automatiquement',
       '⏱️ Délai estimé affiché (cartes, commande, suivi en direct)',
       '🔑 Code de remise à 4 chiffres à donner au livreur',
@@ -755,7 +881,9 @@ export const UPDATES = {
     ] },
   ],
   merchant: [
-    { v: '2026.09.21.6', items: [
+    { v: '2026.09.21.7', items: [
+      '← Le bouton retour ferme les fenêtres ouvertes (fiches, chat…)',
+      '🔔 Rappel d’activation des notifications + marqueur rouge sur la cloche',
       '🔔 Alarme forte + écran plein écran à chaque nouvelle commande',
       '🚫 Annulation possible à tout moment (même en cours de livraison)',
       '🖼️ Photos produit : « Autres photos » dès l’ajout (maximum 5)',
@@ -764,7 +892,9 @@ export const UPDATES = {
     ] },
   ],
   driver: [
-    { v: '2026.09.21.6', items: [
+    { v: '2026.09.21.7', items: [
+      '🔙 Le retour ferme les fenêtres et l’app rouvre exactement où tu l’as laissée',
+      '🔔 Rappel d’activation des notifications + marqueur rouge sur la cloche',
       '📞💬🧭 Boutons Appeler / WhatsApp / Navigation sur chaque course',
       '🔑 Code de remise du client obligatoire pour valider la livraison',
       '↩️ Signalement « colis refusé par le client » avec motif',
@@ -873,11 +1003,16 @@ function urlB64ToUint8Array(b64) {
 }
 export async function pushSubscribe() {
   try {
-    // 📱 APK : activer les notifications locales natives (Web Push indisponible en WebView)
-    const LN = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
-    if (LN) {
-      const r = await LN.requestPermissions().catch(() => null);
-      return r && r.display === 'granted' ? 'granted' : 'denied';
+    // 📱 APK : FCM (notifications reçues même app fermée, comme WhatsApp)
+    const PN = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.PushNotifications;
+    if (PN) {
+      try {
+        let p = await PN.checkPermissions();
+        if (p.receive === 'prompt') p = await PN.requestPermissions();
+        if (p.receive !== 'granted') return 'denied';
+        PN.register(); // le token arrive via initNativePush -> envoyé au serveur
+        return 'granted';
+      } catch { return 'failed'; }
     }
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return 'unsupported';
     const perm = await enableNotifications();

@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { LangProvider, SettingsProvider, AuthProvider, CartProvider, useAuth, homeFor, Toasts } from './lib.jsx';
+import { LangProvider, SettingsProvider, AuthProvider, CartProvider, useAuth, homeFor, Toasts , initNativePush } from './lib.jsx';
 import { ErrorBoundary } from './ui.jsx';
 import { SwapModal, Spinner } from './ui.jsx';
 import { Login, Register } from './pages/auth.jsx';
@@ -34,6 +34,7 @@ function ClientGate() {
 }
 
 export default function App() {
+  useEffect(() => { initNativePush(); }, []);   // 🔔 FCM : ré-enregistre le token à chaque démarrage de l'app
   return (
     <ErrorBoundary>
     <LangProvider>
@@ -45,7 +46,7 @@ export default function App() {
               <SwapModal />
               {/* Version du front — sert à VÉRIFIER que l'app charge bien la dernière version
                   (badge discret en bas à droite de chaque écran). À incrémenter à chaque déploiement. */}
-              <div style={{ position: 'fixed', bottom: 3, right: 8, fontSize: 10, opacity: 0.45, zIndex: 9999, pointerEvents: 'none' }}>YallaLiv v2026.09.21.6</div>
+              <div style={{ position: 'fixed', bottom: 3, right: 8, fontSize: 10, opacity: 0.45, zIndex: 9999, pointerEvents: 'none' }}>YallaLiv v2026.09.22.1</div>
               <Routes>
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />

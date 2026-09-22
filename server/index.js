@@ -171,12 +171,58 @@ async function initVapid() {
   VAPID = { subject: 'mailto:admin@yallaliv.com', publicKey: pub, privateKey: priv };
   webpush.setVapidDetails(VAPID.subject, VAPID.publicKey, VAPID.privateKey);
 }
+// ---------- 🔔 FCM : notifications Android reçues même app fermée (comme WhatsApp) ----------
+let FCM_AT = null, FCM_AT_EXP = 0;
+async function fcmAccessToken() {
+  if (FCM_AT && Date.now() < FCM_AT_EXP) return FCM_AT;
+  const pid = process.env.FIREBASE_PROJECT_ID, email = process.env.FIREBASE_CLIENT_EMAIL;
+  let key = process.env.FIREBASE_PRIVATE_KEY || '';
+  if (!pid || !email || !key) return null;   // pas configuré -> silencieux (web push seul)
+  key = key.replace(/\\n/g, '\n');
+  const now = Math.floor(Date.now() / 1000);
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const head = b64({ alg: 'RS256', typ: 'JWT' });
+  const payload = b64({ iss: email, scope: 'https://www.googleapis.com/auth/firebase.messaging', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 });
+  const signer = crypto.createSign('RSA-SHA256');
+  signer.update(head + '.' + payload);
+  const jwt = head + '.' + payload + '.' + signer.sign(key, 'base64url');
+  const r = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: jwt })
+  });
+  const d = await r.json();
+  if (!d.access_token) throw new Error('FCM token KO');
+  FCM_AT = d.access_token;
+  FCM_AT_EXP = Date.now() + ((d.expires_in || 3600) - 120) * 1000;
+  return FCM_AT;
+}
+
+async function sendFcm(token, title, body) {
+  const at = await fcmAccessToken();
+  if (!at) return;
+  const r = await fetch(`https://fcm.googleapis.com/v1/projects/${process.env.FIREBASE_PROJECT_ID}/messages:send`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + at, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: { token, notification: { title: String(title), body: String(body) } } })
+  });
+  if (r.status === 404 || r.status === 410) { const e = new Error('jeton FCM expiré'); e.statusCode = r.status; throw e; }
+  if (!r.ok) console.error('FCM envoi', r.status, (await r.text().catch(() => '')).slice(0, 200));
+}
+
 function pushTo(userIds, title, body, url = '/') {
   (async () => {
     const ids = [...new Set((userIds || []).filter(Boolean))];
     if (!ids.length) return;
     const subs = await all(`SELECT * FROM push_subscriptions WHERE user_id IN (${ids.map(() => '?').join(',')})`, ids);
     for (const s of subs) {
+      if (s.endpoint && s.endpoint.startsWith('fcm:')) {
+        // 🔔 APK : notification FCM (délivrée par Google même app fermée)
+        sendFcm(s.fcm_token || s.endpoint.slice(4), title, body).catch((err) => {
+          if (err.statusCode === 404 || err.statusCode === 410) run('DELETE FROM push_subscriptions WHERE id=?', [s.id]).catch(() => {});
+        });
+        continue;
+      }
       webpush.sendNotification(
         { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
         JSON.stringify({ title, body, url }),
@@ -380,6 +426,14 @@ app.get('/api/settings/public', h(async (req, res) => {
 }));
 
 app.post('/api/push/subscribe', auth, h(async (req, res) => {
+  // 🔔 APK : jeton FCM (notifications reçues même app fermée)
+  const ft = String(req.body.fcm_token || '').trim();
+  if (ft) {
+    await run(`INSERT INTO push_subscriptions(user_id,endpoint,p256dh,auth,kind,fcm_token,created_at) VALUES(?,?,?,?, 'fcm', ?, ?)
+      ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id, fcm_token=excluded.fcm_token`,
+      [req.user.id, 'fcm:' + ft, '', '', ft, Date.now()]);
+    return res.json({ ok: true });
+  }
   const s = req.body.subscription || {};
   if (!s.endpoint || !s.keys || !s.keys.p256dh || !s.keys.auth) return res.status(400).json({ error: 'Subscription invalide' });
   await run(`INSERT INTO push_subscriptions(user_id,endpoint,p256dh,auth,created_at) VALUES(?,?,?,?,?)

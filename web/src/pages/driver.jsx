@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { api, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, pushSubscribe , UpdatesBanner } from '../lib.jsx';
+import { api, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, pushSubscribe , UpdatesBanner, NotifNag, BellButton } from '../lib.jsx';
 import { Empty, Spinner, LangSwitch, StatusBadge, PayBadge, Modal } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import RouteMap, { DualRouteMap, TourMap, buildTour } from '../RouteMap.jsx';
@@ -131,7 +131,7 @@ export default function DriverApp() {
   const YG = isNative ? (window.Capacitor.Plugins?.YallaGps || null) : null;
   const openAppSettings = () => { try { YG?.openSettings?.().catch(() => {}); } catch {} };
   // 🔄 Version minimale de l'APK — si le téléphone a moins, proposer la mise à jour automatique
-  const APK_REQUIRED = '3.1.6'; // + bouton retour téléphone + notifications locales APK
+  const APK_REQUIRED = '3.1.8'; // + FCM : notifications reçues même app fermée
   const [installing, setInstalling] = useState(false);
   const [brandHelp, setBrandHelp] = useState(false); // modal guide par marque
   const [pinAsk, setPinAsk] = useState(null); // 🔑 commande en cours de validation par code
@@ -249,6 +249,7 @@ export default function DriverApp() {
         </div>
       )}
       <UpdatesBanner role="driver" />
+      <NotifNag role="driver" />
       {YG && gpsStatus?.apkVersion && gpsStatus.apkVersion !== APK_REQUIRED && (
         <div className="card" style={{ background: '#e0e7ff', border: '1px solid #6366f1', padding: '10px 14px', fontSize: 13 }}>
           🔄 <b>Mise à jour de l'application disponible</b> (installée : v{gpsStatus.apkVersion} · requise : v{APK_REQUIRED})
@@ -594,10 +595,6 @@ const detectBrand = () => {
 };
 
 function Top({ t, user, logout, online, onToggle, disabled, onAccount }) {
-  const bell = async () => {
-    const r = await pushSubscribe();
-    toast(r === 'granted' ? t('push_on') : r === 'denied' ? t('notif_off') : t('push_fail'), r === 'granted' ? 'ok' : 'err');
-  };
   return (
     <div className="topbar">
       <div className="logo">🛵</div>
@@ -606,7 +603,7 @@ function Top({ t, user, logout, online, onToggle, disabled, onAccount }) {
         <div className="muted small ellipsis">{user?.name} · {user?.vehicle}</div>
       </div>
       <LangSwitch />
-      <button className="icon-btn" onClick={bell} title={t('notif_enable')}>🔔</button>
+      <BellButton />
       {onAccount && <button className="icon-btn" onClick={onAccount} title={t('account_settings')}>👤</button>}
       {!disabled && (
         <div className="row" style={{ gap: 7 }}>
