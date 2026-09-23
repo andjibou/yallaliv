@@ -34,7 +34,7 @@ const ARROW_ICON = L.divIcon({
 });
 
 // Applique le cap (degrés 0-360, nord=0) au marqueur flèche — compense la rotation de la carte.
-function arrowSetHeading(marker, hdg, mapBearing) {
+export function arrowSetHeading(marker, hdg, mapBearing) {
   try {
     const el = marker?.getElement?.()?.querySelector?.('.yl-rot');
     if (!el || typeof hdg !== 'number' || isNaN(hdg)) return;
@@ -47,7 +47,7 @@ function arrowSetHeading(marker, hdg, mapBearing) {
 }
 
 // Déplacement fluide du marqueur livreur (glisse au lieu de sauter à chaque position).
-function glideMarker(marker) {
+export function glideMarker(marker) {
   try { const el = marker?.getElement?.(); if (el) el.style.transition = 'transform .55s linear'; } catch {}
 }
 

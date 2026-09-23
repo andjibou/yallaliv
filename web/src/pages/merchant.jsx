@@ -648,7 +648,7 @@ function Drivers() {
   const [busy, setBusy] = useState(false);
 
   const refresh = () => api('/merchant/drivers').then((d) => setDrivers(d.drivers)).catch(() => {});
-  usePoll(refresh, 5000);
+  usePoll(refresh, 1500);   // 🧭 v2026.09.23.3 : positions + becs quasi live
 
   const create = async () => {
     setBusy(true);
@@ -674,7 +674,7 @@ function Drivers() {
   if (!drivers) return <Spinner />;
   const withPos = drivers.filter((d) => d.lat != null && (d.online || d.active?.length)); // hors ligne → retiré de la carte (sauf course en cours)
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const tv = drivers.find((d) => d.id === tripView); // position live (rafraichie toutes les 5s)
+  const tv = drivers.find((d) => d.id === tripView); // position live (rafraichie toutes les 1.5s)
 
   return (
     <>

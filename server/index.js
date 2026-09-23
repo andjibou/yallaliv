@@ -895,13 +895,13 @@ app.get('/api/merchant/drivers', auth, requireRole('merchant'), h(async (req, re
   if (!store) return res.json({ drivers: [] });
   // Livreurs personnels de la boutique
   const drivers = await all(`SELECT u.id, u.name, u.email, u.phone, u.status, u.online, u.created_at,
-    dl.lat, dl.lng, dl.updated_at AS pos_at,
+    dl.lat, dl.lng, dl.bearing, dl.updated_at AS pos_at,
     (SELECT COUNT(*) FROM orders o WHERE o.driver_id=u.id AND o.status='delivered') AS deliveries
     FROM users u LEFT JOIN driver_locations dl ON dl.driver_id=u.id
     WHERE u.role='driver' AND u.store_id=? ORDER BY u.created_at DESC`, [store.id]);
   // Livreurs generaux : visibles UNIQUEMENT pendant une course pour cette boutique
   const generals = await all(`SELECT DISTINCT u.id, u.name, u.phone, u.online,
-    dl.lat, dl.lng, dl.updated_at AS pos_at,
+    dl.lat, dl.lng, dl.bearing, dl.updated_at AS pos_at,
     (SELECT COUNT(*) FROM orders o WHERE o.driver_id=u.id AND o.store_id=? AND o.status='delivered') AS deliveries
     FROM users u
     JOIN orders o ON o.driver_id=u.id AND o.store_id=? AND o.status IN ('assigned','picked_up')
@@ -969,11 +969,21 @@ app.put('/api/driver/online', auth, requireRole('driver'), h(async (req, res) =>
 }));
 
 app.put('/api/driver/location', auth, requireRole('driver'), h(async (req, res) => {
-  const lat = parseFloat(req.body.lat), lng = parseFloat(req.body.lng);
-  if (isNaN(lat) || isNaN(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return res.status(400).json({ error: 'Coordonnées invalides' });
-  await run(`INSERT INTO driver_locations(driver_id,lat,lng,updated_at) VALUES(?,?,?,?)
-    ON CONFLICT(driver_id) DO UPDATE SET lat=excluded.lat, lng=excluded.lng, updated_at=excluded.updated_at`,
-    [req.user.id, lat, lng, Date.now()]);
+  const lat = parseFloat(req.body.lat), lng = parseFloat(req.body.lng), bearing = parseFloat(req.body.bearing);
+  const hasPos = !isNaN(lat) && !isNaN(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+  const hasBrg = !isNaN(bearing) && bearing >= 0 && bearing < 360;
+  if (!hasPos && !hasBrg) return res.status(400).json({ error: 'Coordonnées invalides' });
+  if (hasPos) {
+    // position (+ cap éventuel) : upsert complet — un envoi SANS cap (service GPS natif)
+    // ne touche PAS au cap déjà enregistré par le webview (boussole).
+    await run(`INSERT INTO driver_locations(driver_id,lat,lng,bearing,updated_at) VALUES(?,?,?,?,?)
+      ON CONFLICT(driver_id) DO UPDATE SET lat=excluded.lat, lng=excluded.lng, updated_at=excluded.updated_at${hasBrg ? ', bearing=excluded.bearing' : ''}`,
+      [req.user.id, lat, lng, hasBrg ? bearing : null, Date.now()]);
+  } else {
+    // 🧭 v2026.09.23.3 — CAP SEUL (APK : le service natif envoie la position, le webview
+    // la boussole) : le magasin voit le bec du livreur pivoter, même arrêté sur place.
+    await run('UPDATE driver_locations SET bearing=?, updated_at=? WHERE driver_id=?', [bearing, Date.now(), req.user.id]);
+  }
   if (!req.user.store_id && Date.now() - lastLocDispatch > 20000) { lastLocDispatch = Date.now(); dispatchPublicOrders(); }
   res.json({ ok: true });
 }));
@@ -982,7 +992,7 @@ app.put('/api/driver/location', auth, requireRole('driver'), h(async (req, res) 
 // du webview reste bloqué (marqueur figé) — le service natif envoie ~1 position/s au PUT
 // ci-dessus, la carte reste ainsi live sans toucher à l'APK.
 app.get('/api/driver/location', auth, requireRole('driver'), h(async (req, res) => {
-  const pos = await get('SELECT lat,lng,updated_at FROM driver_locations WHERE driver_id=?', [req.user.id]);
+  const pos = await get('SELECT lat,lng,bearing,updated_at FROM driver_locations WHERE driver_id=?', [req.user.id]);
   res.json({ pos: pos || null });
 }));
 
@@ -1073,7 +1083,7 @@ app.get('/api/driver/stats', auth, requireRole('driver'), h(async (req, res) => 
 app.get('/api/orders/:id/track', auth, requireRole('client', 'merchant', 'superadmin'), h(async (req, res) => {
   const o = await get(`${ORDER_WITH_JOINS} WHERE o.id=? AND o.client_id=?`, [req.params.id, req.user.id]);
   if (!o) return res.status(404).json({ error: 'Commande introuvable' });
-  const pos = o.driver_id ? (await get('SELECT lat,lng,updated_at FROM driver_locations WHERE driver_id=?', [o.driver_id]) || null) : null;
+  const pos = o.driver_id ? (await get('SELECT lat,lng,bearing,updated_at FROM driver_locations WHERE driver_id=?', [o.driver_id]) || null) : null;
   res.json({ order: o, driver_pos: pos });
 }));
 
@@ -1290,7 +1300,7 @@ app.get('/api/admin/stats', auth, requireRole('superadmin'), h(async (req, res) 
 // ---------- LIVREURS GENERAUX (créés et gérés par le Super Admin uniquement) ----------
 app.get('/api/admin/drivers', auth, requireRole('superadmin'), h(async (req, res) => {
   const drivers = await all(`SELECT u.id,u.name,u.email,u.phone,u.vehicle,u.status,u.online,u.created_at,
-    dl.lat, dl.lng, dl.updated_at AS pos_at,
+    dl.lat, dl.lng, dl.bearing, dl.updated_at AS pos_at,
     (SELECT COUNT(*) FROM orders o WHERE o.driver_id=u.id AND o.status='delivered') AS deliveries,
     (SELECT ROUND(AVG(r.driver_stars)::numeric,1)::float8 FROM reviews r WHERE r.driver_id=u.id) AS rating
     FROM users u LEFT JOIN driver_locations dl ON dl.driver_id=u.id

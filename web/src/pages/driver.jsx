@@ -175,7 +175,14 @@ export default function DriverApp() {
       const disp = lastPos.current;
       const dm = disp ? havM(disp, { lat, lng }) : Infinity;
       const immobile = (spd != null && spd < 0.75) || (spd == null && dm < 8);
-      const send = () => { if (!stopped && !nativeOk && Date.now() - lastPut > 1500) { lastPut = Date.now(); api('/driver/location', { method: 'PUT', body: { lat, lng } }).catch(() => {}); } };
+      const send = () => {
+        if (stopped) return;
+        if (!nativeOk && Date.now() - lastPut > 1500) {
+          lastPut = Date.now();
+          const b = bestHdg();   // 🧭 cap transmis avec la position (le magasin voit le bec)
+          api('/driver/location', { method: 'PUT', body: { lat, lng, ...(typeof b === 'number' ? { bearing: Math.round(b * 10) / 10 } : {}) } }).catch(() => {});
+        }
+      };
       if (disp != null && immobile) { send(); return; }            // à l'arrêt : affichage figé, serveur à jour
       lastPos.current = { lat, lng };
       setPos({ lat, lng });
@@ -199,6 +206,15 @@ export default function DriverApp() {
       } catch {}
     };
     const pollIt = setInterval(pollSrv, 2000);
+
+    // 🧭 v2026.09.23.3 — APK : le service GPS natif envoie les positions ; le webview
+    // envoie le CAP (boussole/cap GPS) -> le magasin voit le bec pivoter en direct,
+    // même si le livreur est arrêté sur place. Léger : un nombre toutes les 1.5 s.
+    const brgIt = setInterval(() => {
+      if (stopped || !nativeOk) return;
+      const b = bestHdg();
+      if (typeof b === 'number') api('/driver/location', { method: 'PUT', body: { bearing: Math.round(b * 10) / 10 } }).catch(() => {});
+    }, 1500);
 
     // 🧭 Boussole (pivot sur place) : priorité à l'ABSOLUE (boussole vraie), la relative
     // est ignorée dès qu'une absolue est dispo. Lissage adaptatif : très stable au repos
@@ -234,7 +250,7 @@ export default function DriverApp() {
     document.addEventListener('visibilitychange', onVis);
 
     return () => {
-      stopped = true; clearInterval(pollIt); document.removeEventListener('visibilitychange', onVis);
+      stopped = true; clearInterval(pollIt); clearInterval(brgIt); document.removeEventListener('visibilitychange', onVis);
       try { window.removeEventListener('deviceorientationabsolute', onOrient, true); } catch {}
       try { window.removeEventListener('deviceorientation', onOrient, true); } catch {}
       try { if (watchId != null && navigator.geolocation?.clearWatch) navigator.geolocation.clearWatch(watchId); } catch {}
