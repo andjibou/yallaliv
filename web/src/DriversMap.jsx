@@ -50,7 +50,7 @@ export default function DriversMap({ drivers }) {
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    map.current = L.map(el.current).setView([31.2001, 29.9187], 12);
+    map.current = L.map(el.current, {}).setView([31.2001, 29.9187], 12);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map.current);
     layer.current = L.layerGroup().addTo(map.current);
     return () => { map.current?.remove(); map.current = null; layer.current = null; mks.current = {}; stKeys.current = {}; };

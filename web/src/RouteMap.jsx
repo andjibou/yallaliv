@@ -10,6 +10,15 @@ import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';
 // (il s'ajouterait sinon à TOUTES les cartes de l'app, même celles sans rotation).
 L.Map.mergeOptions({ rotateControl: false });
 
+// 🛡️ v2026.09.23.4 — Correctif leaflet-rotate : son initialize lit `options.rotate`
+// SANS vérifier qu'un objet d'options existe -> tout L.map(élément) appelé SANS
+// options plantait (« Cannot read properties of undefined (reading 'rotate') ») :
+// carte des livreurs du marchand, carte des magasins côté client, carte tournée
+// livreur... On blinde ici une fois pour toutes : toutes les cartes de l'app
+// passent par ce module, les options manquantes deviennent un objet vide.
+const _lrMapInit = L.Map.prototype.initialize;
+L.Map.prototype.initialize = function(id, options) { return _lrMapInit.call(this, id, options || {}); };
+
 const mkIcon = (emoji) =>
   L.divIcon({
     html: `<div style="font-size:26px;line-height:26px;text-shadow:0 1px 4px rgba(0,0,0,.45)">${emoji}</div>`,
@@ -175,7 +184,7 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
   useEffect(() => {
     if (!el.current || map.current) return;
     // 🧭 live (livreur) : carte orientable (2 doigts) + rotation auto sur son cap
-    map.current = L.map(el.current, live ? { rotate: true, touchRotate: true } : undefined).setView([31.2001, 29.9187], 13);
+    map.current = L.map(el.current, live ? { rotate: true, touchRotate: true } : {}).setView([31.2001, 29.9187], 13);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map.current);
     return () => { map.current?.remove(); map.current = null; markers.current = {}; };
   }, []);
@@ -288,7 +297,7 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
   useEffect(() => {
     if (!el.current || map.current) return;
     // 🧭 live (livreur) : carte orientable (2 doigts) + rotation auto sur son cap
-    map.current = L.map(el.current, live ? { rotate: true, touchRotate: true } : undefined).setView([31.2001, 29.9187], 13);
+    map.current = L.map(el.current, live ? { rotate: true, touchRotate: true } : {}).setView([31.2001, 29.9187], 13);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map.current);
     return () => { map.current?.remove(); map.current = null; marks.current = {}; };
   }, []);
@@ -463,7 +472,7 @@ export function TourMap({ driverPos, stops, height = 340, live = null }) {
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    map.current = L.map(el.current).setView([31.2001, 29.9187], 13);
+    map.current = L.map(el.current, {}).setView([31.2001, 29.9187], 13);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map.current);
     grp.current = L.layerGroup().addTo(map.current);
     return () => { map.current?.remove(); map.current = null; grp.current = null; };
@@ -564,7 +573,7 @@ export function StoresMap({ stores, height = 380, onSelect }) {
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    map.current = L.map(el.current).setView([31.2001, 29.9187], 12);
+    map.current = L.map(el.current, {}).setView([31.2001, 29.9187], 12);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map.current);
     grp.current = L.layerGroup().addTo(map.current);
     return () => { map.current?.remove(); map.current = null; grp.current = null; };
