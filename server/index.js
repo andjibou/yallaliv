@@ -978,6 +978,14 @@ app.put('/api/driver/location', auth, requireRole('driver'), h(async (req, res) 
   res.json({ ok: true });
 }));
 
+// 📍 v2026.09.23.1 — Dernière position du livreur (lui-même) : l'APK la relit quand le GPS
+// du webview reste bloqué (marqueur figé) — le service natif envoie ~1 position/s au PUT
+// ci-dessus, la carte reste ainsi live sans toucher à l'APK.
+app.get('/api/driver/location', auth, requireRole('driver'), h(async (req, res) => {
+  const pos = await get('SELECT lat,lng,updated_at FROM driver_locations WHERE driver_id=?', [req.user.id]);
+  res.json({ pos: pos || null });
+}));
+
 // 🔑 Sécurité PIN : le livreur ne voit jamais le code (il doit le demander au client)
 const stripPin = (rows) => rows.map((r) => { const has = r.pin != null; delete r.pin; return { ...r, has_pin: has }; });
 

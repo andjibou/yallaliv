@@ -21,6 +21,20 @@ export default function DriverApp() {
   const alarmTick = useRef(null);
   const alarmId = useRef(null);
   const lastPos = useRef(null);
+  const lastFixAt = useRef(0);      // 🧭 horodatage du dernier fix GPS (détecte un webview bloqué)
+  const prevFix = useRef(null);     // 🧭 position précédente (cap calculé par déplacement)
+  // 🧭 Cap du livreur (degrés 0-360, nord=0) : GPS (en mouvement) > boussole absolue
+  // > cap calculé par déplacement > boussole relative. Lu par les cartes (flèche Uber).
+  const hdgRef = useRef({ gps: null, gpsAt: 0, abs: null, rel: null, calc: null, calcAt: 0 });
+  const bestHdg = () => {
+    const h = hdgRef.current;
+    if (h.gps != null && Date.now() - h.gpsAt < 8000) return h.gps;
+    if (h.abs != null) return h.abs;
+    if (h.calc != null && Date.now() - h.calcAt < 45000) return h.calc;
+    if (h.rel != null) return h.rel;
+    return h.gps;
+  };
+  const liveCtl = useRef({ getHdg: bestHdg }).current;   // passé aux cartes (stable entre rendus)
   const seenAv = useRef(null);
   const activeRef = useRef(null);
 
@@ -74,13 +88,15 @@ export default function DriverApp() {
   // Livraison active (pour la simulation de trajet)
   activeRef.current = mine?.find((o) => ['assigned', 'picked_up'].includes(o.status)) || null;
 
-  // Diffusion de la position : GPS réel si dispo, sinon trajet simulé magasin → client
+  // 📍 v2026.09.23.1 — Position LIVE (fix marqueur figé) :
+  //  - service GPS NATIF (APK) : envoie 1 position/s au serveur (arrière-plan inclus) ;
+  //  - watchPosition continu : alimente la carte en direct + le cap GPS (heading) ;
+  //  - filet APK : si le webview ne fournit rien (limite connue du WebView Capacitor),
+  //    on relit la position que le service natif vient d'envoyer au serveur.
   useEffect(() => {
     if (!approved || !online) return;
     let stopped = false;
 
-    // 📱 APP NATIVE ANDROID : service GPS NATIF (YallaGps) — envoi direct Java au serveur,
-    // 1 position/seconde, indépendant du navigateur : survit au verrouillage et à l'arrière-plan.
     let nativeOk = false; // vrai dès que le service natif envoie lui-même les positions
     let ygStarted = false; let ygStopped = false;
     if (YG) {
@@ -97,31 +113,75 @@ export default function DriverApp() {
       }
     }
 
-    // 🌐 NAVIGATEUR / PWA : boucle 1 s + reprise au déverrouillage (filet de sécurité)
-    const send = () => {
-      const done = (lat, lng) => {
-        lastPos.current = { lat, lng };
-        setPos({ lat, lng });
-        if (!stopped && !nativeOk) api('/driver/location', { method: 'PUT', body: { lat, lng } }).catch(() => {});
-      };
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (p) => done(p.coords.latitude, p.coords.longitude),
-          () => {}, // GPS indisponible (intérieur d'un bâtiment…) : PAS de simulation —
-                    // on conserve la dernière position réelle (les badges de fraîcheur gèrent l'affichage)
-          { timeout: 4000, maximumAge: 1000, enableHighAccuracy: true }
-        );
+    let lastPut = 0;
+    const onFix = (p) => {
+      if (stopped) return;
+      const { latitude: lat, longitude: lng, heading } = p.coords;
+      lastFixAt.current = Date.now();
+      lastPos.current = { lat, lng };
+      setPos({ lat, lng });
+      if (typeof heading === 'number' && !isNaN(heading)) {
+        hdgRef.current.gps = (heading + 360) % 360; hdgRef.current.gpsAt = Date.now();   // 🧭 cap GPS (fiable en mouvement)
+      } else {
+        const pv = prevFix.current;   // 🧭 cap calculé par le déplacement
+        if (pv) {
+          const mLat = (lat - pv.lat) * 111320, mLng = (lng - pv.lng) * 111320 * Math.cos((lat * Math.PI) / 180);
+          if (Math.hypot(mLat, mLng) > 4) {
+            hdgRef.current.calc = ((Math.atan2(mLng, mLat) * 180) / Math.PI + 360) % 360;
+            hdgRef.current.calcAt = Date.now();
+          }
+        }
+        prevFix.current = { lat, lng };
+      }
+      if (!stopped && !nativeOk && Date.now() - lastPut > 1500) {   // 🌐 navigateur/PWA : envoie au serveur
+        lastPut = Date.now();
+        api('/driver/location', { method: 'PUT', body: { lat, lng } }).catch(() => {});
       }
     };
-    send();
-    const id = setInterval(send, 1000); // suivi à la seconde
-    // Reprise immédiate : au déverrouillage du téléphone / retour sur l'app, on renvoie la position tout de suite
-    const onVis = () => { if (document.visibilityState === 'visible' && !stopped) send(); };
+    let watchId = null;
+    try {
+      if (navigator.geolocation?.watchPosition) watchId = navigator.geolocation.watchPosition(onFix, () => {}, { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+    } catch {}
+
+    // 📱 APK : le GPS du webview peut se bloquer (position figée) — on relit alors la
+    // dernière position envoyée au serveur par le service NATIF (~1 s de fraîcheur).
+    const pollSrv = async () => {
+      if (stopped || !nativeOk || Date.now() - lastFixAt.current < 4000) return;
+      try {
+        const d = await api('/api/driver/location');
+        if (!stopped && d?.pos && Date.now() - lastFixAt.current >= 4000) {
+          lastPos.current = { lat: d.pos.lat, lng: d.pos.lng };
+          setPos({ lat: d.pos.lat, lng: d.pos.lng });
+        }
+      } catch {}
+    };
+    const pollIt = setInterval(pollSrv, 2000);
+
+    // 🧭 Boussole (à l'arrêt) : le livreur pivote le téléphone -> la flèche pivote avec lui
+    const onOrient = (e) => {
+      try {
+        let h = typeof e.webkitCompassHeading === 'number' ? e.webkitCompassHeading : (typeof e.alpha === 'number' ? (360 - e.alpha) % 360 : null);
+        if (h == null) return;
+        const ang = (screen.orientation?.angle ?? window.orientation ?? 0) || 0;
+        h = (h - ang + 720) % 360;
+        if (e.absolute === true || e.type === 'deviceorientationabsolute') hdgRef.current.abs = h;
+        else hdgRef.current.rel = h;
+      } catch {}
+    };
+    try {
+      window.addEventListener('deviceorientationabsolute', onOrient, true);
+      window.addEventListener('deviceorientation', onOrient, true);
+    } catch {}
+    const onVis = () => { if (document.visibilityState === 'visible' && !stopped) pollSrv(); };
     document.addEventListener('visibilitychange', onVis);
+
     return () => {
-      stopped = true; clearInterval(id); document.removeEventListener('visibilitychange', onVis);
+      stopped = true; clearInterval(pollIt); document.removeEventListener('visibilitychange', onVis);
+      try { window.removeEventListener('deviceorientationabsolute', onOrient, true); } catch {}
+      try { window.removeEventListener('deviceorientation', onOrient, true); } catch {}
+      try { if (watchId != null && navigator.geolocation?.clearWatch) navigator.geolocation.clearWatch(watchId); } catch {}
       ygStopped = true;
-      if (ygStarted) { try { YG?.stop().catch(() => {}); } catch {} } // stoppe le service GPS natif
+      if (ygStarted) { try { YG?.stop().catch(() => {}); } catch {} }
     };
   }, [approved, online]);
 
@@ -353,7 +413,7 @@ export default function DriverApp() {
             <span className="badge" style={{ background: '#fee2e2', color: '#b91c1c' }}>🔴 {t('tour_pickup')}</span>
             <span className="badge" style={{ background: '#d1fae5', color: '#065f46' }}>🟢 {t('tour_deliver')}</span>
           </div>
-          <TourMap driverPos={pos} stops={tourStops} />
+          <TourMap driverPos={pos} stops={tourStops} live={liveCtl} />
           <div className="mt8">
             {tourStops.map((s, i) => (
               <div key={s.o.id + '-' + s.kind} className="row spread" style={{ padding: '7px 0', borderBottom: '1px dashed #eef2f7' }}>
@@ -443,6 +503,7 @@ export default function DriverApp() {
                 driverPos={pos || lastPos.current}
                 storePos={{ lat: routeView.store_lat, lng: routeView.store_lng }}
                 clientPos={{ lat: routeView.client_lat, lng: routeView.client_lng }}
+                live={liveCtl}
               />
             ) : (
               <RouteMap
@@ -452,6 +513,7 @@ export default function DriverApp() {
                 to={{ lat: routeView.client_lat, lng: routeView.client_lng }}
                 fromEmoji={routeView.status === 'picked_up' && (pos || lastPos.current) ? '🛵' : '🏪'}
                 toEmoji="🏠"
+                live={routeView.status === 'picked_up' && (pos || lastPos.current) ? liveCtl : null}
               />
             )}
             <div className="mt12" style={{ background: '#f8fafc', borderRadius: 12, padding: 10 }}>

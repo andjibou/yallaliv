@@ -1,8 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import './lr-global.js';      // ⚙️ expose window.L (le plugin ci-dessous patche le L global)
+import 'leaflet-rotate';      // 🧭 v2026.09.23.1 : rotation de carte (setBearing) + pincement 2 doigts
 import { useT } from './lib.jsx';
 import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';
+
+// On gère nos propres boutons 📍/🧭 : pas du contrôle de rotation par défaut du plugin
+// (il s'ajouterait sinon à TOUTES les cartes de l'app, même celles sans rotation).
+L.Map.mergeOptions({ rotateControl: false });
 
 const mkIcon = (emoji) =>
   L.divIcon({
@@ -11,6 +17,118 @@ const mkIcon = (emoji) =>
     iconSize: [26, 26],
     iconAnchor: [13, 13]
   });
+
+// ================= 🧭 v2026.09.23.1 — Suivi live style Uber (côté livreur) =================
+// Pastille 🛵 + bec directionnel qui pivote selon le cap (GPS > boussole > cap calculé).
+const ARROW_ICON = L.divIcon({
+  className: '',
+  html: `<div style="position:relative;width:40px;height:40px">
+    <div class="yl-rot" style="position:absolute;inset:0;transition:transform .45s ease-out;will-change:transform">
+      <svg width="40" height="40" viewBox="0 0 40 40" style="position:absolute;inset:0;overflow:visible">
+        <path d="M20 -3 L27.5 11.5 L20 8 L12.5 11.5 Z" fill="#0e9f6e" stroke="#fff" stroke-width="1.6"/>
+      </svg>
+    </div>
+    <div style="position:absolute;top:7px;left:7px;width:26px;height:26px;border-radius:50%;background:#fff;border:3px solid #0e9f6e;box-shadow:0 2px 10px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:13px">🛵</div>
+  </div>`,
+  iconSize: [40, 40], iconAnchor: [20, 20]
+});
+
+// Applique le cap (degrés 0-360, nord=0) au marqueur flèche — compense la rotation de la carte.
+function arrowSetHeading(marker, hdg, mapBearing) {
+  try {
+    const el = marker?.getElement?.()?.querySelector?.('.yl-rot');
+    if (!el || typeof hdg !== 'number' || isNaN(hdg)) return;
+    const target = ((hdg + (mapBearing || 0)) % 360 + 360) % 360;
+    const prev = parseFloat(el.dataset.rot || '0') || 0;
+    const d = ((target - prev) % 360 + 540) % 360 - 180;   // pivotement par le plus court chemin
+    el.dataset.rot = String(prev + d);
+    el.style.transform = `rotate(${prev + d}deg)`;
+  } catch {}
+}
+
+// Déplacement fluide du marqueur livreur (glisse au lieu de sauter à chaque position).
+function glideMarker(marker) {
+  try { const el = marker?.getElement?.(); if (el) el.style.transition = 'transform .55s linear'; } catch {}
+}
+
+/**
+ * 🧭 Navigation live : 
+ *  - pivote la flèche en continu (cap fourni par live.getHdg()),
+ *  - fait pivoter la carte sur le cap du livreur (mode Uber) tant qu'il ne la tourne pas lui-même,
+ *  - expose follow/rot pour les boutons 📍 (recentrer) et 🧭 (cap auto on/off).
+ * live = { getHdg: () => degrés|null } — fourni par l'espace livreur (driver.jsx).
+ */
+function useLiveNav(mapRef, live, getMarker) {
+  const nav = useRef({ follow: true, rot: true, myBearing: null, bound: false, zooming: false });
+  const [, bump] = useState(0);
+  useEffect(() => {
+    if (!live) return undefined;
+    const m = () => mapRef.current;
+    const s = nav.current;
+    let dead = false;
+    const onDrag = () => { if (s.follow) { s.follow = false; bump((x) => x + 1); } };
+    const onRot = () => {
+      const mm = m(); if (!mm || s.myBearing == null) return;
+      const b = typeof mm.getBearing === 'function' ? mm.getBearing() : 0;
+      // rotation qui ne vient PAS de nous -> geste manuel -> on rend la main au livreur
+      if (Math.abs(((b - s.myBearing) % 360 + 540) % 360 - 180) > 1.5 && s.rot) { s.rot = false; bump((x) => x + 1); }
+    };
+    const onZoomStart = () => { s.zooming = true; };
+    const onZoomEnd = () => { setTimeout(() => { s.zooming = false; }, 700); };
+    const bind = () => { s.bound = true; m().on({ dragstart: onDrag, rotate: onRot, zoomstart: onZoomStart, zoomend: onZoomEnd }); };
+    const ready = () => { if (!dead && m() && !s.bound) bind(); };
+    ready();
+    const it = setInterval(() => {
+      const mm = m(); if (!mm) return;
+      if (!s.bound) ready();
+      const h = live.getHdg ? live.getHdg() : null;
+      const b = typeof mm.getBearing === 'function' ? (mm.getBearing() || 0) : 0;
+      arrowSetHeading(getMarker ? getMarker() : null, h, b);
+      if (typeof h !== 'number' || !s.follow || !s.rot || s.zooming) return;
+      if (typeof mm.setBearing !== 'function') return;
+      const target = (360 - ((h % 360) + 360) % 360) % 360;        // cap du livreur pointé vers le HAUT
+      const cur = mm.getBearing() || 0;
+      const d = ((target - cur) % 360 + 540) % 360 - 180;
+      if (Math.abs(d) > 2) { s.myBearing = ((cur + d * 0.4) % 360 + 360) % 360; mm.setBearing(s.myBearing); }
+    }, 220);
+    return () => { dead = true; clearInterval(it); try { if (s.bound) m()?.off({ dragstart: onDrag, rotate: onRot, zoomstart: onZoomStart, zoomend: onZoomEnd }); } catch {} s.bound = false; };
+  }, [!!live]);
+  return {
+    nav,
+    isFollow: () => nav.current.follow,
+    isRot: () => nav.current.rot,
+    recenter: (lat, lng) => {
+      const s = nav.current; s.follow = true; s.rot = true; bump((x) => x + 1);
+      const mm = mapRef.current;
+      if (mm && lat != null) { try { mm.stop(); mm.setView([lat, lng], Math.max(mm.getZoom() || 13, 15.5), { animate: true }); } catch {} }
+    },
+    toggleRot: () => {
+      const s = nav.current; s.rot = !s.rot; bump((x) => x + 1);
+      const mm = mapRef.current;
+      if (!s.rot && mm && typeof mm.setBearing === 'function') { s.myBearing = 0; mm.setBearing(0); }   // retour nord en haut
+    }
+  };
+}
+
+/** Boutons 📍 recentrer + 🧭 cap auto, superposés à la carte (sous le bouton plein écran). */
+function LiveBtns({ navApi, pos }) {
+  const btn = (active, emoji, title, onClick) => (
+    <button onClick={onClick} title={title} aria-label={title}
+      style={{
+        width: 36, height: 36, borderRadius: 10, border: 'none', cursor: 'pointer',
+        fontSize: 16, lineHeight: '36px', textAlign: 'center', padding: 0,
+        boxShadow: '0 2px 8px rgba(0,0,0,.3)',
+        background: active ? '#0e9f6e' : 'rgba(255,255,255,.95)',
+        color: active ? '#fff' : '#0f172a'
+      }}>{emoji}</button>
+  );
+  return (
+    <div style={{ position: 'absolute', top: 50, right: 8, zIndex: 1100, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {btn(navApi.isFollow(), '📍', 'Recentrer sur ma position (suivi auto)', () => navApi.recenter(pos?.lat, pos?.lng))}
+      {btn(navApi.isRot(), '🧭', 'Orientation automatique sur ma direction', navApi.toggleRot)}
+    </div>
+  );
+}
 
 /**
  * Itinéraire routier réel via OSRM (gratuit, sans clé API).
@@ -43,7 +161,7 @@ export const fmtMin = (s) => {
  * Carte avec itinéraire routier de `from` à `to`.
  * Fallback : ligne droite pointillée si OSRM indisponible (hors ligne).
  */
-export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠', height = 300 }) {
+export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠', height = 300, live = null }) {
   const el = useRef(null);
   const map = useRef(null);
   const { full, toggle } = useMapFullscreen(map);
@@ -56,10 +174,13 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    map.current = L.map(el.current).setView([31.2001, 29.9187], 13);
+    // 🧭 live (livreur) : carte orientable (2 doigts) + rotation auto sur son cap
+    map.current = L.map(el.current, live ? { rotate: true, touchRotate: true } : undefined).setView([31.2001, 29.9187], 13);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map.current);
     return () => { map.current?.remove(); map.current = null; markers.current = {}; };
   }, []);
+
+  const navApi = useLiveNav(map, live, () => markers.current.from);
 
   useEffect(() => {
     const m = map.current;
@@ -70,9 +191,11 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
     ['from', 'to', 'line'].forEach((k) => {
       if (markers.current[k]) { markers.current[k].remove(); delete markers.current[k]; }
     });
-    markers.current.from = L.marker([from.lat, from.lng], { icon: mkIcon(fromEmoji) }).addTo(m);
+    // 🧭 live : le départ EST le livreur -> pastille + flèche de direction
+    markers.current.from = L.marker([from.lat, from.lng], { icon: live ? ARROW_ICON : mkIcon(fromEmoji) }).addTo(m);
+    if (live) { glideMarker(markers.current.from); m.setView([from.lat, from.lng], 16); }
     markers.current.to = L.marker([to.lat, to.lng], { icon: mkIcon(toEmoji) }).addTo(m);
-    m.fitBounds(L.latLngBounds([[from.lat, from.lng], [to.lat, to.lng]]).pad(0.3));
+    if (!live) m.fitBounds(L.latLngBounds([[from.lat, from.lng], [to.lat, to.lng]]).pad(0.3));
 
     // itinéraire réel (ou ligne droite en secours)
     setInfo(null);
@@ -118,10 +241,20 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
     return () => { cancelled = true; };
   }, [from?.lat, from?.lng]);
 
+  // 🧭 Mode Uber (live) : la carte suit le livreur en permanence — tant qu'il ne la
+  // déplace pas lui-même (un drag désactive le suivi, 📍 le réactive).
+  useEffect(() => {
+    const m = map.current;
+    const s = navApi.nav.current;
+    if (!m || !live || !from || !s.follow || s.zooming) return;
+    try { m.panTo([from.lat, from.lng], { animate: true, duration: 0.5 }); } catch {}
+  }, [from?.lat, from?.lng]);
+
   return (
     <div>
       <div ref={el} style={full ? FS_STYLE : { position: 'relative', height, borderRadius: 14, border: '1px solid #e3e9f0', background: '#eef2f7' }}>
         <FsBtn full={full} onClick={toggle} />
+        {live && <LiveBtns navApi={navApi} pos={from} />}
       </div>
       {flash && <div className="row mt8"><span className="badge" style={{ background: '#e0e7ff', color: '#3730a3' }}>🔄 {t('rerouted')}</span></div>}
       {info ? (
@@ -141,7 +274,7 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
  * Trajet double du livreur : sa position → magasin (ROUGE) puis magasin → client (VERT).
  * Affiché automatiquement à l'acceptation d'une livraison.
  */
-export function DualRouteMap({ driverPos, storePos, clientPos, height = 320 }) {
+export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, live = null }) {
   const el = useRef(null);
   const map = useRef(null);
   const { full, toggle } = useMapFullscreen(map);
@@ -154,10 +287,13 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320 }) {
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    map.current = L.map(el.current).setView([31.2001, 29.9187], 13);
+    // 🧭 live (livreur) : carte orientable (2 doigts) + rotation auto sur son cap
+    map.current = L.map(el.current, live ? { rotate: true, touchRotate: true } : undefined).setView([31.2001, 29.9187], 13);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map.current);
     return () => { map.current?.remove(); map.current = null; marks.current = {}; };
   }, []);
+
+  const navApi = useLiveNav(map, live, () => marks.current.d);
 
   useEffect(() => {
     const m = map.current;
@@ -166,7 +302,9 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320 }) {
     ['d', 's', 'c', 'l1', 'l2'].forEach((k) => {
       if (marks.current[k]) { marks.current[k].remove(); delete marks.current[k]; }
     });
-    marks.current.d = L.marker([driverPos.lat, driverPos.lng], { icon: mkIcon('🛵') }).addTo(m);
+    // 🧭 live : pastille + flèche de direction sur le livreur, ouverture zoomée sur lui
+    marks.current.d = L.marker([driverPos.lat, driverPos.lng], { icon: live ? ARROW_ICON : mkIcon('🛵') }).addTo(m);
+    if (live) { glideMarker(marks.current.d); m.setView([driverPos.lat, driverPos.lng], 16); }
     marks.current.s = L.marker([storePos.lat, storePos.lng], { icon: mkIcon('🏪') }).addTo(m);
     marks.current.c = L.marker([clientPos.lat, clientPos.lng], { icon: mkIcon('🏠') }).addTo(m);
     setLegs(null);
@@ -184,7 +322,7 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320 }) {
         r2 ? { color: '#0e9f6e', weight: 5, opacity: 0.9 } : { color: '#0e9f6e', weight: 3, dashArray: '6 8' }
       ).addTo(m);
       setLegs([r1, r2]);
-      m.fitBounds(L.latLngBounds([[driverPos.lat, driverPos.lng], [storePos.lat, storePos.lng], [clientPos.lat, clientPos.lng]]).pad(0.25));
+      if (!live) m.fitBounds(L.latLngBounds([[driverPos.lat, driverPos.lng], [storePos.lat, storePos.lng], [clientPos.lat, clientPos.lng]]).pad(0.25));
       setTimeout(() => map.current?.invalidateSize(), 60);
     });
     return () => { cancelled = true; };
@@ -202,7 +340,7 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320 }) {
     let cancelled = false;
     setFlash(true);
     setTimeout(() => setFlash(false), 4000);
-    fetchRoute(driverPos, storePos).then((r) => {
+      fetchRoute(driverPos, storePos).then((r) => {
       if (cancelled || !map.current || !r) return;
       leg1Ref.current = r.coords;
       marks.current.l1.remove(); delete marks.current.l1;
@@ -212,10 +350,19 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320 }) {
     return () => { cancelled = true; };
   }, [driverPos?.lat, driverPos?.lng]);
 
+  // 🧭 Mode Uber (live) : la carte suit le livreur — un drag désactive, 📍 réactive
+  useEffect(() => {
+    const m = map.current;
+    const s = navApi.nav.current;
+    if (!m || !live || !driverPos || !s.follow || s.zooming) return;
+    try { m.panTo([driverPos.lat, driverPos.lng], { animate: true, duration: 0.5 }); } catch {}
+  }, [driverPos?.lat, driverPos?.lng]);
+
   return (
     <div>
       <div ref={el} style={full ? FS_STYLE : { position: 'relative', height, borderRadius: 14, border: '1px solid #e3e9f0', background: '#eef2f7' }}>
         <FsBtn full={full} onClick={toggle} />
+        {live && <LiveBtns navApi={navApi} pos={driverPos} />}
       </div>
       {flash && <div className="row mt8"><span className="badge" style={{ background: '#e0e7ff', color: '#3730a3' }}>🔄 {t('rerouted')}</span></div>}
       {legs ? (
@@ -300,7 +447,7 @@ const mkStopIcon = (emoji, n, kind) => L.divIcon({
  * Tournee multi-arrêts : legs rouges vers les magasins (recuperer), vertes vers les clients (livrer).
  * stops = sortie de buildTour(). Montre la position du livreur + la sequence 1,2,3...
  */
-export function TourMap({ driverPos, stops, height = 340 }) {
+export function TourMap({ driverPos, stops, height = 340, live = null }) {
   const el = useRef(null);
   const map = useRef(null);
   const { full, toggle } = useMapFullscreen(map);
@@ -322,6 +469,13 @@ export function TourMap({ driverPos, stops, height = 340 }) {
     return () => { map.current?.remove(); map.current = null; grp.current = null; };
   }, []);
 
+  // 🧭 v2026.09.23.1 : la flèche du livreur pivote en continu (vue d'ensemble nord en haut)
+  useEffect(() => {
+    if (!live) return undefined;
+    const it = setInterval(() => arrowSetHeading(driverMk.current, live.getHdg ? live.getHdg() : null, 0), 300);
+    return () => clearInterval(it);
+  }, [!!live]);
+
   useEffect(() => {
     const m = map.current, g = grp.current;
     if (!m || !g || !driverPos || !stops.length) return;
@@ -330,7 +484,8 @@ export function TourMap({ driverPos, stops, height = 340 }) {
     setLegs(null);
     firstLegRef.current = null;
 
-    driverMk.current = L.marker([driverPos.lat, driverPos.lng], { icon: mkIcon('🛵') }).addTo(g);
+    driverMk.current = L.marker([driverPos.lat, driverPos.lng], { icon: ARROW_ICON }).addTo(g);   // 🧭 pastille + flèche de cap
+    glideMarker(driverMk.current);
     stops.forEach((s, i) => {
       L.marker([s.lat, s.lng], { icon: mkStopIcon(s.kind === 'pickup' ? '🏪' : '🏠', i + 1, s.kind) }).addTo(g);
     });
