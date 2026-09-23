@@ -466,6 +466,7 @@ function groupByCat(products) {
 /* ================= CART + CHECKOUT ================= */
 export function CartPage() {
   const t = useT();
+  const { lang } = useLang();   // 📍 v2026.09.23.7 : géocodage dans la langue de l'app
   const nav = useNavigate();
   const { user, register, setUser } = useAuth();
   const [acct, setAcct] = useState({ name: '', email: '', password: '' });   // compte créé à la commande (invité)
@@ -497,7 +498,7 @@ export function CartPage() {
         toast(t('gps_ok'));
         // 📍 remplir automatiquement le champ adresse avec la position trouvée
         try {
-          const a = await reverseGeocode(p.coords.latitude, p.coords.longitude);
+          const a = await reverseGeocode(p.coords.latitude, p.coords.longitude, lang);
           if (a) setAddress(a.split(',').slice(0, 3).join(', '));
         } catch {}
       },
