@@ -23,7 +23,7 @@ const mkIcon = (emoji) =>
 const ARROW_ICON = L.divIcon({
   className: '',
   html: `<div style="position:relative;width:40px;height:40px">
-    <div class="yl-rot" style="position:absolute;inset:0;transition:transform .45s ease-out;will-change:transform">
+    <div class="yl-rot" style="position:absolute;inset:0;transition:transform .2s ease-out;will-change:transform">
       <svg width="40" height="40" viewBox="0 0 40 40" style="position:absolute;inset:0;overflow:visible">
         <path d="M20 -3 L27.5 11.5 L20 8 L12.5 11.5 Z" fill="#0e9f6e" stroke="#fff" stroke-width="1.6"/>
       </svg>
@@ -89,8 +89,8 @@ function useLiveNav(mapRef, live, getMarker) {
       const target = (360 - ((h % 360) + 360) % 360) % 360;        // cap du livreur pointé vers le HAUT
       const cur = mm.getBearing() || 0;
       const d = ((target - cur) % 360 + 540) % 360 - 180;
-      if (Math.abs(d) > 2) { s.myBearing = ((cur + d * 0.4) % 360 + 360) % 360; mm.setBearing(s.myBearing); }
-    }, 220);
+      if (Math.abs(d) > 2) { s.myBearing = ((cur + d * 0.35) % 360 + 360) % 360; mm.setBearing(s.myBearing); }
+    }, 120);
     return () => { dead = true; clearInterval(it); try { if (s.bound) m()?.off({ dragstart: onDrag, rotate: onRot, zoomstart: onZoomStart, zoomend: onZoomEnd }); } catch {} s.bound = false; };
   }, [!!live]);
   return {
@@ -469,10 +469,10 @@ export function TourMap({ driverPos, stops, height = 340, live = null }) {
     return () => { map.current?.remove(); map.current = null; grp.current = null; };
   }, []);
 
-  // 🧭 v2026.09.23.1 : la flèche du livreur pivote en continu (vue d'ensemble nord en haut)
+  // 🧭 v2026.09.23.2 : la flèche du livreur pivote en continu (vue d'ensemble nord en haut)
   useEffect(() => {
     if (!live) return undefined;
-    const it = setInterval(() => arrowSetHeading(driverMk.current, live.getHdg ? live.getHdg() : null, 0), 300);
+    const it = setInterval(() => arrowSetHeading(driverMk.current, live.getHdg ? live.getHdg() : null, 0), 150);
     return () => clearInterval(it);
   }, [!!live]);
 

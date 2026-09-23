@@ -22,17 +22,29 @@ export default function DriverApp() {
   const alarmId = useRef(null);
   const lastPos = useRef(null);
   const lastFixAt = useRef(0);      // 🧭 horodatage du dernier fix GPS (détecte un webview bloqué)
-  const prevFix = useRef(null);     // 🧭 position précédente (cap calculé par déplacement)
-  // 🧭 Cap du livreur (degrés 0-360, nord=0) : GPS (en mouvement) > boussole absolue
-  // > cap calculé par déplacement > boussole relative. Lu par les cartes (flèche Uber).
-  const hdgRef = useRef({ gps: null, gpsAt: 0, abs: null, rel: null, calc: null, calcAt: 0 });
+  const wrap180 = (x) => ((x % 360) + 540) % 360 - 180;
+  const havM = (a, b) => { const R = 6371000, rad = (x) => (x * Math.PI) / 180; const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng); const hh = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(hh)); };
+  // 🧭 v2026.09.23.2 — Cap du livreur, pipeline anti-bruit :
+  //  ① en mouvement (vitesse > ~1 m/s) : cap GPS — direction RÉELLE du déplacement ;
+  //  ② déplacement lent : cap calculé sur ~12 m de trajet franc (vrai sens du mouvement) ;
+  //  ③ à l'arrêt : boussole lissée (stable au repos, vive sur les vrais pivots),
+  //     calibrée AUTOMATIQUEMENT contre le cap GPS en roulant (sens + décalage) ;
+  //  ④ repli : dernier cap connu.
+  // (les chipsets GPS renvoient des caps fantaisistes à l'arrêt — c'était le bec
+  //  qui « tournait tout seul » ; à l'arrêt seule la boussole peut suivre un pivot)
+  const hdgRef = useRef({ gps: null, gpsAt: 0, gpsSpd: 0, comp: null, compMode: null, compAt: 0, anchor: null, calc: null, calcAt: 0, calSign: 0, calOff: null, cal: null });
   const bestHdg = () => {
     const h = hdgRef.current;
-    if (h.gps != null && Date.now() - h.gpsAt < 8000) return h.gps;
-    if (h.abs != null) return h.abs;
-    if (h.calc != null && Date.now() - h.calcAt < 45000) return h.calc;
-    if (h.rel != null) return h.rel;
-    return h.gps;
+    const now = Date.now();
+    if (h.gps != null && now - h.gpsAt < 7000 && h.gpsSpd > 1.1) return h.gps;            // ① cap GPS (en mouvement)
+    if (h.calc != null && now - h.calcAt < 15000 && h.gpsSpd > 0.5) return h.calc;        // ② cap calculé (marche lente)
+    if (h.comp != null && now - h.compAt < 4000) {                                        // ③ boussole calibrée (à l'arrêt)
+      let c = h.comp;
+      if (h.calSign) c = ((h.calSign < 0 ? 360 - c : c) + 360) % 360;                    //   sens détecté vs cap GPS
+      if (h.calOff != null) c = ((c - h.calOff) + 360) % 360;                            //   décalage appris vs cap GPS
+      return c;
+    }
+    return h.gps != null ? h.gps : h.calc;                                                // ④ dernier connu
   };
   const liveCtl = useRef({ getHdg: bestHdg }).current;   // passé aux cartes (stable entre rendus)
   const seenAv = useRef(null);
@@ -116,27 +128,58 @@ export default function DriverApp() {
     let lastPut = 0;
     const onFix = (p) => {
       if (stopped) return;
-      const { latitude: lat, longitude: lng, heading } = p.coords;
+      const { latitude: lat, longitude: lng, heading, accuracy, speed } = p.coords;
+      if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) return;
       lastFixAt.current = Date.now();
-      lastPos.current = { lat, lng };
-      setPos({ lat, lng });
-      if (typeof heading === 'number' && !isNaN(heading)) {
-        hdgRef.current.gps = (heading + 360) % 360; hdgRef.current.gpsAt = Date.now();   // 🧭 cap GPS (fiable en mouvement)
-      } else {
-        const pv = prevFix.current;   // 🧭 cap calculé par le déplacement
-        if (pv) {
-          const mLat = (lat - pv.lat) * 111320, mLng = (lng - pv.lng) * 111320 * Math.cos((lat * Math.PI) / 180);
-          if (Math.hypot(mLat, mLng) > 4) {
-            hdgRef.current.calc = ((Math.atan2(mLng, mLat) * 180) / Math.PI + 360) % 360;
-            hdgRef.current.calcAt = Date.now();
+      const h = hdgRef.current;
+      const spd = typeof speed === 'number' && !isNaN(speed) ? speed : null;
+      h.gpsSpd = spd || 0;
+
+      // ---- 🧭 cap GPS : accepté UNIQUEMENT en vrai déplacement (les chipsets
+      //      renvoient des caps aléatoires à l'arrêt -> bec qui pivotait tout seul)
+      if (typeof heading === 'number' && !isNaN(heading) && (spd == null || spd > 1.1)) {
+        h.gps = (heading + 360) % 360; h.gpsAt = Date.now();
+        // 🧭 Calibration auto de la boussole en roulant : on compare ses variations
+        // au cap GPS (fiable à vitesse) pour détecter le SENS (certains téléphones
+        // l'inversent) et apprendre le décalage. Silencieux, aucun réglage —
+        // se complète en ~1 minute de conduite avec quelques virages.
+        if (spd != null && spd > 2.2 && h.comp != null && Date.now() - h.compAt < 5000) {
+          if (!h.cal) h.cal = { g: h.gps, c: h.comp, at: Date.now(), sumDGDC: 0, sumAbsDG: 0 };
+          else if (Date.now() - h.cal.at > 900) {
+            const dG = wrap180(h.gps - h.cal.g), dC = wrap180(h.comp - h.cal.c);
+            const s = { sumDGDC: h.cal.sumDGDC + dG * dC, sumAbsDG: h.cal.sumAbsDG + Math.abs(dG) };
+            if (h.calSign === 0 && s.sumAbsDG > 90) h.calSign = s.sumDGDC >= 0 ? 1 : -1;
+            if (h.calSign !== 0) {
+              const eff = ((h.calSign < 0 ? 360 - h.comp : h.comp) + 360) % 360;
+              const off = wrap180(eff - h.gps);
+              h.calOff = h.calOff == null ? off : wrap180(h.calOff + 0.25 * wrap180(off - h.calOff));
+            }
+            h.cal = { g: h.gps, c: h.comp, at: Date.now(), ...s };
           }
         }
-        prevFix.current = { lat, lng };
       }
-      if (!stopped && !nativeOk && Date.now() - lastPut > 1500) {   // 🌐 navigateur/PWA : envoie au serveur
-        lastPut = Date.now();
-        api('/driver/location', { method: 'PUT', body: { lat, lng } }).catch(() => {});
+
+      // ---- 🧭 cap calculé par déplacement FRANC (>= 12 m depuis le point d'ancrage) :
+      //      sens réel du mouvement, insensible au « marchandage » GPS de ±5-15 m
+      if (!h.anchor) h.anchor = { lat, lng };
+      else if (havM(h.anchor, { lat, lng }) > (h.calcAt ? 12 : 6)) {
+        const dLat = (lat - h.anchor.lat) * 111320, dLng = (lng - h.anchor.lng) * 111320 * Math.cos((lat * Math.PI) / 180);
+        h.calc = ((Math.atan2(dLng, dLat) * 180) / Math.PI + 360) % 360;
+        h.calcAt = Date.now();
+        h.anchor = { lat, lng };
       }
+
+      // ---- 📍 anti-dérive : fixes imprécis ignorés, et à l'arrêt le marqueur ne
+      //      bouge PLUS (le GPS « marchande » de quelques mètres même téléphone posé)
+      if (typeof accuracy === 'number' && accuracy > 75) return;   // fix trop mauvais
+      const disp = lastPos.current;
+      const dm = disp ? havM(disp, { lat, lng }) : Infinity;
+      const immobile = (spd != null && spd < 0.75) || (spd == null && dm < 8);
+      const send = () => { if (!stopped && !nativeOk && Date.now() - lastPut > 1500) { lastPut = Date.now(); api('/driver/location', { method: 'PUT', body: { lat, lng } }).catch(() => {}); } };
+      if (disp != null && immobile) { send(); return; }            // à l'arrêt : affichage figé, serveur à jour
+      lastPos.current = { lat, lng };
+      setPos({ lat, lng });
+      send();
     };
     let watchId = null;
     try {
@@ -157,15 +200,30 @@ export default function DriverApp() {
     };
     const pollIt = setInterval(pollSrv, 2000);
 
-    // 🧭 Boussole (à l'arrêt) : le livreur pivote le téléphone -> la flèche pivote avec lui
+    // 🧭 Boussole (pivot sur place) : priorité à l'ABSOLUE (boussole vraie), la relative
+    // est ignorée dès qu'une absolue est dispo. Lissage adaptatif : très stable au repos
+    // (micro-bruit filtré), réponse immédiate sur les vrais pivots/virages. Téléphone trop
+    // incliné -> boussole illisible -> événement ignoré.
     const onOrient = (e) => {
       try {
-        let h = typeof e.webkitCompassHeading === 'number' ? e.webkitCompassHeading : (typeof e.alpha === 'number' ? (360 - e.alpha) % 360 : null);
-        if (h == null) return;
+        const h = hdgRef.current;
+        const isAbs = e.type === 'deviceorientationabsolute' || e.absolute === true;
+        if (!isAbs && h.compMode === 'abs') return;
+        if (Math.abs(e.beta || 0) > 65 || Math.abs(e.gamma || 0) > 50) return;
+        let raw = typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)
+          ? e.webkitCompassHeading
+          : (typeof e.alpha === 'number' && !isNaN(e.alpha) ? (360 - e.alpha) % 360 : null);
+        if (raw == null) return;
         const ang = (screen.orientation?.angle ?? window.orientation ?? 0) || 0;
-        h = (h - ang + 720) % 360;
-        if (e.absolute === true || e.type === 'deviceorientationabsolute') hdgRef.current.abs = h;
-        else hdgRef.current.rel = h;
+        if (ang % 90 === 0 && ang) raw = (raw + ang + 720) % 360;   // écran pivoté : compensation
+        if (h.comp == null) h.comp = raw;
+        else {
+          const d = wrap180(raw - h.comp);
+          const a = Math.abs(d) > 40 ? 0.65 : Math.abs(d) > 12 ? 0.38 : 0.14;   // vif sur les virages, stable au repos
+          h.comp = (h.comp + d * a + 360) % 360;
+        }
+        h.compMode = isAbs ? 'abs' : 'rel';
+        h.compAt = Date.now();
       } catch {}
     };
     try {
