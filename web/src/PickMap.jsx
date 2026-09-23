@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { addBaseLayers } from './mapTiles.js';
 import { useT, toast } from './lib.jsx';
 
 /** Géocodage inverse gratuit (Nominatim) : coordonnées → adresse lisible */
@@ -29,7 +30,7 @@ export default function PickMap({ initial, onConfirm }) {
   useEffect(() => {
     if (!el.current || map.current) return;
     map.current = L.map(el.current, { zoomControl: true }).setView([initial.lat, initial.lng], 16);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map.current);
+    addBaseLayers(map.current);   // 🗺️ v2026.09.23.5 : Plan/Satellite + mémoire du choix
 
     const upd = () => {
       const c = map.current.getCenter();

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { addBaseLayers } from './mapTiles.js';
 import { fetchRoute, arrowSetHeading, glideMarker } from './RouteMap.jsx';
 import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';
 
@@ -51,7 +52,7 @@ export default function DriversMap({ drivers }) {
   useEffect(() => {
     if (!el.current || map.current) return;
     map.current = L.map(el.current, {}).setView([31.2001, 29.9187], 12);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map.current);
+    addBaseLayers(map.current);   // 🗺️ v2026.09.23.5 : Plan/Satellite + mémoire du choix
     layer.current = L.layerGroup().addTo(map.current);
     return () => { map.current?.remove(); map.current = null; layer.current = null; mks.current = {}; stKeys.current = {}; };
   }, []);

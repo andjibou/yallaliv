@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { addBaseLayers } from './mapTiles.js';
 import { fetchRoute } from './RouteMap.jsx';
 
 const mkIcon = (emoji) =>
@@ -27,7 +28,7 @@ export default function TrackMap({ storePos, clientPos, driverPos }) {
   useEffect(() => {
     if (!el.current || map.current) return;
     map.current = L.map(el.current, { attributionControl: true }).setView([31.2001, 29.9187], 13);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map.current);
+    addBaseLayers(map.current);   // 🗺️ v2026.09.23.5 : Plan/Satellite + mémoire du choix
     return () => { map.current?.remove(); map.current = null; markers.current = {}; };
   }, []);
 

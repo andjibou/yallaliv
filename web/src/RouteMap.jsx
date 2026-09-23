@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './lr-global.js';      // ⚙️ expose window.L (le plugin ci-dessous patche le L global)
-import 'leaflet-rotate';      // 🧭 v2026.09.23.1 : rotation de carte (setBearing) + pincement 2 doigts
+import 'leaflet-rotate';
+import { addBaseLayers } from './mapTiles.js';      // 🧭 v2026.09.23.1 : rotation de carte (setBearing) + pincement 2 doigts
 import { useT } from './lib.jsx';
 import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';
 
@@ -185,7 +186,7 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
     if (!el.current || map.current) return;
     // 🧭 live (livreur) : carte orientable (2 doigts) + rotation auto sur son cap
     map.current = L.map(el.current, live ? { rotate: true, touchRotate: true } : {}).setView([31.2001, 29.9187], 13);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map.current);
+    addBaseLayers(map.current);   // 🗺️ v2026.09.23.5 : Plan/Satellite + mémoire du choix
     return () => { map.current?.remove(); map.current = null; markers.current = {}; };
   }, []);
 
@@ -298,7 +299,7 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
     if (!el.current || map.current) return;
     // 🧭 live (livreur) : carte orientable (2 doigts) + rotation auto sur son cap
     map.current = L.map(el.current, live ? { rotate: true, touchRotate: true } : {}).setView([31.2001, 29.9187], 13);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map.current);
+    addBaseLayers(map.current);   // 🗺️ v2026.09.23.5 : Plan/Satellite + mémoire du choix
     return () => { map.current?.remove(); map.current = null; marks.current = {}; };
   }, []);
 
@@ -473,7 +474,7 @@ export function TourMap({ driverPos, stops, height = 340, live = null }) {
   useEffect(() => {
     if (!el.current || map.current) return;
     map.current = L.map(el.current, {}).setView([31.2001, 29.9187], 13);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map.current);
+    addBaseLayers(map.current);   // 🗺️ v2026.09.23.5 : Plan/Satellite + mémoire du choix
     grp.current = L.layerGroup().addTo(map.current);
     return () => { map.current?.remove(); map.current = null; grp.current = null; };
   }, []);
@@ -574,7 +575,7 @@ export function StoresMap({ stores, height = 380, onSelect }) {
   useEffect(() => {
     if (!el.current || map.current) return;
     map.current = L.map(el.current, {}).setView([31.2001, 29.9187], 12);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map.current);
+    addBaseLayers(map.current);   // 🗺️ v2026.09.23.5 : Plan/Satellite + mémoire du choix
     grp.current = L.layerGroup().addTo(map.current);
     return () => { map.current?.remove(); map.current = null; grp.current = null; };
   }, []);
