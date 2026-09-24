@@ -4,7 +4,7 @@ import TrackMap from '../TrackMap.jsx';
 import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton } from '../lib.jsx';
 import { BottomNav, CartBar, StatusBadge, PayBadge, Stepper, Empty, Spinner, BackBtn, LangSwitch, Modal, Stars, SuggestBox, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
-import PickMap, { reverseGeocode } from '../PickMap.jsx';
+import PickMap, { reverseGeocode, geocodeSearch } from '../PickMap.jsx';
 import AccountSettings from '../AccountSettings.jsx';
 import { StoresMap } from '../RouteMap.jsx';
 
@@ -480,6 +480,8 @@ export function CartPage() {
   const [busy, setBusy] = useState(false);
   const [gps, setGps] = useState(null);
   const [pickOpen, setPickOpen] = useState(false);
+  const [sugg, setSugg] = useState(null);       // 📍 v2026.09.23.10 : propositions d'adresses (frappe)
+  const suggTm = useRef(null);
   const [done, setDone] = useState(null); // 🔑 confirmation finale avec le code de remise
   const [coErr, setCoErr] = useState({});  // ⚠️ erreurs par champ du checkout
   const [card, setCard] = useState({ no: '', exp: '', cvc: '' });
@@ -505,6 +507,27 @@ export function CartPage() {
       () => toast(t('gps_fail'), 'err'),
       { timeout: 6000 }
     );
+  };
+
+  // 📍 v2026.09.23.10 — AUTOCOMPLÉTION de l'adresse : pendant la frappe, on cherche
+  // (Esri + OpenStreetMap, biaisé vers la position GPS / le magasin) et toucher une
+  // proposition pose AUTOMATIQUEMENT le point de livraison — coordonnées exactes
+  // de la proposition, envoyées avec la commande (le livreur voit le même point).
+  const onAddr = (e) => {
+    const v = e.target.value;
+    setAddress(v);
+    clearTimeout(suggTm.current);
+    if (v.trim().length < 4) { setSugg(null); return; }
+    suggTm.current = setTimeout(async () => {
+      const near = gps || (store?.lat != null ? { lat: store.lat, lng: store.lng } : { lat: 31.2001, lng: 29.9187 });
+      try { setSugg((await geocodeSearch(v.trim(), lang, near)).slice(0, 5)); } catch { setSugg(null); }
+    }, 500);
+  };
+  const pickSugg = (r) => {
+    setAddress(r.label.split(',').slice(0, 3).join(', '));
+    setGps({ lat: r.lat, lng: r.lng });
+    setSugg(null);
+    toast(t('loc_defined'));
   };
 
   const total = subtotal - (promo?.discount || 0) + (store?.delivery_fee || 0);
@@ -629,8 +652,18 @@ export function CartPage() {
       <div className="card mb12">
         <div className="field">
           <label className="label">📍 {t('address')}</label>
-          <textarea className="textarea" value={address} onChange={(e) => setAddress(e.target.value)} placeholder={t('address_ph') + ' — ex. : 12 rue Saad Zaghloul, Alexandrie'} />
+          <textarea className="textarea" value={address} onChange={onAddr} placeholder={t('address_ph') + ' — ex. : 12 rue Saad Zaghloul, Alexandrie'} />
           <FieldErr e={coErr.address} />
+          {sugg && sugg.length > 0 && (
+            <div className="card" style={{ padding: 0, marginTop: 6, overflow: 'hidden' }}>
+              {sugg.map((r, i) => (
+                <button key={i} type="button" onClick={() => pickSugg(r)}
+                  style={{ display: 'block', width: '100%', textAlign: 'start', padding: '8px 12px', background: 'transparent', border: 'none', borderBottom: i < sugg.length - 1 ? '1px solid #f1f5f9' : 'none', cursor: 'pointer', fontSize: 13.5, lineHeight: 1.35 }}>
+                  📍 {r.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="row mt12 wrap" style={{ gap: 8 }}>
           <button type="button" className="btn ghost sm" onClick={useGps}>🛰️ {t('use_gps')}</button>
