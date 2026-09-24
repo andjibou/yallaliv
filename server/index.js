@@ -429,6 +429,23 @@ app.get('/api/auth/me', auth, h(async (req, res) => {
 }));
 
 // ---------- PUBLIC ----------
+// 🎯 v2026.09.23.9 — Étend un lien court Google Maps (maps.app.goo.gl, g.co/maps)
+// pour récupérer l'URL finale contenant les coordonnées exactes. Public (les invités
+// au checkout n'ont pas de compte) et STRICTEMENT limité aux domaines Google Maps :
+// ce n'est pas un proxy ouvert.
+app.get('/api/gmaps/expand', async (req, res) => {
+  const u = String(req.query.url || '');
+  if (!/^https:\/\/(maps\.app\.goo\.gl\/|goo\.gl\/maps\/|g\.co\/maps\/)\S+$/i.test(u)) {
+    return res.status(400).json({ error: 'Lien non supporté' });
+  }
+  try {
+    const r = await fetch(u, { redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0 (Linux; Android 13) YallaLiv' } });
+    res.json({ url: r.url });
+  } catch {
+    res.status(502).json({ error: 'Lecture du lien impossible' });
+  }
+});
+
 app.get('/api/settings/public', h(async (req, res) => {
   if (!VAPID) await initVapid();   // 🛡️ attend l'initialisation (instance froide)
   res.json({ app_name: await getSetting('app_name', 'YallaLiv'), currency: await getSetting('currency', 'EGP'), vapid_public: VAPID ? VAPID.publicKey : null });

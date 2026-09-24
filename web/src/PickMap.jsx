@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { addBaseLayers } from './mapTiles.js';
-import { useT, useLang, toast } from './lib.jsx';
+import { useT, useLang, toast, api } from './lib.jsx';
 
 // ================= 📍 v2026.09.23.7 — Géocodage double source (gratuit, sans clé) =================
 // Le problème « l'adresse existe sur Google Maps mais pas chez nous » vient de la BASE
@@ -73,6 +73,37 @@ export async function geocodeSearch(q, lang = 'fr', near = null) {
 }
 
 /**
+ * 🎯 v2026.09.23.9 — Extrait les coordonnées EXACTES d'un lien Google Maps partagé
+ * (Partager → Copier le lien). Formats gérés :
+ *  · !3dLAT!4dLNG  : marqueur de lieu — précision maximale (priorité) ;
+ *  · @LAT,LNG      : épingle posée / caméra centrée dessus ;
+ *  · ?q= / query= / destination= / ll= / center=LAT,LNG.
+ * Même principe que le bouton 🧭 Navigation livreur : lien Google officiel, gratuit,
+ * sans clé API — la position Google est importée au millimètre dans notre carte.
+ */
+export function parseGmapsUrl(s) {
+  const chk = (lat, lng) => (Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null);
+  try {
+    s = String(s || '').trim();
+    if (!/^https?:\/\//i.test(s)) return null;
+    const num = '(-?\\d+(?:\\.\\d+)?)';
+    let m = s.match(new RegExp('!3d' + num + '!4d' + num));
+    if (m) return chk(+m[1], +m[2]);
+    m = s.match(new RegExp('@' + num + ',' + num));
+    if (m) return chk(+m[1], +m[2]);
+    const u = new URL(s);
+    for (const k of ['q', 'query', 'destination', 'll', 'center']) {
+      const v = u.searchParams.get(k);
+      if (v) {
+        const mm = v.match(new RegExp('^' + num + ',\\s*' + num));
+        if (mm) return chk(+mm[1], +mm[2]);
+      }
+    }
+    return null;
+  } catch { return null; }
+}
+
+/**
  * Sélecteur de position façon Uber :
  * l'épingle 📌 reste FIXE au centre — l'utilisateur déplace la carte.
  * 🔎 Nouveau : il peut aussi TAPER son adresse (Esri/OSM) — la carte y va directement,
@@ -91,6 +122,8 @@ export default function PickMap({ initial, onConfirm }) {
   const [q, setQ] = useState('');            // 🔎 texte recherché
   const [results, setResults] = useState(null);
   const [searching, setSearching] = useState(false);
+  const [paste, setPaste] = useState('');    // 🎯 lien Google Maps partagé (collé)
+  const [busyG, setBusyG] = useState(false);
 
   useEffect(() => {
     if (!el.current || map.current) return;
@@ -137,6 +170,32 @@ export default function PickMap({ initial, onConfirm }) {
     setResults(null);
   };
 
+  // 🎯 Ouvre Google Maps (app native ou web) avec la recherche en cours pré-remplie —
+  // même principe que le bouton 🧭 Navigation livreur : lien officiel Google, gratuit, sans clé.
+  const openG = () => {
+    const qq = q.trim();
+    window.open('https://www.google.com/maps/search/?api=1' + (qq ? '&query=' + encodeURIComponent(qq) : ''), '_blank');
+  };
+
+  // 🎯 Importe les coordonnées EXACTES du lien Google Maps partagé. Les liens courts
+  // (maps.app.goo.gl) sont étendus par notre serveur, puis analysés : l'épingle
+  // Leaflet prend la position Google au millimètre près.
+  const importG = async () => {
+    let s = paste.trim();
+    if (!s || busyG) return;
+    setBusyG(true);
+    try {
+      if (/goo\.gl|g\.co/.test(s)) {
+        try { const d = await api('/gmaps/expand?url=' + encodeURIComponent(s)); if (d?.url) s = d.url; } catch {}
+      }
+      const p = parseGmapsUrl(s);
+      if (!p) { toast(t('gmap_bad_link'), 'err'); return; }
+      setPaste('');
+      map.current?.setView([p.lat, p.lng], 18);
+      toast(t('gmap_imported'), 'ok');
+    } finally { setBusyG(false); }
+  };
+
   const confirm = async () => {
     setBusy(true);
     const address = addr || (await reverseGeocode(pos.lat, pos.lng, langRef.current));
@@ -166,6 +225,24 @@ export default function PickMap({ initial, onConfirm }) {
           ))}
         </div>
       )}
+      {/* 🎯 Précision Google Maps : chercher sur Google (lien officiel gratuit), puis
+          importer les coordonnées exactes du lien partagé — épingle au millimètre */}
+      <div className="card" style={{ padding: 10, marginBottom: 8 }}>
+        <div className="row spread wrap" style={{ gap: 6 }}>
+          <div className="small" style={{ fontWeight: 800 }}>🎯 {t('gmap_title')}</div>
+          <button className="btn blue sm" onClick={openG}>🔗 {t('gmap_open')}</button>
+        </div>
+        <div className="muted small mt4">{t('gmap_hint')}</div>
+        <div className="row mt8" style={{ gap: 6 }}>
+          <input
+            className="grow" value={paste} onChange={(e) => setPaste(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); importG(); } }}
+            placeholder={t('gmap_paste')}
+            style={{ padding: '9px 12px', borderRadius: 10, border: '1px solid #e3e9f0', fontSize: 13 }}
+          />
+          <button className="btn primary" disabled={busyG} onClick={importG}>{busyG ? '…' : '⬇️'}</button>
+        </div>
+      </div>
       <div style={{ position: 'relative' }}>
         <div ref={el} style={{ height: 320, borderRadius: 14, border: '1px solid #e3e9f0', background: '#eef2f7' }} />
         {/* épingle FIXE au centre — seule la carte bouge */}
