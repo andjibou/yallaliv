@@ -332,3 +332,43 @@ button { font-family: inherit; }
 .suggest-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 10px; border: none; background: none;
   border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 600; color: var(--ink); text-align: start; }
 .suggest-item:hover { background: #f0fdf4; }
+
+/* ============ 🧭 v2026.09.24.1 — Barre de navigation client moderne (5 onglets + ＋ central) ============ */
+.cnav {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 1200;
+  display: flex; align-items: flex-end; justify-content: space-around;
+  background: #fff; border-top: 1px solid var(--line);
+  box-shadow: 0 -6px 24px rgba(15, 23, 42, .08);
+  padding: 7px 4px calc(9px + env(safe-area-inset-bottom));
+}
+.cnav-item {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  background: none; border: none; color: #64748b; font-size: 10.5px; font-weight: 700;
+  cursor: pointer; padding: 5px 2px; text-decoration: none; line-height: 1.1; text-align: center;
+}
+.cnav-item .ci { font-size: 21px; line-height: 1; position: relative; transition: transform .15s ease; }
+.cnav-item.on { color: var(--brand); }
+.cnav-item.on .ci { transform: translateY(-2px) scale(1.08); }
+.cnav-item.on .ci::after {
+  content: ''; position: absolute; bottom: -5px; left: 50%; transform: translateX(-50%);
+  width: 5px; height: 5px; border-radius: 99px; background: var(--brand);
+}
+.cnav-fab-wrap { flex: 1; display: flex; justify-content: center; }
+.cnav-fab {
+  width: 58px; height: 58px; border-radius: 50%; border: 4px solid #fff;
+  background: linear-gradient(135deg, #0e9f6e, #0b7a54); color: #fff;
+  font-size: 32px; font-weight: 300; line-height: 1; margin-top: -30px;
+  box-shadow: 0 8px 22px rgba(14, 159, 110, .45);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  transition: transform .15s ease;
+}
+.cnav-fab:active { transform: scale(.93); }
+.cnav-badge {
+  position: absolute; top: -5px; right: -10px; min-width: 17px; height: 17px;
+  border-radius: 99px; background: #dc2626; color: #fff; font-size: 10px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center; padding: 0 4px;
+  border: 2px solid #fff; font-family: inherit;
+}
+/* carte annonce (marché) */
+.mkt-card { min-width: 118px; cursor: pointer; text-align: center; }
+.notif-unread { border-color: #bbf7d0 !important; background: #f0fdf4 !important; }

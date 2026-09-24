@@ -225,6 +225,34 @@ CREATE INDEX IF NOT EXISTS idx_orders_driver ON orders(driver_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_products_store ON products(store_id);
 CREATE INDEX IF NOT EXISTS idx_messages_order ON messages(order_id);
+
+-- 🛍️ v2026.09.24.1 — MARCHÉ (style OLX) : articles publiés par tout utilisateur connecté
+CREATE TABLE IF NOT EXISTS listings (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'other',
+  description TEXT,
+  price REAL NOT NULL,
+  phone TEXT,
+  photo TEXT,
+  available INTEGER NOT NULL DEFAULT 1,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_listings_avail ON listings(available, created_at);
+
+-- 🔔 v2026.09.24.1 — Centre de notifications : chaque push alimente le fil in-app
+CREATE TABLE IF NOT EXISTS notifications (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'info',
+  title TEXT NOT NULL,
+  body TEXT,
+  url TEXT DEFAULT '/',
+  read INTEGER NOT NULL DEFAULT 0,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notifs_user ON notifications(user_id, read);
 `;
 
 // ---------- Initialisation (appelée au démarrage) ----------

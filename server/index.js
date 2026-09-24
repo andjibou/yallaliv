@@ -221,6 +221,11 @@ function pushTo(userIds, title, body, url = '/') {
   (async () => {
     const ids = [...new Set((userIds || []).filter(Boolean))];
     if (!ids.length) return;
+    // 🔔 v2026.09.24.1 — centre de notifications : chaque push alimente aussi le fil in-app
+    const oidM = String(title).match(/#(\d+)/);
+    const kind = String(title).includes('💬') ? 'message' : /[#🛵📦🧾🚨🎉🚫↩️]/.test(String(title)) ? 'order' : 'info';
+    ids.forEach((uid) => run('INSERT INTO notifications(user_id,kind,title,body,url,created_at) VALUES(?,?,?,?,?,?)',
+      [uid, kind, title, body || '', oidM ? '/app/orders' : (url || '/'), Date.now()]).catch(() => {}));
     if (!VAPID) { await initVapid(); if (!VAPID) return; }   // 🛡️ pas encore prêt -> FCM passe, web push attend le prochain envoi
     const subs = await all(`SELECT * FROM push_subscriptions WHERE user_id IN (${ids.map(() => '?').join(',')})`, ids);
     for (const s of subs) {
@@ -429,6 +434,75 @@ app.get('/api/auth/me', auth, h(async (req, res) => {
 }));
 
 // ---------- PUBLIC ----------
+// 🔔 v2026.09.24.1 — Centre de notifications (fil in-app + badge non-lus)
+app.get('/api/notifications', auth, h(async (req, res) => {
+  const rows = await all('SELECT id,kind,title,body,url,read,created_at FROM notifications WHERE user_id=? ORDER BY created_at DESC LIMIT 60', [req.user.id]);
+  const c = await get('SELECT COUNT(*) AS n FROM notifications WHERE user_id=? AND read=0', [req.user.id]);
+  res.json({ notifications: rows, unread: c.n });
+}));
+app.post('/api/notifications/read', auth, h(async (req, res) => {
+  await run('UPDATE notifications SET read=1 WHERE user_id=?', [req.user.id]);
+  res.json({ ok: true });
+}));
+
+// 🛍️ v2026.09.24.1 — MARCHÉ (style OLX) : tout utilisateur connecté publie des articles,
+// visibles par tous. Contact direct acheteur → vendeur (appel/WhatsApp), comme OLX.
+const LISTING_CATS = ['phones', 'electronics', 'home', 'fashion', 'kids', 'sports', 'beauty', 'auto', 'other'];
+app.get('/api/listings', h(async (req, res) => {
+  const { q, cat } = req.query;
+  let sql = `SELECT l.id, l.name, l.category, l.description, l.price, l.phone, l.photo, l.created_at,
+    u.name AS seller FROM listings l JOIN users u ON u.id=l.user_id WHERE l.available=1`;
+  const args = [];
+  if (cat && cat !== 'all') { sql += ' AND l.category=?'; args.push(cat); }
+  if (q) { sql += ' AND (l.name ILIKE ? OR l.description ILIKE ?)'; args.push(`%${q}%`, `%${q}%`); }
+  sql += ' ORDER BY l.created_at DESC LIMIT 60';
+  res.json({ listings: await all(sql, args) });
+}));
+app.get('/api/listings/mine', auth, h(async (req, res) => {
+  res.json({ listings: await all('SELECT * FROM listings WHERE user_id=? ORDER BY created_at DESC', [req.user.id]) });
+}));
+app.post('/api/listings', auth, h(async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  const description = String(req.body.description || '').trim().slice(0, 1000);
+  const price = parseFloat(req.body.price);
+  const phone = String(req.body.phone || req.user.phone || '').trim();
+  const category = LISTING_CATS.includes(req.body.category) ? req.body.category : 'other';
+  const photo = typeof req.body.photo === 'string' && req.body.photo.startsWith('data:image/') && req.body.photo.length < 2200000 ? req.body.photo : null;
+  if (name.length < 2 || name.length > 80) return res.status(400).json({ error: "Nom de l'article invalide (2 à 80 caractères)" });
+  if (isNaN(price) || price < 0 || price > 10000000) return res.status(400).json({ error: 'Prix invalide' });
+  if (!phone) return res.status(400).json({ error: 'Téléphone requis pour que les acheteurs vous contactent' });
+  const r = await run('INSERT INTO listings(user_id,name,category,description,price,phone,photo,created_at) VALUES(?,?,?,?,?,?,?,?) RETURNING id',
+    [req.user.id, name, category, description, price, phone, photo, Date.now()]);
+  res.json({ id: r.rows[0].id });
+}));
+app.put('/api/listings/:id', auth, h(async (req, res) => {
+  const l = await get('SELECT * FROM listings WHERE id=?', [req.params.id]);
+  if (!l) return res.status(404).json({ error: 'Annonce introuvable' });
+  if (l.user_id !== req.user.id && req.user.role !== 'superadmin') return res.status(403).json({ error: "Ce n'est pas votre annonce" });
+  const name = String(req.body.name ?? l.name).trim().slice(0, 80);
+  const price = req.body.price != null ? parseFloat(req.body.price) : l.price;
+  if (name.length < 2) return res.status(400).json({ error: "Nom de l'article invalide" });
+  if (isNaN(price) || price < 0) return res.status(400).json({ error: 'Prix invalide' });
+  await run('UPDATE listings SET name=?, category=?, description=?, price=?, phone=?, photo=?, available=? WHERE id=?', [
+    name,
+    LISTING_CATS.includes(req.body.category) ? req.body.category : l.category,
+    String(req.body.description ?? l.description ?? '').trim().slice(0, 1000),
+    price,
+    String(req.body.phone ?? l.phone ?? '').trim(),
+    (typeof req.body.photo === 'string' && req.body.photo.startsWith('data:image/') && req.body.photo.length < 2200000) ? req.body.photo : (req.body.photo === null ? null : l.photo),
+    req.body.available != null ? (req.body.available ? 1 : 0) : l.available,
+    l.id
+  ]);
+  res.json({ ok: true });
+}));
+app.delete('/api/listings/:id', auth, h(async (req, res) => {
+  const l = await get('SELECT * FROM listings WHERE id=?', [req.params.id]);
+  if (!l) return res.status(404).json({ error: 'Annonce introuvable' });
+  if (l.user_id !== req.user.id && req.user.role !== 'superadmin') return res.status(403).json({ error: "Ce n'est pas votre annonce" });
+  await run('DELETE FROM listings WHERE id=?', [l.id]);
+  res.json({ ok: true });
+}));
+
 app.get('/api/settings/public', h(async (req, res) => {
   if (!VAPID) await initVapid();   // 🛡️ attend l'initialisation (instance froide)
   res.json({ app_name: await getSetting('app_name', 'YallaLiv'), currency: await getSetting('currency', 'EGP'), vapid_public: VAPID ? VAPID.publicKey : null });

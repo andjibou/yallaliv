@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, Outlet, useSearchParams } from 'react-router-dom';
+import { Link, NavLink, useNavigate, useParams, Outlet, useSearchParams } from 'react-router-dom';
 import TrackMap from '../TrackMap.jsx';
 import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton } from '../lib.jsx';
 import { BottomNav, CartBar, StatusBadge, PayBadge, Stepper, Empty, Spinner, BackBtn, LangSwitch, Modal, Stars, SuggestBox, NoPhoto } from '../ui.jsx';
@@ -10,6 +10,35 @@ import { StoresMap } from '../RouteMap.jsx';
 
 const TYPE_META = { restaurant: { e: '🍽️', c: '#ef6c4d' }, market: { e: '🛒', c: '#3b82f6' }, pharmacy: { e: '💊', c: '#14b8a6' } };
 
+// 🛍️ v2026.09.24.1 — Marché (style OLX) : catégories + emojis + lien WhatsApp Égypte
+const CAT_EMOJI = { phones: '📱', electronics: '🔌', home: '🏠', fashion: '👕', kids: '🧸', sports: '⚽', beauty: '💄', auto: '🚗', other: '📦' };
+const waLink = (p) => 'https://wa.me/' + String(p || '').replace(/\D/g, '').replace(/^0/, '20');
+
+// 🧭 v2026.09.24.1 — Barre de navigation moderne : Accueil · Commandes · [＋] · Notifications · Paramètres
+function ClientNav() {
+  const t = useT();
+  const [unread, setUnread] = useState(0);
+  usePoll(() => api('/notifications').then((d) => setUnread(d.unread || 0)).catch(() => {}), 15000);
+  const it = (to, icon, label, end) => (
+    <NavLink key={to} to={to} end={end} className={({ isActive }) => 'cnav-item' + (isActive ? ' on' : '')}>
+      <span className="ci">{icon}</span>{label}
+    </NavLink>
+  );
+  return (
+    <nav className="cnav">
+      {it('/app', '🏠', t('home'), true)}
+      {it('/app/orders', '🧾', t('orders_nav'))}
+      <div className="cnav-fab-wrap">
+        <NavLink to="/app/publish" className="cnav-fab" title={t('publish')} aria-label={t('publish')}>＋</NavLink>
+      </div>
+      <NavLink to="/app/notifications" className={({ isActive }) => 'cnav-item' + (isActive ? ' on' : '')}>
+        <span className="ci">🔔{unread > 0 && <span className="cnav-badge">{unread > 99 ? '99+' : unread}</span>}</span>{t('notifications')}
+      </NavLink>
+      {it('/app/settings', '⚙️', t('settings'))}
+    </nav>
+  );
+}
+
 export function ClientLayout() {
   return (
     <div className="app-client">
@@ -17,7 +46,7 @@ export function ClientLayout() {
       <NotifNag role="client" />
       <Outlet />
       <CartBar />
-      <BottomNav />
+      <ClientNav />
     </div>
   );
 }
@@ -36,6 +65,8 @@ export function ClientHome() {
   const [type, setType] = useState(sp.get('t') || 'all');
   const [q, setQ] = useState(sp.get('q') || '');
   const [gDetail, setGDetail] = useState(null); // fiche produit ouverte depuis la vue Produits
+  const [market, setMarket] = useState(null);   // 🛍️ dernières annonces du marché
+  const [mkt, setMkt] = useState(null);         // annonce ouverte en fiche
   const [gQty, setGQty] = useState(1);
   const [gBig, setGBig] = useState(null);
 
@@ -52,6 +83,9 @@ export function ClientHome() {
       setSp(next, { replace: !isNav });
     }
   }, [view, type, q]);
+  // 🛍️ dernières annonces du marché (section de l'accueil)
+  useEffect(() => { api('/listings').then((d) => setMarket(d.listings)).catch(() => setMarket([])); }, []);
+
   // ← bouton retour : l'URL rechange → re-synchroniser la vue affichée
   useEffect(() => {
     const sync = () => {
@@ -130,8 +164,8 @@ export function ClientHome() {
           <div className="brand-name">Yalla<span className="accent">Liv</span></div>
           <div className="muted small ellipsis">{t('home_title')} {user?.name?.split(' ')[0]} 👋</div>
         </div>
-        <BellButton />
         <LangSwitch />
+        <button className="icon-btn" onClick={() => nav('/app/profile')} title={t('profile')} aria-label={t('profile')} style={{ fontSize: 19 }}>👤</button>
       </div>
 
       <SuggestBox
@@ -207,6 +241,26 @@ export function ClientHome() {
           )
       )}
 
+      {view === 'stores' && market?.length > 0 && (
+        <div className="card mb12">
+          <div className="row spread mb8">
+            <div className="h2">🛍️ {t('market')}</div>
+            <button className="btn ghost sm" onClick={() => nav('/app/market')}>{t('see_all')} →</button>
+          </div>
+          <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 4 }}>
+            {market.slice(0, 12).map((l) => (
+              <div key={l.id} className="mkt-card" onClick={() => setMkt(l)}>
+                {l.photo
+                  ? <img src={l.photo} alt="" style={{ width: 110, height: 86, borderRadius: 12, objectFit: 'cover' }} />
+                  : <div style={{ width: 110, height: 86, borderRadius: 12, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30 }}>{CAT_EMOJI[l.category] || '📦'}</div>}
+                <div className="small ellipsis" style={{ fontWeight: 700, marginTop: 4, maxWidth: 110 }}>{l.name}</div>
+                <div className="small" style={{ color: 'var(--brand-dark)', fontWeight: 800 }}>{fmtMoney(l.price)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {view === 'stores' && (
       !stores ? (
         <Spinner />
@@ -237,6 +291,27 @@ export function ClientHome() {
         </div>
         )
       )}
+
+      <Modal open={!!mkt} onClose={() => setMkt(null)} title={'🛍️ ' + t('market')}>
+        {mkt && (
+          <div>
+            {mkt.photo
+              ? <img src={mkt.photo} alt="" style={{ width: '100%', maxHeight: 240, objectFit: 'cover', borderRadius: 14 }} />
+              : <div style={{ height: 150, borderRadius: 14, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 54 }}>{CAT_EMOJI[mkt.category] || '📦'}</div>}
+            <div className="row spread wrap mt8">
+              <div className="h2">{mkt.name}</div>
+              <div className="h2" style={{ color: 'var(--brand-dark)' }}>{fmtMoney(mkt.price)}</div>
+            </div>
+            <div className="muted small mt4">📦 {t('listing_cat')} : {CAT_EMOJI[mkt.category] || '📦'} {mkt.category} · 👤 {mkt.seller}</div>
+            {mkt.description && <p className="small mt8" style={{ whiteSpace: 'pre-wrap' }}>{mkt.description}</p>}
+            <div className="row mt8 wrap">
+              <a className="btn blue grow" href={'tel:' + mkt.phone}>📞 {t('call')}</a>
+              <a className="btn grow" style={{ background: '#25d366', color: '#fff' }} href={waLink(mkt.phone)} target="_blank" rel="noopener">💬 WhatsApp</a>
+            </div>
+            <button className="btn ghost block mt8" onClick={() => { setMkt(null); nav('/app/market'); }}>{t('see_all')} →</button>
+          </div>
+        )}
+      </Modal>
 
       <Modal open={!!gDetail} onClose={() => setGDetail(null)} title={t('product_details')}>
         {gDetail?.loading ? <Spinner /> : gDetail?.store && gDetail?.product ? (
@@ -1125,5 +1200,301 @@ export function ClientProfile() {
       <button className="btn danger block mt16" onClick={logout}>🚪 {t('logout')}</button>
       <div className="muted small mt16" style={{ textAlign: 'center' }}>🚀 YallaLiv · v1.0</div>
     </>
+  );
+}
+
+// ================= 🛍️ v2026.09.24.1 — Page Marché (toutes les annonces + mes annonces) =================
+export function MarketPage() {
+  const t = useT();
+  const nav = useNavigate();
+  const { user } = useAuth();
+  const [cat, setCat] = useState('all');
+  const [q, setQ] = useState('');
+  const [data, setData] = useState(null);
+  const [mine, setMine] = useState(null);
+  const [detail, setDetail] = useState(null);
+
+  const load = () => {
+    const p = new URLSearchParams();
+    if (cat !== 'all') p.set('cat', cat);
+    if (q.trim()) p.set('q', q.trim());
+    api('/listings?' + p.toString()).then((d) => setData(d.listings)).catch(() => setData([]));
+    if (user) api('/listings/mine').then((d) => setMine(d.listings)).catch(() => {});
+  };
+  useEffect(load, [cat]);
+
+  const toggle = async (l) => {
+    try { await api('/listings/' + l.id, { method: 'PUT', body: { available: l.available ? 0 : 1 } }); load(); }
+    catch (ex) { toast(ex.message, 'err'); }
+  };
+  const del = async (l) => {
+    if (!window.confirm(t('confirm_delete'))) return;
+    try { await api('/listings/' + l.id, { method: 'DELETE' }); toast(t('listing_deleted')); load(); }
+    catch (ex) { toast(ex.message, 'err'); }
+  };
+
+  return (
+    <div>
+      <div className="topbar">
+        <BackBtn />
+        <div className="grow"><div className="brand-name">🛍️ {t('market')}</div></div>
+        <button className="btn primary sm" onClick={() => nav('/app/publish')}>＋ {t('publish')}</button>
+      </div>
+
+      <div className="row mb8" style={{ gap: 6 }}>
+        <input className="grow" value={q} onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); load(); } }}
+          placeholder={'🔍 ' + t('search_ph')} style={{ padding: '9px 12px', borderRadius: 10, border: '1px solid #e3e9f0' }} />
+        <button className="btn blue" onClick={load}>🔍</button>
+      </div>
+      <div className="row wrap mb12" style={{ gap: 6 }}>
+        {[['all', '🛍️'], ...Object.entries(CAT_EMOJI)].map(([k, e]) => (
+          <button key={k} className={'badge' + (cat === k ? ' b-active' : '')} style={{ cursor: 'pointer', border: 'none' }}
+            onClick={() => setCat(k)}>{e} {k === 'all' ? t('all') : t('cat_' + k)}</button>
+        ))}
+      </div>
+
+      {mine?.length > 0 && (
+        <div className="card mb12">
+          <div className="h2 mb8">📌 {t('my_listings')} ({mine.length})</div>
+          {mine.map((l) => (
+            <div key={l.id} className="row spread wrap" style={{ padding: '8px 0', borderBottom: '1px dashed #eef2f7', gap: 6 }}>
+              <div className="grow" style={{ minWidth: 130 }}>
+                <div className="small" style={{ fontWeight: 700 }}>{CAT_EMOJI[l.category] || '📦'} {l.name} {l.available ? '' : <span className="muted small">(masquée)</span>}</div>
+                <div className="muted small">{fmtMoney(l.price)}</div>
+              </div>
+              <div className="row" style={{ gap: 4 }}>
+                <button className="btn ghost sm" onClick={() => nav('/app/publish?edit=' + l.id)}>✏️ {t('edit')}</button>
+                <button className="btn ghost sm" onClick={() => toggle(l)}>{l.available ? '🚫 ' + t('hide_listing') : '✅ ' + t('show_listing')}</button>
+                <button className="btn danger sm" onClick={() => del(l)}>🗑️</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!data ? <Spinner /> : data.length === 0 ? <Empty e="🛍️" text={t('no_listings')} /> : (
+        <div className="store-grid" style={{ gridTemplateColumns: '1fr' }}>
+          {data.map((l) => (
+            <div key={l.id} className="card store-card" onClick={() => setDetail(l)}>
+              {l.photo
+                ? <img src={l.photo} alt="" style={{ width: 52, height: 52, borderRadius: 14, objectFit: 'cover', flexShrink: 0, border: '1px solid var(--line)' }} />
+                : <div className="store-emoji" style={{ background: '#f1f5f9' }}>{CAT_EMOJI[l.category] || '📦'}</div>}
+              <div className="grow">
+                <div className="h2 ellipsis">{l.name}</div>
+                <div className="muted small ellipsis">👤 {l.seller}</div>
+                <div className="row mt4" style={{ gap: 6 }}>
+                  <span className="badge" style={{ background: '#dcfce7', color: '#166534' }}>{fmtMoney(l.price)}</span>
+                  <span className="badge">{CAT_EMOJI[l.category] || '📦'} {t('cat_' + l.category)}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Modal open={!!detail} onClose={() => setDetail(null)} title={'🛍️ ' + t('market')}>
+        {detail && (
+          <div>
+            {detail.photo
+              ? <img src={detail.photo} alt="" style={{ width: '100%', maxHeight: 240, objectFit: 'cover', borderRadius: 14 }} />
+              : <div style={{ height: 150, borderRadius: 14, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 54 }}>{CAT_EMOJI[detail.category] || '📦'}</div>}
+            <div className="row spread wrap mt8">
+              <div className="h2">{detail.name}</div>
+              <div className="h2" style={{ color: 'var(--brand-dark)' }}>{fmtMoney(detail.price)}</div>
+            </div>
+            <div className="muted small mt4">👤 {detail.seller}</div>
+            {detail.description && <p className="small mt8" style={{ whiteSpace: 'pre-wrap' }}>{detail.description}</p>}
+            <div className="row mt8 wrap">
+              <a className="btn blue grow" href={'tel:' + detail.phone}>📞 {t('call')}</a>
+              <a className="btn grow" style={{ background: '#25d366', color: '#fff' }} href={waLink(detail.phone)} target="_blank" rel="noopener">💬 WhatsApp</a>
+            </div>
+          </div>
+        )}
+      </Modal>
+    </div>
+  );
+}
+
+// ================= ＋ Publier / Modifier une annonce =================
+export function PublishPage() {
+  const t = useT();
+  const nav = useNavigate();
+  const { user } = useAuth();
+  const [sp] = useSearchParams();
+  const editId = sp.get('edit');
+  const [form, setForm] = useState({ name: '', category: 'other', description: '', price: '', phone: user?.phone || '', photo: null });
+  const [busy, setBusy] = useState(false);
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    if (!editId) return;
+    api('/listings/mine').then((d) => {
+      const l = (d.listings || []).find((x) => String(x.id) === String(editId));
+      if (l) setForm({ name: l.name, category: l.category, description: l.description || '', price: String(l.price), phone: l.phone || '', photo: l.photo });
+    }).catch(() => {});
+  }, [editId]);
+
+  // 📷 photo compressée côté navigateur (max 1000px, JPEG) — jamais de fichier envoyé au serveur
+  const pickPhoto = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, 1000 / Math.max(img.width, img.height));
+        const cv = document.createElement('canvas');
+        cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        set('photo', cv.toDataURL('image/jpeg', 0.82));
+      };
+      img.src = rd.result;
+    };
+    rd.readAsDataURL(file);
+  };
+
+  const submit = async () => {
+    if (busy) return;
+    if (form.name.trim().length < 2) return toast(t('listing_name') + ' ?', 'err');
+    const price = parseFloat(form.price);
+    if (isNaN(price) || price < 0) return toast(t('listing_price') + ' ?', 'err');
+    if (!form.phone.trim()) return toast(t('listing_phone') + ' ?', 'err');
+    setBusy(true);
+    try {
+      const body = { name: form.name.trim(), category: form.category, description: form.description.trim(), price, phone: form.phone.trim(), photo: form.photo };
+      if (editId) { await api('/listings/' + editId, { method: 'PUT', body }); toast(t('listing_updated'), 'ok'); }
+      else { await api('/listings', { method: 'POST', body }); toast(t('listing_published'), 'ok'); }
+      nav('/app/market');
+    } catch (ex) { toast(ex.message, 'err'); }
+    setBusy(false);
+  };
+
+  return (
+    <div>
+      <div className="topbar">
+        <BackBtn />
+        <div className="grow"><div className="brand-name">{editId ? '✏️ ' + t('edit') : '＋ ' + t('publish')}</div></div>
+      </div>
+
+      <div className="banner ok mb12">💡 {t('sell_hint')}</div>
+
+      <div className="card mb12">
+        <div className="field">
+          <label className="label">📷 {t('add_photo')}</label>
+          <div className="row">
+            {form.photo && <img src={form.photo} alt="" style={{ width: 74, height: 74, borderRadius: 12, objectFit: 'cover' }} />}
+            <input type="file" accept="image/*" onChange={pickPhoto} style={{ fontSize: 13 }} />
+            {form.photo && <button className="btn danger sm" onClick={() => set('photo', null)}>🗑️</button>}
+          </div>
+        </div>
+        <div className="field">
+          <label className="label">📦 {t('listing_name')}</label>
+          <input className="input" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="ex. : iPhone 12 — très bon état" />
+        </div>
+        <div className="field">
+          <label className="label">🏷️ {t('listing_cat')}</label>
+          <div className="row wrap" style={{ gap: 6 }}>
+            {Object.entries(CAT_EMOJI).map(([k, e]) => (
+              <button key={k} className={'badge' + (form.category === k ? ' b-active' : '')} style={{ cursor: 'pointer', border: 'none' }}
+                onClick={() => set('category', k)}>{e} {t('cat_' + k)}</button>
+            ))}
+          </div>
+        </div>
+        <div className="row" style={{ gap: 10 }}>
+          <div className="field grow">
+            <label className="label">💰 {t('listing_price')}</label>
+            <input className="input" dir="ltr" type="number" min="0" value={form.price} onChange={(e) => set('price', e.target.value)} placeholder="0" />
+          </div>
+          <div className="field grow">
+            <label className="label">📞 {t('listing_phone')}</label>
+            <input className="input" dir="ltr" type="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="0100 123 4567" />
+          </div>
+        </div>
+        <div className="field">
+          <label className="label">📝 {t('listing_desc')}</label>
+          <textarea className="textarea" rows={3} value={form.description} onChange={(e) => set('description', e.target.value)} />
+        </div>
+        <button className="btn primary block" disabled={busy} onClick={submit}>{busy ? '…' : (editId ? '✅ ' + t('save') : '🚀 ' + t('publish'))}</button>
+      </div>
+    </div>
+  );
+}
+
+// ================= 🔔 Centre de notifications =================
+export function NotificationsPage() {
+  const t = useT();
+  const nav = useNavigate();
+  const [data, setData] = useState(null);
+  const load = () => api('/notifications').then(setData).catch(() => setData({ notifications: [], unread: 0 }));
+  usePoll(load, 10000);
+  const markAll = async () => { try { await api('/notifications/read', { method: 'POST' }); load(); } catch {} };
+  const icon = (k) => (k === 'message' ? '💬' : k === 'order' ? '📦' : '🔔');
+
+  return (
+    <div>
+      <div className="topbar">
+        <BackBtn />
+        <div className="grow"><div className="brand-name">🔔 {t('notifications')}</div></div>
+        {data?.unread > 0 && <button className="btn ghost sm" onClick={markAll}>✓ {t('mark_all_read')}</button>}
+      </div>
+      {!data ? <Spinner /> : !data.notifications.length ? <Empty e="🔔" text={t('no_notifs')} /> : data.notifications.map((n) => (
+        <div key={n.id} className={'card mb8' + (n.read ? '' : ' notif-unread')} style={{ cursor: 'pointer' }}
+          onClick={() => nav(n.url || '/app')}>
+          <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+            <div style={{ fontSize: 22 }}>{icon(n.kind)}</div>
+            <div className="grow">
+              <div style={{ fontWeight: 800, fontSize: 13.5 }}>{n.title}</div>
+              <div className="muted small">{n.body}</div>
+              <div className="muted small" style={{ fontSize: 11, marginTop: 3 }}>{fmtDate(n.created_at)}</div>
+            </div>
+            {!n.read && <span style={{ width: 9, height: 9, borderRadius: 99, background: '#dc2626', flexShrink: 0, marginTop: 4 }} />}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ================= ⚙️ Paramètres =================
+export function SettingsPage() {
+  const t = useT();
+  const nav = useNavigate();
+  const { user, logout } = useAuth();
+  return (
+    <div>
+      <div className="topbar">
+        <BackBtn />
+        <div className="grow"><div className="brand-name">⚙️ {t('settings')}</div></div>
+      </div>
+
+      <div className="card mb12 row spread" style={{ alignItems: 'center' }}>
+        <div>
+          <div style={{ fontWeight: 800 }}>👤 {t('profile')}</div>
+          <div className="muted small">{user?.name} · {user?.phone || user?.email}</div>
+        </div>
+        <button className="btn blue sm" onClick={() => nav('/app/profile')}>{t('edit')}</button>
+      </div>
+
+      <div className="card mb12 row spread" style={{ alignItems: 'center' }}>
+        <div>
+          <div style={{ fontWeight: 800 }}>🔔 {t('push_notifs')}</div>
+          <div className="muted small">{t('notif_toggle_hint')}</div>
+        </div>
+        <BellButton />
+      </div>
+
+      <div className="card mb12 row spread" style={{ alignItems: 'center' }}>
+        <div style={{ fontWeight: 800 }}>🌐 {t('language')}</div>
+        <LangSwitch />
+      </div>
+
+      <div className="card mb12">
+        <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.24.1</div>
+      </div>
+
+      <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
+    </div>
   );
 }
