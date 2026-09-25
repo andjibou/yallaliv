@@ -10,11 +10,11 @@ import { StoresMap } from '../RouteMap.jsx';
 
 const TYPE_META = { restaurant: { e: '🍽️', c: '#ef6c4d' }, market: { e: '🛒', c: '#3b82f6' }, pharmacy: { e: '💊', c: '#14b8a6' } };
 
-// 🛍️ v2026.09.24.1 — Marché (style OLX) : catégories + emojis + lien WhatsApp Égypte
+// 🛍️ v2026.09.24.2 — Marché (style OLX) : catégories + emojis + lien WhatsApp Égypte
 const CAT_EMOJI = { phones: '📱', electronics: '🔌', home: '🏠', fashion: '👕', kids: '🧸', sports: '⚽', beauty: '💄', auto: '🚗', other: '📦' };
 const waLink = (p) => 'https://wa.me/' + String(p || '').replace(/\D/g, '').replace(/^0/, '20');
 
-// 🧭 v2026.09.24.1 — Barre de navigation moderne : Accueil · Commandes · [＋] · Notifications · Paramètres
+// 🧭 v2026.09.24.2 — Barre de navigation moderne : Accueil · Commandes · [＋] · Notifications · Paramètres
 function ClientNav() {
   const t = useT();
   const [unread, setUnread] = useState(0);
@@ -29,7 +29,10 @@ function ClientNav() {
       {it('/app', '🏠', t('home'), true)}
       {it('/app/orders', '🧾', t('orders_nav'))}
       <div className="cnav-fab-wrap">
-        <NavLink to="/app/publish" className="cnav-fab" title={t('publish')} aria-label={t('publish')}>＋</NavLink>
+        <NavLink to="/app/publish" className="cnav-fab" title={t('publish')} aria-label={t('publish')}>
+            <span style={{ fontSize: 32, lineHeight: 1 }}>＋</span>
+            <span style={{ fontSize: 8.5, fontWeight: 800, lineHeight: 1.5 }}>{t('publish')}</span>
+          </NavLink>
       </div>
       <NavLink to="/app/notifications" className={({ isActive }) => 'cnav-item' + (isActive ? ' on' : '')}>
         <span className="ci">🔔{unread > 0 && <span className="cnav-badge">{unread > 99 ? '99+' : unread}</span>}</span>{t('notifications')}
@@ -65,8 +68,6 @@ export function ClientHome() {
   const [type, setType] = useState(sp.get('t') || 'all');
   const [q, setQ] = useState(sp.get('q') || '');
   const [gDetail, setGDetail] = useState(null); // fiche produit ouverte depuis la vue Produits
-  const [market, setMarket] = useState(null);   // 🛍️ dernières annonces du marché
-  const [mkt, setMkt] = useState(null);         // annonce ouverte en fiche
   const [gQty, setGQty] = useState(1);
   const [gBig, setGBig] = useState(null);
 
@@ -83,9 +84,6 @@ export function ClientHome() {
       setSp(next, { replace: !isNav });
     }
   }, [view, type, q]);
-  // 🛍️ dernières annonces du marché (section de l'accueil)
-  useEffect(() => { api('/listings').then((d) => setMarket(d.listings)).catch(() => setMarket([])); }, []);
-
   // ← bouton retour : l'URL rechange → re-synchroniser la vue affichée
   useEffect(() => {
     const sync = () => {
@@ -241,21 +239,19 @@ export function ClientHome() {
           )
       )}
 
-      {view === 'stores' && market?.length > 0 && (
+      {view === 'stores' && (
         <div className="card mb12">
           <div className="row spread mb8">
             <div className="h2">🛍️ {t('market')}</div>
             <button className="btn ghost sm" onClick={() => nav('/app/market')}>{t('see_all')} →</button>
           </div>
-          <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 4 }}>
-            {market.slice(0, 12).map((l) => (
-              <div key={l.id} className="mkt-card" onClick={() => setMkt(l)}>
-                {l.photo
-                  ? <img src={l.photo} alt="" style={{ width: 110, height: 86, borderRadius: 12, objectFit: 'cover' }} />
-                  : <div style={{ width: 110, height: 86, borderRadius: 12, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30 }}>{CAT_EMOJI[l.category] || '📦'}</div>}
-                <div className="small ellipsis" style={{ fontWeight: 700, marginTop: 4, maxWidth: 110 }}>{l.name}</div>
-                <div className="small" style={{ color: 'var(--brand-dark)', fontWeight: 800 }}>{fmtMoney(l.price)}</div>
-              </div>
+          {/* 🛍️ v2026.09.24.2 — grandes icônes 3D réalistes par catégorie, défilement gauche/droite */}
+          <div className="mkt-cats">
+            {Object.keys(CAT_EMOJI).map((k) => (
+              <button key={k} type="button" className="mkt-cat" onClick={() => nav('/app/market?cat=' + k)}>
+                <img src={'/market/' + k + '.jpg'} alt={t('cat_' + k)} loading="lazy" />
+                <span>{t('cat_' + k)}</span>
+              </button>
             ))}
           </div>
         </div>
@@ -267,7 +263,7 @@ export function ClientHome() {
       ) : stores.length === 0 ? (
         <Empty e="🔎" text={t('no_data')} />
       ) : (
-        <div className="store-grid" style={{ gridTemplateColumns: '1fr' }}>
+        <div className="store-grid">
           {stores.map((s) => {
             const meta = TYPE_META[s.type] || TYPE_META.market;
             return (
@@ -291,27 +287,6 @@ export function ClientHome() {
         </div>
         )
       )}
-
-      <Modal open={!!mkt} onClose={() => setMkt(null)} title={'🛍️ ' + t('market')}>
-        {mkt && (
-          <div>
-            {mkt.photo
-              ? <img src={mkt.photo} alt="" style={{ width: '100%', maxHeight: 240, objectFit: 'cover', borderRadius: 14 }} />
-              : <div style={{ height: 150, borderRadius: 14, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 54 }}>{CAT_EMOJI[mkt.category] || '📦'}</div>}
-            <div className="row spread wrap mt8">
-              <div className="h2">{mkt.name}</div>
-              <div className="h2" style={{ color: 'var(--brand-dark)' }}>{fmtMoney(mkt.price)}</div>
-            </div>
-            <div className="muted small mt4">📦 {t('listing_cat')} : {CAT_EMOJI[mkt.category] || '📦'} {mkt.category} · 👤 {mkt.seller}</div>
-            {mkt.description && <p className="small mt8" style={{ whiteSpace: 'pre-wrap' }}>{mkt.description}</p>}
-            <div className="row mt8 wrap">
-              <a className="btn blue grow" href={'tel:' + mkt.phone}>📞 {t('call')}</a>
-              <a className="btn grow" style={{ background: '#25d366', color: '#fff' }} href={waLink(mkt.phone)} target="_blank" rel="noopener">💬 WhatsApp</a>
-            </div>
-            <button className="btn ghost block mt8" onClick={() => { setMkt(null); nav('/app/market'); }}>{t('see_all')} →</button>
-          </div>
-        )}
-      </Modal>
 
       <Modal open={!!gDetail} onClose={() => setGDetail(null)} title={t('product_details')}>
         {gDetail?.loading ? <Spinner /> : gDetail?.store && gDetail?.product ? (
@@ -1203,12 +1178,13 @@ export function ClientProfile() {
   );
 }
 
-// ================= 🛍️ v2026.09.24.1 — Page Marché (toutes les annonces + mes annonces) =================
+// ================= 🛍️ v2026.09.24.2 — Page Marché (toutes les annonces + mes annonces) =================
 export function MarketPage() {
   const t = useT();
   const nav = useNavigate();
   const { user } = useAuth();
-  const [cat, setCat] = useState('all');
+  const [spM] = useSearchParams();
+  const [cat, setCat] = useState(spM.get('cat') || 'all');   // 🛍️ catégorie depuis l'accueil
   const [q, setQ] = useState('');
   const [data, setData] = useState(null);
   const [mine, setMine] = useState(null);
@@ -1274,7 +1250,7 @@ export function MarketPage() {
       )}
 
       {!data ? <Spinner /> : data.length === 0 ? <Empty e="🛍️" text={t('no_listings')} /> : (
-        <div className="store-grid" style={{ gridTemplateColumns: '1fr' }}>
+        <div className="store-grid">
           {data.map((l) => (
             <div key={l.id} className="card store-card" onClick={() => setDetail(l)}>
               {l.photo
@@ -1491,7 +1467,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.24.1</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.24.2</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>

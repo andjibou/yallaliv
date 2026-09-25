@@ -372,3 +372,33 @@ button { font-family: inherit; }
 /* carte annonce (marché) */
 .mkt-card { min-width: 118px; cursor: pointer; text-align: center; }
 .notif-unread { border-color: #bbf7d0 !important; background: #f0fdf4 !important; }
+
+/* ============ 🧭 v2026.09.24.2 — Ajustements : ＋ plus haut/gros + responsive + icônes catégories ============ */
+.cnav { padding: 8px 4px calc(10px + env(safe-area-inset-bottom)); }
+.cnav-item { font-size: 11px; }
+.cnav-item .ci { font-size: 23px; }
+.cnav-fab {
+  width: 66px; height: 66px; margin-top: -42px; font-size: 32px;
+  flex-direction: column; align-items: center; justify-content: center;
+}
+.app-client { padding: 0 14px 124px; }
+.prod-grid { grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); }
+@media (min-width: 700px) {
+  .app-client { max-width: 800px; padding-left: 20px; padding-right: 20px; }
+  .mkt-cat, .mkt-cat img { width: 100px; height: 100px; }
+}
+@media (min-width: 1100px) { .app-client { max-width: 1040px; } }
+
+/* 🛍️ Grandes icônes catégories du Marché (réalistes, défilement gauche/droite) */
+.mkt-cats { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 8px; -webkit-overflow-scrolling: touch; }
+.mkt-cat {
+  flex: 0 0 auto; width: 88px; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  background: none; border: none; cursor: pointer; padding: 0;
+}
+.mkt-cat img {
+  width: 88px; height: 88px; border-radius: 22px; object-fit: cover;
+  border: 1px solid var(--line); box-shadow: 0 4px 12px rgba(15, 23, 42, .14);
+  transition: transform .15s ease;
+}
+.mkt-cat:active img { transform: scale(.94); }
+.mkt-cat span { font-size: 11.5px; font-weight: 700; color: #334155; }
