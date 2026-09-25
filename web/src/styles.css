@@ -269,7 +269,7 @@ button { font-family: inherit; }
 @keyframes pop { from { opacity: 0; transform: translateY(-10px) scale(.95); } to { opacity: 1; } }
 
 /* ---------- Misc ---------- */
-.row { display: flex; align-items: center; gap: 10px; }
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }   /* 📐 v2026.09.24.3 : filet anti-débordement — wrap auto si ça ne tient pas */
 .spread { justify-content: space-between; }
 .wrap { flex-wrap: wrap; }
 .grow { flex: 1; min-width: 0; }
@@ -342,9 +342,10 @@ button { font-family: inherit; }
   padding: 7px 4px calc(9px + env(safe-area-inset-bottom));
 }
 .cnav-item {
-  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
-  background: none; border: none; color: #64748b; font-size: 10.5px; font-weight: 700;
-  cursor: pointer; padding: 5px 2px; text-decoration: none; line-height: 1.1; text-align: center;
+  flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  background: none; border: none; color: #64748b; font-size: 10px; font-weight: 700;
+  cursor: pointer; padding: 5px 1px; text-decoration: none; line-height: 1.1; text-align: center;
+  overflow-wrap: anywhere;
 }
 .cnav-item .ci { font-size: 21px; line-height: 1; position: relative; transition: transform .15s ease; }
 .cnav-item.on { color: var(--brand); }
@@ -353,7 +354,7 @@ button { font-family: inherit; }
   content: ''; position: absolute; bottom: -5px; left: 50%; transform: translateX(-50%);
   width: 5px; height: 5px; border-radius: 99px; background: var(--brand);
 }
-.cnav-fab-wrap { flex: 1; display: flex; justify-content: center; }
+.cnav-fab-wrap { flex: 0 0 74px; display: flex; justify-content: center; min-width: 0; }
 .cnav-fab {
   width: 58px; height: 58px; border-radius: 50%; border: 4px solid #fff;
   background: linear-gradient(135deg, #0e9f6e, #0b7a54); color: #fff;
@@ -374,9 +375,9 @@ button { font-family: inherit; }
 .notif-unread { border-color: #bbf7d0 !important; background: #f0fdf4 !important; }
 
 /* ============ 🧭 v2026.09.24.2 — Ajustements : ＋ plus haut/gros + responsive + icônes catégories ============ */
-.cnav { padding: 8px 4px calc(10px + env(safe-area-inset-bottom)); }
-.cnav-item { font-size: 11px; }
-.cnav-item .ci { font-size: 23px; }
+.cnav { padding: 8px 2px calc(10px + env(safe-area-inset-bottom)); }
+.cnav-item { font-size: 10px; }
+.cnav-item .ci { font-size: 22px; }
 .cnav-fab {
   width: 66px; height: 66px; margin-top: -42px; font-size: 32px;
   flex-direction: column; align-items: center; justify-content: center;

@@ -10,11 +10,11 @@ import { StoresMap } from '../RouteMap.jsx';
 
 const TYPE_META = { restaurant: { e: '🍽️', c: '#ef6c4d' }, market: { e: '🛒', c: '#3b82f6' }, pharmacy: { e: '💊', c: '#14b8a6' } };
 
-// 🛍️ v2026.09.24.2 — Marché (style OLX) : catégories + emojis + lien WhatsApp Égypte
+// 🛍️ v2026.09.24.3 — Marché (style OLX) : catégories + emojis + lien WhatsApp Égypte
 const CAT_EMOJI = { phones: '📱', electronics: '🔌', home: '🏠', fashion: '👕', kids: '🧸', sports: '⚽', beauty: '💄', auto: '🚗', other: '📦' };
 const waLink = (p) => 'https://wa.me/' + String(p || '').replace(/\D/g, '').replace(/^0/, '20');
 
-// 🧭 v2026.09.24.2 — Barre de navigation moderne : Accueil · Commandes · [＋] · Notifications · Paramètres
+// 🧭 v2026.09.24.3 — Barre de navigation moderne : Accueil · Commandes · [＋] · Notifications · Paramètres
 function ClientNav() {
   const t = useT();
   const [unread, setUnread] = useState(0);
@@ -245,7 +245,7 @@ export function ClientHome() {
             <div className="h2">🛍️ {t('market')}</div>
             <button className="btn ghost sm" onClick={() => nav('/app/market')}>{t('see_all')} →</button>
           </div>
-          {/* 🛍️ v2026.09.24.2 — grandes icônes 3D réalistes par catégorie, défilement gauche/droite */}
+          {/* 🛍️ v2026.09.24.3 — grandes icônes 3D réalistes par catégorie, défilement gauche/droite */}
           <div className="mkt-cats">
             {Object.keys(CAT_EMOJI).map((k) => (
               <button key={k} type="button" className="mkt-cat" onClick={() => nav('/app/market?cat=' + k)}>
@@ -1178,7 +1178,7 @@ export function ClientProfile() {
   );
 }
 
-// ================= 🛍️ v2026.09.24.2 — Page Marché (toutes les annonces + mes annonces) =================
+// ================= 🛍️ v2026.09.24.3 — Page Marché (toutes les annonces + mes annonces) =================
 export function MarketPage() {
   const t = useT();
   const nav = useNavigate();
@@ -1467,7 +1467,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.24.2</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.24.3</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
