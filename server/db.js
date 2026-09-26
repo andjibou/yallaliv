@@ -261,6 +261,57 @@ CREATE TABLE IF NOT EXISTS listing_favorites (
   created_at BIGINT NOT NULL,
   PRIMARY KEY (user_id, listing_id)
 );
+
+-- 💬 v2026.09.26.2 — Marché Phase 2 : chat acheteur ↔ vendeur
+CREATE TABLE IF NOT EXISTS market_chats (
+  id SERIAL PRIMARY KEY,
+  listing_id INTEGER NOT NULL,
+  buyer_id INTEGER NOT NULL,
+  seller_id INTEGER NOT NULL,
+  buyer_read_at BIGINT NOT NULL DEFAULT 0,
+  seller_read_at BIGINT NOT NULL DEFAULT 0,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mchats_buyer ON market_chats(buyer_id);
+CREATE INDEX IF NOT EXISTS idx_mchats_seller ON market_chats(seller_id);
+CREATE TABLE IF NOT EXISTS market_messages (
+  id SERIAL PRIMARY KEY,
+  chat_id INTEGER NOT NULL,
+  sender_id INTEGER NOT NULL,
+  text TEXT NOT NULL,
+  created_at BIGINT NOT NULL
+);
+-- ⭐ avis vendeurs (uniquement après avoir discuté)
+CREATE TABLE IF NOT EXISTS seller_reviews (
+  id SERIAL PRIMARY KEY,
+  seller_id INTEGER NOT NULL,
+  buyer_id INTEGER NOT NULL,
+  stars INTEGER NOT NULL,
+  comment TEXT,
+  created_at BIGINT NOT NULL,
+  UNIQUE (seller_id, buyer_id)
+);
+-- 🔔 recherches sauvegardées -> alertes à chaque nouvelle annonce
+CREATE TABLE IF NOT EXISTS saved_searches (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  q TEXT,
+  cat TEXT,
+  sub TEXT,
+  price_min REAL,
+  price_max REAL,
+  created_at BIGINT NOT NULL
+);
+-- 🚨 signalements d'annonces (modération superadmin)
+CREATE TABLE IF NOT EXISTS listing_reports (
+  id SERIAL PRIMARY KEY,
+  listing_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  note TEXT,
+  created_at BIGINT NOT NULL,
+  handled INTEGER NOT NULL DEFAULT 0
+);
 `;
 
 // ---------- Initialisation (appelée au démarrage) ----------
@@ -278,6 +329,14 @@ export async function initDb() {
   await run("ALTER TABLE push_subscriptions ADD COLUMN kind TEXT NOT NULL DEFAULT 'web'").catch(() => {});   // 🔔 'web' (VAPID) ou 'fcm' (APK)
   await run('ALTER TABLE push_subscriptions ADD COLUMN fcm_token TEXT').catch(() => {});
   await run('ALTER TABLE stores ADD COLUMN photo TEXT').catch(() => {});
+  // 🛵 v2026.09.26.3 — Marché Phase 3 : livraison des articles par YallaLiv
+  await run('ALTER TABLE orders ALTER COLUMN store_id DROP NOT NULL').catch(() => {});   // commande marché = sans magasin
+  await run("ALTER TABLE orders ADD COLUMN kind TEXT NOT NULL DEFAULT 'store'").catch(() => {});   // 'store' | 'market'
+  await run('ALTER TABLE orders ADD COLUMN listing_id INTEGER').catch(() => {});
+  await run('ALTER TABLE orders ADD COLUMN seller_id INTEGER').catch(() => {});
+  await run('ALTER TABLE orders ADD COLUMN pickup_address TEXT').catch(() => {});   // chez le vendeur
+  await run('ALTER TABLE orders ADD COLUMN pickup_lat REAL').catch(() => {});
+  await run('ALTER TABLE orders ADD COLUMN pickup_lng REAL').catch(() => {});
   await run('ALTER TABLE users ALTER COLUMN email DROP NOT NULL').catch(() => {});   // comptes par telephone (email NULL)
   // 🛍️ v2026.09.26.1 — Marché Phase 1 : sous-catégories, état, attributs, zone, vues, renouvellement, multi-photos
   await run('ALTER TABLE listings ADD COLUMN subcategory TEXT').catch(() => {});

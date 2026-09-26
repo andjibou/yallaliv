@@ -466,7 +466,7 @@ app.get('/api/listings', h(async (req, res) => {
   const { q, cat, sub, sort, page } = req.query;
   const pmin = parseFloat(req.query.price_min); const pmax = parseFloat(req.query.price_max);
   const pg = Math.max(1, parseInt(page) || 1); const LIM = 20;
-  let sql = `SELECT l.id, l.name, l.category, l.subcategory, l.condition, l.brand, l.size, l.area, l.description, l.price, l.phone, l.photo, l.views, l.renewed_at, l.created_at, u.name AS seller,
+  let sql = `SELECT l.id, l.name, l.category, l.subcategory, l.condition, l.brand, l.size, l.area, l.description, l.price, l.phone, l.photo, l.views, l.renewed_at, l.created_at, l.lat, l.lng, u.name AS seller,
     (SELECT COUNT(*) FROM listing_favorites f WHERE f.listing_id = l.id)::int AS favs
     FROM listings l JOIN users u ON u.id = l.user_id WHERE l.available = 1`;
   const args = [];
@@ -475,7 +475,11 @@ app.get('/api/listings', h(async (req, res) => {
   if (!isNaN(pmin) && pmin >= 0) { sql += ' AND l.price >= ?'; args.push(pmin); }
   if (!isNaN(pmax) && pmax > 0) { sql += ' AND l.price <= ?'; args.push(pmax); }
   if (q) { sql += ' AND (l.name ILIKE ? OR l.description ILIKE ?)'; args.push(`%${q}%`, `%${q}%`); }
-  sql += ` ORDER BY ${LISTING_SORTS[sort] || LISTING_SORTS.recent} LIMIT ? OFFSET ?`;
+  const la = parseFloat(req.query.lat); const ln = parseFloat(req.query.lng);   // 📍 Phase 2 : tri par proximité
+  if (sort === 'near' && !isNaN(la) && !isNaN(ln)) {
+    sql += ` ORDER BY (CASE WHEN l.lat IS NULL THEN 1e12 ELSE ((l.lat - ?) * (l.lat - ?) + (l.lng - ?) * (l.lng - ?)) END) ASC, l.created_at DESC LIMIT ? OFFSET ?`;
+    args.push(la, la, ln, ln);
+  } else sql += ` ORDER BY ${LISTING_SORTS[sort] || LISTING_SORTS.recent} LIMIT ? OFFSET ?`;
   args.push(LIM + 1, (pg - 1) * LIM);
   const rows = await all(sql, args);
   const hasMore = rows.length > LIM;
@@ -507,8 +511,23 @@ app.post('/api/listings', auth, h(async (req, res) => {
   if (name.length < 2 || name.length > 80) return res.status(400).json({ error: "Nom de l'article invalide (2 à 80 caractères)" });
   if (isNaN(price) || price < 0 || price > 10000000) return res.status(400).json({ error: 'Prix invalide' });
   if (!phone) return res.status(400).json({ error: 'Téléphone requis pour que les acheteurs vous contactent' });
-  const r = await run('INSERT INTO listings(user_id,name,category,subcategory,condition,brand,size,area,description,price,phone,photo,photos,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
-    [req.user.id, name, category, subcategory, condition, brand, size, area, description, price, phone, photos[0] || null, JSON.stringify(photos), Date.now()]);
+  const lat = req.body.lat != null && !isNaN(parseFloat(req.body.lat)) && Math.abs(parseFloat(req.body.lat)) <= 90 ? parseFloat(req.body.lat) : null;   // 📍 Phase 2
+  const lng = req.body.lng != null && !isNaN(parseFloat(req.body.lng)) && Math.abs(parseFloat(req.body.lng)) <= 180 ? parseFloat(req.body.lng) : null;
+  const r = await run('INSERT INTO listings(user_id,name,category,subcategory,condition,brand,size,area,description,price,phone,photo,photos,lat,lng,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
+    [req.user.id, name, category, subcategory, condition, brand, size, area, description, price, phone, photos[0] || null, JSON.stringify(photos), lat, lng, Date.now()]);
+  // 🔔 v2026.09.26.2 — alerte les utilisateurs ayant sauvegardé une recherche correspondante
+  try {
+    const searches = await all('SELECT * FROM saved_searches WHERE user_id <> ?', [req.user.id]);
+    const matches = searches.filter((s) => {
+      if (s.q) { const hay = (name + ' ' + description).toLowerCase(); if (!hay.includes(String(s.q).toLowerCase())) return false; }
+      if (s.cat && s.cat !== category) return false;
+      if (s.sub && s.sub !== subcategory) return false;
+      if (s.price_min != null && price < s.price_min) return false;
+      if (s.price_max != null && price > s.price_max) return false;
+      return true;
+    });
+    if (matches.length) pushTo(matches.map((m) => m.user_id), '🔔 Marché', `Nouvelle annonce : ${name.slice(0, 60)}`, '/app/market');
+  } catch (e) { console.warn('⚠️ alertes recherches :', e.message); }
   res.json({ id: r.rows[0].id });
 }));
 app.put('/api/listings/:id', auth, h(async (req, res) => {
@@ -546,9 +565,12 @@ app.get('/api/listings/:id', h(async (req, res) => {
   if (!l || !l.available) return res.status(404).json({ error: 'Annonce introuvable' });
   await run('UPDATE listings SET views = views + 1 WHERE id = ?', [l.id]);
   const sellerAds = await all('SELECT id, name, price, photo, photos, category FROM listings WHERE user_id = ? AND available = 1 AND id <> ? ORDER BY created_at DESC LIMIT 6', [l.user_id, l.id]);
+  const rev = await get('SELECT COUNT(*)::int AS c, COALESCE(AVG(stars),0)::float AS a FROM seller_reviews WHERE seller_id = ?', [l.user_id]);   // ⭐ Phase 2
   res.json({
     listing: { ...l, views: (l.views || 0) + 1, photos: listingPhotos(l) },
-    seller: { name: l.seller, verified: !!l.phone, since: l.seller_since, ads: sellerAds.map((a2) => ({ ...a2, photos: listingPhotos(a2) })) },
+    seller: { name: l.seller, verified: !!l.phone, since: l.seller_since, user_id: l.user_id,
+      stars: rev.c ? Math.round(rev.a * 10) / 10 : null, reviews_count: rev.c,
+      ads: sellerAds.map((a2) => ({ ...a2, photos: listingPhotos(a2) })) },
   });
 }));
 app.post('/api/listings/:id/fav', auth, h(async (req, res) => {
@@ -568,6 +590,206 @@ app.post('/api/listings/:id/renew', auth, h(async (req, res) => {
     return res.status(400).json({ error: `Renouvellement possible dans ${hLeft} h` });
   }
   await run('UPDATE listings SET renewed_at = ? WHERE id = ?', [Date.now(), l.id]);
+  res.json({ ok: true });
+}));
+
+// ================= 💬 ⭐ 🔔 🚨 v2026.09.26.2 — Marché Phase 2 : chat, profils, alertes, signalements =================
+app.post('/api/market/chat', auth, h(async (req, res) => {   // ouvrir (ou retrouver) une discussion sur une annonce
+  const l = await get('SELECT * FROM listings WHERE id = ? AND available = 1', [req.body.listing_id]);
+  if (!l) return res.status(404).json({ error: 'Annonce introuvable' });
+  if (l.user_id === req.user.id) return res.status(400).json({ error: 'Ce sont vos propres annonces' });
+  let c = await get('SELECT * FROM market_chats WHERE listing_id = ? AND buyer_id = ?', [l.id, req.user.id]);
+  if (!c) {
+    const r = await run('INSERT INTO market_chats(listing_id,buyer_id,seller_id,created_at) VALUES(?,?,?,?) RETURNING id', [l.id, req.user.id, l.user_id, Date.now()]);
+    c = { id: r.rows[0].id };
+  }
+  res.json({ id: c.id });
+}));
+app.get('/api/market/chats', auth, h(async (req, res) => {
+  const me = req.user.id;
+  const rows = await all(`SELECT c.*, l.name AS listing_name, l.price AS listing_price, l.photo, l.photos,
+    bu.name AS buyer_name, se.name AS seller_name,
+    (SELECT m.text FROM market_messages m WHERE m.chat_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_msg,
+    (SELECT m.created_at FROM market_messages m WHERE m.chat_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_at,
+    (SELECT COUNT(*) FROM market_messages m2 WHERE m2.chat_id = c.id AND m2.sender_id <> ? AND m2.created_at > (CASE WHEN c.buyer_id = ? THEN c.buyer_read_at ELSE c.seller_read_at END))::int AS unread
+    FROM market_chats c JOIN listings l ON l.id = c.listing_id JOIN users bu ON bu.id = c.buyer_id JOIN users se ON se.id = c.seller_id
+    WHERE c.buyer_id = ? OR c.seller_id = ? ORDER BY last_at DESC NULLS LAST`, [me, me, me, me]);
+  res.json({
+    chats: rows.map((c) => ({
+      id: c.id, listing: { id: c.listing_id, name: c.listing_name, price: c.listing_price, photo: (listingPhotos(c))[0] || null },
+      other: me === c.buyer_id ? { id: c.seller_id, name: c.seller_name } : { id: c.buyer_id, name: c.buyer_name },
+      last_msg: c.last_msg, last_at: c.last_at, unread: c.unread,
+    })),
+    unread: rows.reduce((s, c) => s + c.unread, 0),
+  });
+}));
+app.get('/api/market/chats/:id', auth, h(async (req, res) => {
+  const c = await get('SELECT * FROM market_chats WHERE id = ?', [req.params.id]);
+  if (!c) return res.status(404).json({ error: 'Discussion introuvable' });
+  if (c.buyer_id !== req.user.id && c.seller_id !== req.user.id) return res.status(403).json({ error: 'Accès refusé' });
+  await run(`UPDATE market_chats SET ${c.buyer_id === req.user.id ? 'buyer_read_at' : 'seller_read_at'} = ? WHERE id = ?`, [Date.now(), c.id]);
+  const messages = await all(`SELECT m.*, u.name AS sender_name FROM market_messages m JOIN users u ON u.id = m.sender_id WHERE m.chat_id = ? ORDER BY m.id ASC LIMIT 300`, [c.id]);
+  res.json({ messages, me: req.user.id });
+}));
+app.post('/api/market/chats/:id', auth, h(async (req, res) => {
+  const c = await get('SELECT * FROM market_chats WHERE id = ?', [req.params.id]);
+  if (!c) return res.status(404).json({ error: 'Discussion introuvable' });
+  if (c.buyer_id !== req.user.id && c.seller_id !== req.user.id) return res.status(403).json({ error: 'Accès refusé' });
+  const text = String(req.body.text || '').trim().slice(0, 500);
+  if (!text) return res.status(400).json({ error: 'Message vide' });
+  const m = await get('INSERT INTO market_messages(chat_id,sender_id,text,created_at) VALUES(?,?,?,?) RETURNING id', [c.id, req.user.id, text, Date.now()]);
+  const other = c.buyer_id === req.user.id ? c.seller_id : c.buyer_id;
+  const l = await get('SELECT name FROM listings WHERE id = ?', [c.listing_id]);
+  pushTo([other], `💬 ${(l ? l.name : 'Marché').slice(0, 40)}`, `${req.user.name} : ${text.slice(0, 80)}`, `/app/chat/${c.id}`);
+  const message = await get('SELECT m.*, u.name AS sender_name FROM market_messages m JOIN users u ON u.id = m.sender_id WHERE m.id = ?', [m.id]);
+  res.json({ message });
+}));
+app.get('/api/sellers/:id', h(async (req, res) => {   // profil vendeur public
+  const u = await get('SELECT id, name, phone, created_at FROM users WHERE id = ?', [req.params.id]);
+  if (!u) return res.status(404).json({ error: 'Vendeur introuvable' });
+  const ads = await all('SELECT id, name, price, photo, photos, category, views, area FROM listings WHERE user_id = ? AND available = 1 ORDER BY created_at DESC LIMIT 24', [u.id]);
+  const st = await get('SELECT COALESCE(SUM(views),0)::int AS views, COUNT(*)::int AS n FROM listings WHERE user_id = ? AND available = 1', [u.id]);
+  const favs = await get('SELECT COUNT(*)::int AS n FROM listing_favorites f JOIN listings l ON l.id = f.listing_id WHERE l.user_id = ?', [u.id]);
+  const rev = await get('SELECT COUNT(*)::int AS c, COALESCE(AVG(stars),0)::float AS a FROM seller_reviews WHERE seller_id = ?', [u.id]);
+  const reviews = await all('SELECT r.stars, r.comment, r.created_at, u.name AS buyer_name FROM seller_reviews r JOIN users u ON u.id = r.buyer_id WHERE r.seller_id = ? ORDER BY r.created_at DESC LIMIT 10', [u.id]);
+  res.json({
+    seller: { id: u.id, name: u.name, verified: !!u.phone, since: u.created_at,
+      stars: rev.c ? Math.round(rev.a * 10) / 10 : null, reviews_count: rev.c,
+      total_views: st.views, total_favs: favs.n, ads_count: st.n },
+    ads: ads.map((a2) => ({ ...a2, photos: listingPhotos(a2) })),
+    reviews,
+  });
+}));
+app.post('/api/sellers/:id/review', auth, h(async (req, res) => {   // ⭐ avis (après avoir discuté)
+  if (Number(req.params.id) === req.user.id) return res.status(400).json({ error: 'Vous ne pouvez pas vous noter vous-même' });
+  const talked = await get('SELECT 1 AS x FROM market_chats WHERE seller_id = ? AND buyer_id = ? LIMIT 1', [req.params.id, req.user.id]);
+  if (!talked) return res.status(400).json({ error: 'Discutez d’abord avec ce vendeur (bouton 💬 Chat) pour pouvoir le noter' });
+  const stars = parseInt(req.body.stars, 10);
+  if (!(stars >= 1 && stars <= 5)) return res.status(400).json({ error: 'Note invalide (1 à 5 étoiles)' });
+  const comment = String(req.body.comment || '').trim().slice(0, 300) || null;
+  await run(`INSERT INTO seller_reviews(seller_id,buyer_id,stars,comment,created_at) VALUES(?,?,?,?,?)
+    ON CONFLICT (seller_id, buyer_id) DO UPDATE SET stars = EXCLUDED.stars, comment = EXCLUDED.comment, created_at = EXCLUDED.created_at`,
+    [req.params.id, req.user.id, stars, comment, Date.now()]);
+  pushTo([req.params.id], '⭐ Marché', `${req.user.name} vous a laissé un avis (${stars}★)`, '/app/seller/' + req.params.id);
+  res.json({ ok: true });
+}));
+app.get('/api/saved-searches', auth, h(async (req, res) => {
+  res.json({ searches: await all('SELECT * FROM saved_searches WHERE user_id = ? ORDER BY created_at DESC', [req.user.id]) });
+}));
+app.post('/api/saved-searches', auth, h(async (req, res) => {
+  const cnt = await get('SELECT COUNT(*)::int AS n FROM saved_searches WHERE user_id = ?', [req.user.id]);
+  if (cnt.n >= 10) return res.status(400).json({ error: 'Maximum 10 recherches sauvegardées' });
+  const q = String(req.body.q || '').trim().slice(0, 60) || null;
+  const cat = LISTING_CATS.includes(req.body.cat) ? req.body.cat : null;
+  const sub = /^[a-z_]{1,30}$/.test(String(req.body.sub || '')) ? req.body.sub : null;
+  const pmin = !isNaN(parseFloat(req.body.price_min)) ? parseFloat(req.body.price_min) : null;
+  const pmax = !isNaN(parseFloat(req.body.price_max)) ? parseFloat(req.body.price_max) : null;
+  if (!q && !cat && !sub && pmin == null && pmax == null) return res.status(400).json({ error: 'Rien à sauvegarder' });
+  const r = await run('INSERT INTO saved_searches(user_id,q,cat,sub,price_min,price_max,created_at) VALUES(?,?,?,?,?,?,?) RETURNING id',
+    [req.user.id, q, cat, sub, pmin, pmax, Date.now()]);
+  res.json({ id: r.rows[0].id });
+}));
+app.delete('/api/saved-searches/:id', auth, h(async (req, res) => {
+  await run('DELETE FROM saved_searches WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+  res.json({ ok: true });
+}));
+const REPORT_REASONS = ['scam', 'prohibited', 'price', 'other'];
+app.post('/api/listings/:id/report', auth, h(async (req, res) => {   // 🚨 signaler
+  const l = await get('SELECT id, user_id, name FROM listings WHERE id = ?', [req.params.id]);
+  if (!l) return res.status(404).json({ error: 'Annonce introuvable' });
+  const reason = REPORT_REASONS.includes(req.body.reason) ? req.body.reason : null;
+  if (!reason) return res.status(400).json({ error: 'Motif invalide' });
+  const note = String(req.body.note || '').trim().slice(0, 200) || null;
+  const dup = await get('SELECT 1 AS x FROM listing_reports WHERE listing_id = ? AND user_id = ? AND handled = 0', [l.id, req.user.id]);
+  if (dup) return res.status(400).json({ error: 'Vous avez déjà signalé cette annonce' });
+  await run('INSERT INTO listing_reports(listing_id,user_id,reason,note,created_at) VALUES(?,?,?,?,?)', [l.id, req.user.id, reason, note, Date.now()]);
+  res.json({ ok: true });
+}));
+app.get('/api/admin/reports', auth, requireRole('superadmin'), h(async (req, res) => {
+  const rows = await all(`SELECT r.*, l.name AS listing_name, l.price, l.photo, l.photos, l.available, u.name AS reporter
+    FROM listing_reports r JOIN listings l ON l.id = r.listing_id JOIN users u ON u.id = r.user_id
+    WHERE r.handled = 0 ORDER BY r.created_at DESC LIMIT 100`);
+  res.json({ reports: rows.map((r) => ({ ...r, photos: listingPhotos(r) })) });
+}));
+app.post('/api/admin/reports/:id', auth, requireRole('superadmin'), h(async (req, res) => {   // traiter : ignorer ou supprimer
+  const r = await get('SELECT * FROM listing_reports WHERE id = ?', [req.params.id]);
+  if (!r) return res.status(404).json({ error: 'Signalement introuvable' });
+  if (req.body.action === 'delete') {
+    await run('DELETE FROM market_messages WHERE chat_id IN (SELECT id FROM market_chats WHERE listing_id = ?)', [r.listing_id]);
+    await run('DELETE FROM market_chats WHERE listing_id = ?', [r.listing_id]);
+    await run('DELETE FROM listing_favorites WHERE listing_id = ?', [r.listing_id]);
+    await run('DELETE FROM listings WHERE id = ?', [r.listing_id]);
+    await run('UPDATE listing_reports SET handled = 1 WHERE id = ?', [r.id]);
+    return res.json({ ok: true, deleted: true });
+  }
+  await run('UPDATE listing_reports SET handled = 1 WHERE id = ?', [r.id]);
+  res.json({ ok: true });
+}));
+
+// ================= 🛵 v2026.09.26.3 — Marché Phase 3 : livraison des articles par YallaLiv =================
+app.post('/api/market/deliver', auth, requireRole('client', 'merchant', 'superadmin'), h(async (req, res) => {
+  const l = await get('SELECT * FROM listings WHERE id = ? AND available = 1', [req.body.listing_id]);
+  if (!l) return res.status(404).json({ error: 'Annonce introuvable ou déjà vendue' });
+  if (l.user_id === req.user.id) return res.status(400).json({ error: 'Vous ne pouvez pas vous livrer votre propre annonce' });
+  const address = String(req.body.address || '').trim().slice(0, 200);
+  const phone = String(req.body.phone || req.user.phone || '').trim();
+  const note = String(req.body.note || '').trim().slice(0, 200);
+  const clat = parseFloat(req.body.lat); const clng = parseFloat(req.body.lng);
+  if (address.length < 5) return res.status(400).json({ error: 'Adresse de livraison trop courte' });
+  if (!phone) return res.status(400).json({ error: 'Téléphone requis pour le livreur' });
+  if (isNaN(clat) || isNaN(clng)) return res.status(400).json({ error: 'Position de livraison requise (touchez une proposition ou 🗺️)' });
+  let fee = parseFloat(req.body.delivery_fee);
+  if (isNaN(fee)) fee = 25;
+  fee = Math.max(10, Math.min(80, Math.round(fee * 100) / 100));   // fourchette raisonnelle
+  const open = await get("SELECT COUNT(*)::int AS n FROM orders WHERE client_id = ? AND kind = 'market' AND status IN ('pending','accepted','preparing','ready','assigned','picked_up')", [req.user.id]);
+  if (open.n >= 3) return res.status(400).json({ error: 'Trop de livraisons marché en cours (max 3)' });
+  const pin = String(1000 + Math.floor(Math.random() * 9000));   // 🔑 remise à l'acheteur
+  const now = Date.now();
+  const r = await run(`INSERT INTO orders(kind,listing_id,seller_id,client_id,store_id,driver_id,status,payment,paid,subtotal,delivery_fee,commission,total,address,phone,note,client_lat,client_lng,promo_code,discount,visibility,pin,created_at,updated_at)
+    VALUES('market',?,?,?,NULL,NULL,'pending','cash',0,?,?,0,?,?,?,?,?,?,'',0,'public',?,?,?) RETURNING id`,
+    [l.id, l.user_id, req.user.id, l.price, fee, l.price + fee, address, phone, note, clat, clng, pin, now, now]);
+  const oid = r.rows[0].id;
+  await run('INSERT INTO order_items(order_id,product_id,name,emoji,price,qty) VALUES(?,?,?,?,?,?)', [oid, null, l.name, '🛍️', l.price, 1]);
+  pushTo([l.user_id], `🛵 Marché — demande de livraison`, `${req.user.name} veut faire livrer « ${l.name.slice(0, 40)} » par YallaLiv — acceptez la demande`, '/app/sales');
+  res.json({ order_id: oid, pin, delivery_fee: fee });
+}));
+app.get('/api/market/sales', auth, h(async (req, res) => {
+  const rows = await all(`${ORDER_WITH_JOINS} WHERE o.kind='market' AND o.seller_id=? ORDER BY o.created_at DESC LIMIT 60`, [req.user.id]);
+  const orders = await withItems(stripPin(rows));   // le PIN appartient à l'acheteur
+  // 📍 pré-remplit le point de récupération depuis l'annonce (si le vendeur n'a rien saisi)
+  const lst = await all('SELECT id, lat, lng, area FROM listings WHERE user_id = ?', [req.user.id]);
+  const byId = Object.fromEntries(lst.map((l) => [l.id, l]));
+  orders.forEach((o) => {
+    const l = byId[o.listing_id];
+    if (!l) return;
+    if (o.store_lat == null && l.lat != null) { o.store_lat = l.lat; o.store_lng = l.lng; }
+    if (!o.store_address && l.area) o.store_address = l.area;
+  });
+  res.json({ orders });
+}));
+app.post('/api/market/orders/:id/accept', auth, h(async (req, res) => {
+  const o = await get(`SELECT o.*, l.lat AS l_lat, l.lng AS l_lng, l.area AS l_area, l.name AS l_name FROM orders o LEFT JOIN listings l ON l.id=o.listing_id WHERE o.id=? AND o.kind='market'`, [req.params.id]);
+  if (!o) return res.status(404).json({ error: 'Commande introuvable' });
+  if (o.seller_id !== req.user.id) return res.status(403).json({ error: "Ce n'est pas votre vente" });
+  if (o.status !== 'pending') return res.status(400).json({ error: 'Demande déjà traitée' });
+  const pickup_address = String(req.body.pickup_address || o.pickup_address || o.l_area || '').trim().slice(0, 200);
+  if (pickup_address.length < 5) return res.status(400).json({ error: 'Adresse de récupération requise' });
+  const plat = req.body.pickup_lat != null && !isNaN(parseFloat(req.body.pickup_lat)) ? parseFloat(req.body.pickup_lat) : (o.pickup_lat != null ? o.pickup_lat : o.l_lat);   // 📍 point : saisi OU annonce
+  const plng = req.body.pickup_lng != null && !isNaN(parseFloat(req.body.pickup_lng)) ? parseFloat(req.body.pickup_lng) : (o.pickup_lng != null ? o.pickup_lng : o.l_lng);
+  if (plat == null || plng == null) return res.status(400).json({ error: 'Point de récupération requis — définissez-le sur la carte 🗺️' });
+  await run(`UPDATE orders SET status='ready', visibility='public', pickup_address=?, pickup_lat=?, pickup_lng=?, updated_at=? WHERE id=?`,
+    [pickup_address, plat, plng, Date.now(), o.id]);
+  pushTo([o.client_id], `Commande #${o.id}`, '✅ Le vendeur a accepté — un livreur YallaLiv vient chercher votre article 🛵');
+  dispatchPublicOrders();   // attribution immédiate
+  res.json({ ok: true });
+}));
+app.post('/api/market/orders/:id/decline', auth, h(async (req, res) => {
+  const o = await get(`SELECT * FROM orders WHERE id=? AND kind='market'`, [req.params.id]);
+  if (!o) return res.status(404).json({ error: 'Commande introuvable' });
+  if (o.seller_id !== req.user.id) return res.status(403).json({ error: "Ce n'est pas votre vente" });
+  if (o.status !== 'pending') return res.status(400).json({ error: 'Demande déjà traitée' });
+  await run(`UPDATE orders SET status='cancelled', updated_at=? WHERE id=?`, [Date.now(), o.id]);
+  pushTo([o.client_id], `Commande #${o.id}`, '🚫 Le vendeur a décliné la demande de livraison');
   res.json({ ok: true });
 }));
 app.delete('/api/listings/:id', auth, h(async (req, res) => {
@@ -709,15 +931,23 @@ app.post('/api/orders', auth, requireRole('client', 'merchant', 'superadmin'), h
 }));
 
 const ORDER_WITH_JOINS = `
-  SELECT o.*, s.name AS store_name, s.emoji AS store_emoji, s.type AS store_type, s.phone AS store_phone, s.address AS store_address,
-    s.lat AS store_lat, s.lng AS store_lng,
+  SELECT o.*,
+    CASE WHEN o.kind='market' THEN COALESCE(l.name, '🛍️ Marché') ELSE s.name END AS store_name,        -- 🛍️ Phase 3 : commande marché = nom de l'article
+    CASE WHEN o.kind='market' THEN '🛍️' ELSE s.emoji END AS store_emoji,
+    CASE WHEN o.kind='market' THEN 'market' ELSE s.type END AS store_type,
+    CASE WHEN o.kind='market' THEN se.phone ELSE s.phone END AS store_phone,                           -- tél vendeur = contact récupération
+    CASE WHEN o.kind='market' THEN COALESCE(o.pickup_address, l.area, '') ELSE s.address END AS store_address,
+    CASE WHEN o.kind='market' THEN o.pickup_lat ELSE s.lat END AS store_lat,                           -- point de récupération = chez le vendeur
+    CASE WHEN o.kind='market' THEN o.pickup_lng ELSE s.lng END AS store_lng,
     c.name AS client_name, d.name AS driver_name, d.phone AS driver_phone, d.vehicle AS driver_vehicle,
     r.store_stars AS rev_store, r.driver_stars AS rev_driver,
     (SELECT m.text FROM messages m WHERE m.order_id=o.id ORDER BY m.id DESC LIMIT 1) AS last_msg,
     (SELECT m.id FROM messages m WHERE m.order_id=o.id ORDER BY m.id DESC LIMIT 1) AS last_msg_id,
     (SELECT m.sender_id FROM messages m WHERE m.order_id=o.id ORDER BY m.id DESC LIMIT 1) AS last_sender_id
   FROM orders o
-  JOIN stores s ON s.id=o.store_id
+  LEFT JOIN stores s ON s.id=o.store_id        -- 🛍️ Phase 3 : LEFT JOIN (commandes marché sans magasin)
+  LEFT JOIN listings l ON l.id=o.listing_id
+  LEFT JOIN users se ON se.id=o.seller_id
   JOIN users c ON c.id=o.client_id
   LEFT JOIN users d ON d.id=o.driver_id
   LEFT JOIN reviews r ON r.order_id=o.id`;
@@ -737,6 +967,7 @@ app.post('/api/orders/:id/cancel', auth, requireRole('client', 'merchant', 'supe
   if (!o) return res.status(404).json({ error: 'Commande introuvable' });
   if (o.status !== 'pending') return res.status(400).json({ error: "Impossible d'annuler maintenant" });
   await run(`UPDATE orders SET status='cancelled', updated_at=? WHERE id=?`, [Date.now(), o.id]);
+  if (o.kind === 'market' && o.seller_id) pushTo([o.seller_id], `Commande #${o.id}`, '🚫 Demande de livraison annulée par l’acheteur');   // 🛍️ Phase 3
   res.json({ ok: true });
 }));
 
@@ -1032,6 +1263,7 @@ async function dispatchPublicOrders() {
       if (r.rowCount === 0) continue; // pris entre-temps
       pushTo([winner.id], '🚨 Nouvelle livraison assignée', `Commande #${o.id} · ${o.store_name} — itinéraire mis à jour, appuyez sur OK`);
       pushTo([o.client_id], `Commande #${o.id}`, '🛵 Un livreur vous a été attribué automatiquement — il arrive !');
+      if (o.kind === 'market' && o.seller_id) pushTo([o.seller_id], `Commande #${o.id}`, '🛵 Un livreur vient chercher votre article — préparez-le !');   // 🛍️ Phase 3
     }
   } catch (e) { console.error('dispatch:', e.message); }
   finally { dispatchBusy = false; }
@@ -1196,7 +1428,14 @@ app.post('/api/driver/orders/:id/status', auth, requireRole('driver'), h(async (
   const paid = next === 'delivered' && o.payment === 'cash' ? 1 : o.paid;
   await run('UPDATE orders SET status=?, paid=?, updated_at=? WHERE id=?', [next, paid, Date.now(), o.id]);
   if (next === 'picked_up') pushTo([o.client_id], `Commande #${o.id}`, '📦 Colis récupéré — en route vers vous 🛵');
-  if (next === 'delivered') pushTo([o.client_id], `Commande #${o.id}`, '🎉 Livrée ! Bon appétit — notez votre commande ⭐');
+  if (next === 'delivered') pushTo([o.client_id], `Commande #${o.id}`, o.kind === 'market' ? '🎉 Article livré — notez le vendeur ⭐' : '🎉 Livrée ! Bon appétit — notez votre commande ⭐');
+  if (o.kind === 'market') {   // 🛍️ Phase 3 : le vendeur suit aussi
+    if (next === 'picked_up') pushTo([o.seller_id], `Commande #${o.id}`, '📦 Votre article a été récupéré par le livreur');
+    if (next === 'delivered') {
+      pushTo([o.seller_id], `Commande #${o.id}`, '🎉 Article livré à l’acheteur ✓ — annonce marquée vendue');
+      if (o.listing_id) await run('UPDATE listings SET available=0 WHERE id=?', [o.listing_id]);   // vendu
+    }
+  }
   if (!req.user.store_id) dispatchPublicOrders(); // un slot se libere -> redistribuer
   res.json({ ok: true });
 }));
@@ -1208,9 +1447,10 @@ app.post('/api/driver/orders/:id/refuse', auth, requireRole('driver'), h(async (
   if (!['assigned', 'picked_up'].includes(o.status)) return res.status(400).json({ error: 'Transition invalide' });
   const reason = String(req.body.reason || '').trim().slice(0, 300);
   await run(`UPDATE orders SET status='refused', refuse_reason=?, updated_at=? WHERE id=?`, [reason, Date.now(), o.id]);
-  const store = await get('SELECT * FROM stores WHERE id=?', [o.store_id]);
-  pushTo([store?.owner_id].filter(Boolean), `↩️ Commande #${o.id} refusée par le client`,
-    (reason ? 'Motif : ' + reason + ' · ' : '') + 'Le colis retourne au magasin ' + (store?.name || ''));
+  const store = o.store_id != null ? await get('SELECT * FROM stores WHERE id=?', [o.store_id]) : null;
+  const backTo = o.kind === 'market' ? [o.seller_id] : [store?.owner_id].filter(Boolean);   // 🛍️ Phase 3
+  pushTo(backTo, `↩️ Commande #${o.id} refusée par le client`,
+    (reason ? 'Motif : ' + reason + ' · ' : '') + (o.kind === 'market' ? 'Le colis retourne chez le vendeur' : 'Le colis retourne au magasin ' + (store?.name || '')));
   pushTo([o.client_id], `Commande #${o.id}`, '↩️ Colis refusé à la livraison');
   if (!req.user.store_id) dispatchPublicOrders(); // un slot se libère
   res.json({ ok: true });

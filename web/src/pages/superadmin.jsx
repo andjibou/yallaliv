@@ -18,6 +18,7 @@ export default function AdminApp() {
     { id: 'orders', label: '🧾 ' + t('sa_orders') },
     { id: 'gdrivers', label: '🛵 ' + t('general_drivers') },
     { id: 'promos', label: '🎁 ' + t('promos') },
+    { id: 'reports', label: '🚨 ' + t('reports_tab') },   // 🚨 v2026.09.26.2 — modération Marché
     { id: 'settings', label: '⚙️ ' + t('sa_settings') }
   ];
   return (
@@ -54,6 +55,7 @@ export default function AdminApp() {
         {tab === 'orders' && <Orders />}
         {tab === 'gdrivers' && <GeneralDrivers />}
         {tab === 'promos' && <Promos />}
+        {tab === 'reports' && <Reports />}
         {tab === 'settings' && <Settings />}
       </ErrorBoundary>
     </div>
@@ -618,5 +620,41 @@ function Settings() {
       <button className="btn primary block" disabled={busy} onClick={save}>{t('save_settings')}</button>
     </div>
     </>
+  );
+}
+
+// ================= 🚨 v2026.09.26.2 — Signalements d'annonces Marché =================
+function Reports() {
+  const t = useT();
+  const [rows, setRows] = useState(null);
+  const load = () => api('/admin/reports').then((d) => setRows(d.reports)).catch(() => setRows([]));
+  useEffect(() => { load(); }, []);
+  const act = async (id, action) => {
+    try { await api('/admin/reports/' + id, { method: 'POST', body: { action } }); load(); toast(action === 'delete' ? t('del_listing') + ' ✓' : t('dismiss') + ' ✓', 'ok'); }
+    catch (ex) { toast(ex.message, 'err'); }
+  };
+  if (!rows) return <Spinner />;
+  if (rows.length === 0) return <div className="banner ok">✅ {t('no_reports')}</div>;
+  return (
+    <div>
+      {rows.map((r) => (
+        <div key={r.id} className="card mb8" style={{ padding: 12 }}>
+          <div className="row" style={{ gap: 10 }}>
+            {r.photos && r.photos[0]
+              ? <img src={r.photos[0]} alt="" style={{ width: 54, height: 54, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }} />
+              : <div className="store-emoji">🛍️</div>}
+            <div className="grow" style={{ minWidth: 0 }}>
+              <div className="small ellipsis" style={{ fontWeight: 800 }}>{r.listing_name}</div>
+              <div className="muted xsmall">{fmtMoney(r.price)} · {t('reported_by')} {r.reporter} · {t('r_' + r.reason)}</div>
+              {r.note && <div className="muted xsmall">📝 {r.note}</div>}
+            </div>
+          </div>
+          <div className="row mt8" style={{ gap: 6 }}>
+            <button className="btn ghost sm grow" onClick={() => act(r.id, 'dismiss')}>✅ {t('dismiss')}</button>
+            <button className="btn danger sm grow" onClick={() => act(r.id, 'delete')}>🗑️ {t('del_listing')}</button>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

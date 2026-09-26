@@ -953,8 +953,8 @@ export function ClientOrders() {
               <div className="row" style={{ gap: 8 }}>
                 <div className="p-emoji" style={{ width: 40, height: 40, fontSize: 20 }}>{o.store_emoji}</div>
                 <div>
-                  <div style={{ fontWeight: 800 }}>{o.store_name}</div>
-                  <div className="muted small">#{o.id} · {fmtDate(o.created_at, lang)}</div>
+                  <div style={{ fontWeight: 800 }}>{o.store_name} {o.kind === 'market' && <span className="badge" style={{ background: '#fef3c7', color: '#92400e', fontSize: 10 }}>🛍️ {t('market')}</span>}</div>
+                  <div className="muted small">#{o.id} · {fmtDate(o.created_at, lang)}{o.pin && ['ready', 'assigned', 'picked_up'].includes(o.status) && <span style={{ color: '#b45309', fontWeight: 800 }}> · 🔑 {o.pin}</span>}</div>
                 </div>
               </div>
               <StatusBadge status={o.status} />
@@ -1228,6 +1228,9 @@ export function MarketPage() {
   const [more, setMore] = useState(false);
   const [mine, setMine] = useState(null);
   const [favIds, setFavIds] = useState(null);
+  const [near, setNear] = useState(null);        // 📍 Phase 2 : position pour le tri "près de moi"
+  const [saved, setSaved] = useState(null);      // 🔔 Phase 2 : recherches sauvegardées
+  const [unread, setUnread] = useState(0);       // 💬 Phase 2 : messages non-lus
   const subLbl = (k) => (SUB_LBL[k] ? (SUB_LBL[k][lang] || SUB_LBL[k].fr) : k);
   const condLbl = (k) => (COND_LBL[k] ? (COND_LBL[k][lang] || COND_LBL[k].fr) : '');
 
@@ -1239,16 +1242,19 @@ export function MarketPage() {
     if (q.trim()) p.set('q', q.trim());
     if (pmin) p.set('price_min', pmin);
     if (pmax) p.set('price_max', pmax);
-    if (sort !== 'recent') p.set('sort', sort);
+    if (sort !== 'recent' && sort !== 'near') p.set('sort', sort);
+    if (sort === 'near') { p.set('sort', 'near'); if (near) { p.set('lat', String(near.lat)); p.set('lng', String(near.lng)); } }
     p.set('page', String(pg));
     api('/listings?' + p.toString()).then((d) => { setData((old) => (keep && old ? old.concat(d.listings) : d.listings)); setMore(!!d.hasMore); })
       .catch(() => setData([]));
   };
-  useEffect(() => { setData(null); load(1, false); }, [cat, sub, sort, favOnly]); // eslint-disable-line
+  useEffect(() => { setData(null); load(1, false); }, [cat, sub, sort, favOnly, near]); // eslint-disable-line   // 📍 near en dépendance : recharge quand la position arrive
   useEffect(() => {
     if (!user) return;
     api('/listings/mine').then((d) => setMine(d.listings)).catch(() => {});
     api('/listings/favorites').then((d) => setFavIds(new Set(d.listings.map((l) => l.id)))).catch(() => setFavIds(new Set()));
+    api('/market/chats').then((d) => setUnread(d.unread || 0)).catch(() => {});                    // 💬 Phase 2
+    api('/saved-searches').then((d) => setSaved(d.searches)).catch(() => {});                      // 🔔 Phase 2
   }, [user]);
 
   const toggleFav = async (l, e) => {
@@ -1263,12 +1269,51 @@ export function MarketPage() {
   const toggle = async (l) => { try { await api('/listings/' + l.id, { method: 'PUT', body: { available: l.available ? 0 : 1 } }); load(1, false); } catch (ex) { toast(ex.message, 'err'); } };
   const del = async (l) => { if (!window.confirm(t('confirm_delete'))) return; try { await api('/listings/' + l.id, { method: 'DELETE' }); toast(t('listing_deleted')); load(1, false); } catch (ex) { toast(ex.message, 'err'); } };
   const renew = async (l) => { try { await api('/listings/' + l.id + '/renew', { method: 'POST' }); toast(t('renewed'), 'ok'); } catch (ex) { toast(ex.message, 'err'); } };
+  const onSort = (v) => {   // 📍 "près de moi" : demande la position GPS une seule fois
+    if (v === 'near' && !near) {
+      if (!navigator.geolocation) return toast(t('mk_gps_no'), 'err');
+      navigator.geolocation.getCurrentPosition(
+        (pos) => { setNear({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setSort('near'); },   // l'effet [.., near] recharge avec la bonne closure
+        () => toast(t('mk_gps_denied'), 'err'),
+      );
+      return;
+    }
+    setSort(v);
+  };
+  const saveSearch = async () => {   // 🔔 Phase 2
+    if (favOnly) return;
+    try {
+      await api('/saved-searches', { method: 'POST', body: { q: q.trim(), cat: cat !== 'all' ? cat : null, sub: sub !== 'all' ? sub : null, price_min: pmin || null, price_max: pmax || null } });
+      toast(t('search_saved'), 'ok');
+      api('/saved-searches').then((r2) => setSaved(r2.searches));
+    } catch (ex) { toast(ex.message, 'err'); }
+  };
+  const applySearch = (s) => {
+    setQ(s.q || ''); setCat(s.cat || 'all'); setSub(s.sub || 'all');
+    setPmin(s.price_min != null ? String(s.price_min) : ''); setPmax(s.price_max != null ? String(s.price_max) : '');
+    setFavOnly(false); setSort('recent');
+    // 🐛 fetch direct avec paramètres explicites (un setTimeout(load) aurait une closure périmée)
+    const p = new URLSearchParams();
+    if (s.q) p.set('q', s.q);
+    if (s.cat && s.cat !== 'all') p.set('cat', s.cat);
+    if (s.sub && s.sub !== 'all') p.set('sub', s.sub);
+    if (s.price_min != null) p.set('price_min', String(s.price_min));
+    if (s.price_max != null) p.set('price_max', String(s.price_max));
+    p.set('page', '1');
+    setData(null);
+    api('/listings?' + p.toString()).then((d) => { setData(d.listings); setMore(!!d.hasMore); }).catch(() => setData([]));
+  };
+  const rmSearch = async (s, e) => { e.stopPropagation(); try { await api('/saved-searches/' + s.id, { method: 'DELETE' }); setSaved((l) => (l || []).filter((x) => x.id !== s.id)); } catch {} };
 
   return (
     <div>
       <div className="topbar">
         <BackBtn />
         <div className="grow"><div className="brand-name">🛍️ {t('market')}</div></div>
+        <button className="btn ghost sm" style={{ position: 'relative' }} title={t('mk_chats')} onClick={() => nav('/app/chats')}>
+          💬 {unread > 0 && <span className="dot-badge">{unread > 99 ? '99+' : unread}</span>}
+        </button>
+        <button className="btn ghost sm" title={t('my_sales')} onClick={() => nav('/app/sales')}>📦</button>
         <button className="btn primary sm" onClick={() => nav('/app/publish')}>＋ {t('publish')}</button>
       </div>
 
@@ -1276,18 +1321,21 @@ export function MarketPage() {
         <input className="grow" value={q} onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); load(1, false); } }}
           placeholder={'🔍 ' + t('search_ph')} style={{ padding: '9px 12px', borderRadius: 10, border: '1px solid #e3e9f0' }} />
+        <button className="btn blue" title={t('search')} onClick={() => load(1, false)}>🔍</button>
         <button className={'btn' + (favOnly ? ' primary' : ' ghost')} title={t('favorites')} onClick={() => setFavOnly((v) => !v)}>❤️</button>
         <button className={'btn' + (showF ? ' primary' : ' ghost')} title={t('sort')} onClick={() => setShowF((v) => !v)}>⚙️</button>
+        <button className="btn ghost" title={t('save_search')} onClick={saveSearch}>🔔</button>
       </div>
 
       {showF && (
         <div className="card mb8" style={{ padding: 10 }}>
           <div className="row wrap" style={{ gap: 8 }}>
-            <select className="input" value={sort} onChange={(e) => setSort(e.target.value)} style={{ padding: '8px', flexGrow: 1, minWidth: 130 }}>
+            <select className="input" value={sort} onChange={(e) => onSort(e.target.value)} style={{ padding: '8px', flexGrow: 1, minWidth: 130 }}>
               <option value="recent">🕐 {t('sort_recent')}</option>
               <option value="price_asc">💰 {t('sort_price_asc')}</option>
               <option value="price_desc">💰 {t('sort_price_desc')}</option>
               <option value="popular">🔥 {t('sort_popular')}</option>
+              <option value="near">📍 {t('sort_near')}</option>
             </select>
             <input className="input" dir="ltr" type="number" min="0" value={pmin} onChange={(e) => setPmin(e.target.value)} placeholder={t('price_min')} style={{ minWidth: 90, padding: '8px', flexGrow: 1 }} />
             <input className="input" dir="ltr" type="number" min="0" value={pmax} onChange={(e) => setPmax(e.target.value)} placeholder={t('price_max')} style={{ minWidth: 90, padding: '8px', flexGrow: 1 }} />
@@ -1305,6 +1353,17 @@ export function MarketPage() {
         <div className="row wrap mb12" style={{ gap: 6 }}>
           {[['all', '•'], ...SUBCATS[cat]].map(([k, e]) => (
             <button key={k} className={'chip sm' + (sub === k ? ' on' : '')} onClick={() => setSub(k)}>{e} {k === 'all' ? t('sub_all') : subLbl(k)}</button>
+          ))}
+        </div>
+      )}
+      {user && saved && saved.length > 0 && !favOnly && (
+        <div className="row wrap mb8" style={{ gap: 6, alignItems: 'center' }}>
+          <span className="muted xsmall" style={{ fontWeight: 800 }}>🔔 {t('saved_searches')} :</span>
+          {saved.map((s) => (
+            <button key={s.id} className="chip sm" onClick={() => applySearch(s)}>
+              {(s.q || '') + (s.cat && s.cat !== 'all' ? ' ' + (CAT_EMOJI[s.cat] || '') : '') + (s.price_max ? ' ≤' + s.price_max : '') || '🔎'}
+              <span style={{ marginLeft: 5, opacity: 0.55 }} onClick={(e) => rmSearch(s, e)}>✕</span>
+            </button>
           ))}
         </div>
       )}
@@ -1366,6 +1425,16 @@ export function ListingDetailPage() {
   const [err, setErr] = useState(null);
   const [gi, setGi] = useState(0);
   const [fav, setFav] = useState(false);
+  const [rep, setRep] = useState(false);       // 🚨 signalement
+  const [repR, setRepR] = useState(null);
+  const [dlv, setDlv] = useState(false);       // 🛵 Phase 3 : livraison YallaLiv
+  const [dAddr, setDAddr] = useState('');
+  const [dPhone, setDPhone] = useState(user?.phone || '');
+  const [dNote, setDNote] = useState('');
+  const [dGps, setDGps] = useState(null);
+  const [dSugg, setDSugg] = useState(null);
+  const [dBusy, setDBusy] = useState(false);
+  const dTm = useRef(null);
   const subLbl = (k) => (SUB_LBL[k] ? (SUB_LBL[k][lang] || SUB_LBL[k].fr) : k);
   const condLbl = (k) => (COND_LBL[k] ? (COND_LBL[k][lang] || COND_LBL[k].fr) : '');
 
@@ -1382,6 +1451,42 @@ export function ListingDetailPage() {
     const url = window.location.origin + '/app/market/' + l.id;
     try { if (navigator.share) await navigator.share({ title: l.name, url }); else { await navigator.clipboard.writeText(url); toast(t('link_copied'), 'ok'); } } catch {}
   };
+  const onDAddr = (e) => {   // 📍 autocomplétion adresse de livraison (même mécanisme que le panier)
+    const v = e.target.value;
+    setDAddr(v);
+    clearTimeout(dTm.current);
+    if (v.trim().length < 4) { setDSugg(null); return; }
+    dTm.current = setTimeout(async () => {
+      const near = dGps || (l.lat != null ? { lat: l.lat, lng: l.lng } : { lat: 31.2001, lng: 29.9187 });
+      try { setDSugg((await geocodeSearch(v.trim(), lang, near)).slice(0, 5)); } catch { setDSugg(null); }
+    }, 500);
+  };
+  const pickDSugg = (r) => { setDAddr(r.label.split(',').slice(0, 3).join(', ')); setDGps({ lat: r.lat, lng: r.lng }); setDSugg(null); };
+  const feeEst = dGps && l.lat != null
+    ? Math.max(15, Math.min(70, Math.round(20 + Math.max(0, distM(dGps.lat, dGps.lng, l.lat, l.lng) / 1000 - 2) * 2.5)))
+    : null;   // base 20 EGP + 2,5 EGP/km au-delà de 2 km
+  const orderDelivery = async () => {
+    if (dBusy) return;
+    if (dAddr.trim().length < 5) return toast(t('addr_too_short'), 'err');
+    if (!dGps) return toast(t('loc_required'), 'err');
+    if (!dPhone.trim()) return toast(t('listing_phone') + ' ?', 'err');
+    setDBusy(true);
+    try {
+      const r = await api('/market/deliver', { method: 'POST', body: { listing_id: l.id, address: dAddr.trim(), phone: dPhone.trim(), note: dNote.trim(), lat: dGps.lat, lng: dGps.lng, delivery_fee: feeEst || 25 } });
+      toast(t('deliver_ok') + ' 🔑 ' + r.pin, 'ok');
+      setDlv(false); setDAddr(''); setDGps(null); setDNote('');
+      nav('/app/orders');
+    } catch (ex) { toast(ex.message, 'err'); }
+    setDBusy(false);
+  };
+  const openChat = async () => {   // 💬 Phase 2 : discussion intégrée avec le vendeur
+    try { const r = await api('/market/chat', { method: 'POST', body: { listing_id: l.id } }); nav('/app/chat/' + r.id); }
+    catch (ex) { toast(ex.message, 'err'); }
+  };
+  const sendReport = async () => {
+    try { await api('/listings/' + l.id + '/report', { method: 'POST', body: { reason: repR } }); toast(t('report_sent'), 'ok'); setRep(false); setRepR(null); }
+    catch (ex) { toast(ex.message, 'err'); }
+  };
   const since = d.seller.since ? new Date(d.seller.since).toLocaleDateString(lang === 'ar' ? 'ar-EG' : lang === 'en' ? 'en-GB' : 'fr-FR', { year: 'numeric', month: 'long' }) : '';
 
   return (
@@ -1391,6 +1496,7 @@ export function ListingDetailPage() {
         <div className="grow"><div className="brand-name">🛍️ {t('market')}</div></div>
         <button className={'btn sm ' + (fav ? 'primary' : 'ghost')} onClick={toggleFav}>{fav ? '❤️' : '🤍'}</button>
         <button className="btn ghost sm" onClick={share}>🔗</button>
+        {!own && <button className="btn ghost sm" title={t('report')} onClick={() => { setRepR(null); setRep(true); }}>🚨</button>}
       </div>
 
       {photos.length > 0 ? (
@@ -1429,11 +1535,12 @@ export function ListingDetailPage() {
       </div>
 
       <div className="card mt8" style={{ padding: 14 }}>
-        <div className="row" style={{ gap: 10 }}>
+        <div className="row" style={{ gap: 10, cursor: 'pointer' }} onClick={() => nav('/app/seller/' + d.seller.user_id)}>
           <div className="store-emoji" style={{ width: 46, height: 46, fontSize: 22 }}>👤</div>
           <div className="grow" style={{ minWidth: 0 }}>
             <div className="small" style={{ fontWeight: 800 }}>{d.seller.name} {d.seller.verified && <span className="badge" style={{ background: '#dbeafe', color: '#1e40af' }}>✓ {t('verified')}</span>}</div>
-            <div className="muted xsmall">{t('member_since')} {since} · {d.seller.ads.length + 1} {t('seller_ads')}</div>
+            <div className="xsmall" style={{ color: '#b45309', fontWeight: 800 }}>{d.seller.stars ? `⭐ ${d.seller.stars} (${d.seller.reviews_count} ${t('n_reviews')})` : '☆ ' + t('no_reviews')}</div>
+            <div className="muted xsmall">{t('member_since')} {since} · {d.seller.ads.length + 1} {t('seller_ads')} ›</div>
           </div>
         </div>
         {own ? (
@@ -1442,10 +1549,14 @@ export function ListingDetailPage() {
             <button className="btn danger" onClick={async () => { if (window.confirm(t('confirm_delete'))) { try { await api('/listings/' + l.id, { method: 'DELETE' }); toast(t('listing_deleted')); nav('/app/market'); } catch (ex) { toast(ex.message, 'err'); } } }}>🗑️</button>
           </div>
         ) : (
-          <div className="row mt8" style={{ gap: 6 }}>
-            <a className="btn blue grow" href={'tel:' + l.phone}>📞 {t('call')}</a>
-            <a className="btn grow" style={{ background: '#25d366', color: '#fff' }} href={waLink(l.phone)} target="_blank" rel="noopener">💬 WhatsApp</a>
-          </div>
+          <>
+            <div className="row mt8 wrap" style={{ gap: 6 }}>
+              <button className="btn primary grow" onClick={openChat}>💬 {t('chat_btn')}</button>
+              <a className="btn blue" href={'tel:' + l.phone} title={t('call')}>📞</a>
+              <a className="btn" style={{ background: '#25d366', color: '#fff' }} href={waLink(l.phone)} target="_blank" rel="noopener" title="WhatsApp">🟢</a>
+            </div>
+            <button className="btn block mt8" style={{ background: '#0f172a', color: '#fff' }} onClick={() => setDlv(true)}>🛵 {t('deliver_btn')}</button>
+          </>
         )}
       </div>
 
@@ -1465,6 +1576,237 @@ export function ListingDetailPage() {
       )}
 
       <div className="banner ok mt8 mb12">🛡️ {t('safety_tip')}</div>
+
+      <Modal open={dlv} onClose={() => setDlv(false)} title={'🛵 ' + t('deliver_title')}>
+        {dlv && (
+          <div>
+            <div className="banner ok mb8" style={{ fontSize: 12 }}>💡 {t('deliver_pay_note')}</div>
+            <div className="field">
+              <label className="label">📍 {t('delivery_addr')}</label>
+              <input className="input" value={dAddr} onChange={onDAddr} placeholder={t('addr_ph')} />
+              {dSugg && dSugg.length > 0 && (
+                <div style={{ marginTop: 6, border: '1px solid #eef2f7', borderRadius: 10, overflow: 'hidden' }}>
+                  {dSugg.map((r, i) => (
+                    <button key={i} type="button" onClick={() => pickDSugg(r)}
+                      style={{ display: 'block', width: '100%', textAlign: 'start', padding: '7px 10px', background: 'transparent', border: 'none', borderBottom: i < dSugg.length - 1 ? '1px solid #f1f5f9' : 'none', cursor: 'pointer', fontSize: 12.5 }}>📍 {r.label}</button>
+                  ))}
+                </div>
+              )}
+              {dGps && <div className="muted xsmall mt4">✅ {t('loc_set')}</div>}
+            </div>
+            <div className="row" style={{ gap: 8 }}>
+              <div className="field grow"><label className="label">📞 {t('listing_phone')}</label>
+                <input className="input" dir="ltr" type="tel" value={dPhone} onChange={(e) => setDPhone(e.target.value)} /></div>
+              <div className="field grow"><label className="label">📝 {t('note')}</label>
+                <input className="input" value={dNote} onChange={(e) => setDNote(e.target.value)} placeholder="…" /></div>
+            </div>
+            <div className="row spread mt8" style={{ padding: '8px 12px', background: '#f0fdf4', borderRadius: 10 }}>
+              <span className="small" style={{ fontWeight: 800 }}>🛵 {t('deliver_fee')}</span>
+              <span className="small" style={{ fontWeight: 900, color: 'var(--brand-dark)' }}>{feeEst ? '≈ ' + fmtMoney(feeEst) : '≈ ' + fmtMoney(25)}</span>
+            </div>
+            {dGps && l.lat != null && <div className="muted xsmall mt4">📏 ≈ {Math.max(1, Math.round(distM(dGps.lat, dGps.lng, l.lat, l.lng) / 1000))} km — base 20 EGP + 2,5 EGP/km au-delà de 2 km</div>}
+            <button className="btn primary block mt8" disabled={dBusy} onClick={orderDelivery}>{dBusy ? '…' : '🛵 ' + t('deliver_confirm')}</button>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={rep} onClose={() => setRep(false)} title={'🚨 ' + t('report')}>
+        {rep && (
+          <div>
+            <div className="small mb8" style={{ fontWeight: 700 }}>{t('report_q')}</div>
+            {[['scam', '🚫'], ['prohibited', '⛔'], ['price', '💰'], ['other', '❓']].map(([k, em]) => (
+              <button key={k} className={'chip' + (repR === k ? ' on' : '')} style={{ display: 'block', width: '100%', textAlign: 'start', marginBottom: 6 }} onClick={() => setRepR(k)}>{em} {t('r_' + k)}</button>
+            ))}
+            <button className="btn danger block mt8" disabled={!repR} onClick={sendReport}>🚨 {t('report')}</button>
+          </div>
+        )}
+      </Modal>
+    </div>
+  );
+}
+
+// ================= 💬 Discussions marché (v2026.09.26.2) =================
+export function ChatsPage() {
+  const t = useT(); const { lang } = useLang(); const nav = useNavigate();
+  const [chats, setChats] = useState(null);
+  const load = () => api('/market/chats').then((d) => setChats(d.chats)).catch(() => setChats([]));
+  useEffect(() => { load(); const tm = setInterval(load, 15000); return () => clearInterval(tm); }, []);
+  return (
+    <div>
+      <div className="topbar">
+        <BackBtn />
+        <div className="grow"><div className="brand-name">💬 {t('mk_chats')}</div></div>
+      </div>
+      {!chats ? <Spinner /> : chats.length === 0 ? <Empty e="💬" text={t('mk_none')} /> : (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          {chats.map((c) => (
+            <button key={c.id} className="chat-row" onClick={() => nav('/app/chat/' + c.id)}>
+              {c.listing.photo
+                ? <img src={c.listing.photo} alt="" />
+                : <span className="chat-emoji">🛍️</span>}
+              <div className="grow" style={{ minWidth: 0 }}>
+                <div className="small" style={{ fontWeight: 800 }}>
+                  {c.other.name} {c.unread > 0 && <span className="unread-pill">{c.unread}</span>}
+                </div>
+                <div className="muted xsmall ellipsis">{c.last_msg || '🛍️ ' + c.listing.name}</div>
+              </div>
+              <div className="muted xsmall" style={{ flexShrink: 0 }}>{c.last_at ? fmtDate(c.last_at, lang) : ''}</div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ================= 💬 Conversation (acheteur ↔ vendeur) =================
+export function ChatPage() {
+  const t = useT(); const nav = useNavigate(); const { user } = useAuth();
+  const { id } = useParams();
+  const [msgs, setMsgs] = useState(null);
+  const [txt, setTxt] = useState('');
+  const [head, setHead] = useState(null);
+  const endRef = useRef(null);
+  const load = () => api('/market/chats/' + id).then((d) => setMsgs(d.messages)).catch(() => setMsgs([]));
+  useEffect(() => {
+    api('/market/chats').then((d) => { const c = d.chats.find((x) => String(x.id) === String(id)); if (c) setHead(c); }).catch(() => {});
+    load();
+    const tm = setInterval(load, 5000);
+    return () => clearInterval(tm);
+  }, [id]);
+  useEffect(() => { endRef.current && endRef.current.scrollIntoView({ block: 'end' }); }, [msgs && msgs.length]);
+  const send = async (val) => {
+    const v = (val != null ? val : txt).trim();
+    if (!v) return;
+    setTxt('');
+    try { const r = await api('/market/chats/' + id, { method: 'POST', body: { text: v } }); setMsgs((m) => [...(m || []), r.message]); }
+    catch (ex) { toast(ex.message, 'err'); }
+  };
+  return (
+    <div className="chat-page">
+      <div className="topbar">
+        <BackBtn />
+        <div className="grow">
+          <div className="brand-name" style={{ fontSize: 15 }}>💬 {head ? head.other.name : '…'}</div>
+          {head && (
+            <button className="muted xsmall" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }} onClick={() => nav('/app/market/' + head.listing.id)}>
+              🛍️ {head.listing.name} ›
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="chat-msgs">
+        {msgs === null ? <Spinner /> : msgs.length === 0 ? (
+          <div className="card chat-quick">
+            <div className="small mb8" style={{ fontWeight: 800 }}>💬 {t('mk_start')}</div>
+            <div className="row wrap" style={{ gap: 6 }}>
+              {[t('mk_q1'), t('mk_q2'), t('mk_q3')].map((qq) => (
+                <button key={qq} className="chip" onClick={() => send(qq)}>{qq}</button>
+              ))}
+            </div>
+          </div>
+        ) : msgs.map((m) => (
+          <div key={m.id} className={'msg' + (m.sender_id === user.id ? ' me' : '')}>
+            {m.text}
+            <div className="msg-meta">{m.sender_name}</div>
+          </div>
+        ))}
+        <div ref={endRef}></div>
+      </div>
+      <div className="chat-input row">
+        <input className="input grow" value={txt} onChange={(e) => setTxt(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); send(); } }}
+          placeholder={t('mk_type')} />
+        <button className="btn primary" onClick={() => send()}>➤</button>
+      </div>
+    </div>
+  );
+}
+
+// ================= 👤 Profil vendeur public + avis (v2026.09.26.2) =================
+export function SellerProfilePage() {
+  const t = useT(); const { lang } = useLang(); const nav = useNavigate(); const { user } = useAuth();
+  const { id } = useParams();
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  const [rvw, setRvw] = useState(false);
+  const [stars, setStars] = useState(5);
+  const [comment, setComment] = useState('');
+  useEffect(() => { setD(null); setErr(null); api('/sellers/' + id).then(setD).catch((e) => setErr(e.message)); }, [id]);
+  if (err) return (<div><div className="topbar"><BackBtn /></div><Empty e="😕" text={err} /></div>);
+  if (!d) return (<div><div className="topbar"><BackBtn /></div><Spinner /></div>);
+  const s = d.seller;
+  const since = s.since ? new Date(s.since).toLocaleDateString(lang === 'ar' ? 'ar-EG' : lang === 'en' ? 'en-GB' : 'fr-FR', { year: 'numeric', month: 'long' }) : '';
+  const sendReview = async () => {
+    try { await api('/sellers/' + id + '/review', { method: 'POST', body: { stars, comment } }); toast(t('review_saved'), 'ok'); setRvw(false); api('/sellers/' + id).then(setD); }
+    catch (ex) { toast(ex.message, 'err'); }
+  };
+  return (
+    <div>
+      <div className="topbar">
+        <BackBtn />
+        <div className="grow"><div className="brand-name">👤 {t('seller_profile')}</div></div>
+      </div>
+      <div className="card mb12" style={{ padding: 16 }}>
+        <div className="row" style={{ gap: 12 }}>
+          <div className="store-emoji" style={{ width: 56, height: 56, fontSize: 26 }}>👤</div>
+          <div className="grow" style={{ minWidth: 0 }}>
+            <div className="h2">{s.name}</div>
+            <div className="row wrap mt4" style={{ gap: 6 }}>
+              {s.verified && <span className="badge" style={{ background: '#dbeafe', color: '#1e40af' }}>✓ {t('verified')}</span>}
+              <span className="badge" style={{ color: '#b45309' }}>{s.stars ? `⭐ ${s.stars} (${s.reviews_count})` : '☆ ' + t('no_reviews')}</span>
+            </div>
+            <div className="muted xsmall mt4">{t('member_since')} {since}</div>
+          </div>
+        </div>
+        <div className="row spread mt12" style={{ textAlign: 'center' }}>
+          <div><div style={{ fontWeight: 900, fontSize: 17 }}>📦 {s.ads_count}</div><div className="muted xsmall">{t('ads_count')}</div></div>
+          <div><div style={{ fontWeight: 900, fontSize: 17 }}>👁 {s.total_views}</div><div className="muted xsmall">{t('total_views')}</div></div>
+          <div><div style={{ fontWeight: 900, fontSize: 17 }}>❤️ {s.total_favs}</div><div className="muted xsmall">{t('favorites')}</div></div>
+        </div>
+        {user && user.id !== s.id && <button className="btn primary block mt12" onClick={() => setRvw(true)}>⭐ {t('leave_review')}</button>}
+      </div>
+
+      <div className="h2 mb8">🛍️ {s.ads_count} {t('seller_ads')}</div>
+      <div className="store-grid mb12">
+        {d.ads.map((a) => (
+          <div key={a.id} className="card mkt-lcard" onClick={() => nav('/app/market/' + a.id)}>
+            <div className="mkt-lphoto">
+              {a.photos && a.photos[0] ? <img src={a.photos[0]} alt="" /> : <div className="mkt-nophoto">{CAT_EMOJI[a.category] || '📦'}</div>}
+            </div>
+            <div className="mkt-lbody">
+              <div className="small ellipsis" style={{ fontWeight: 800 }}>{a.name}</div>
+              <div style={{ fontWeight: 900, color: 'var(--brand-dark)' }}>{fmtMoney(a.price)}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {d.reviews.length > 0 && (
+        <div className="card" style={{ padding: 14 }}>
+          <div className="small mb8" style={{ fontWeight: 800 }}>⭐ {s.reviews_count} {t('n_reviews')}</div>
+          {d.reviews.map((r, i) => (
+            <div key={i} style={{ padding: '8px 0', borderBottom: '1px dashed #eef2f7' }}>
+              <div className="small" style={{ fontWeight: 800 }}>{'⭐'.repeat(r.stars)} <span className="muted" style={{ fontWeight: 400 }}>· {r.buyer_name}</span></div>
+              {r.comment && <div className="small mt4">{r.comment}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Modal open={rvw} onClose={() => setRvw(false)} title={'⭐ ' + t('leave_review')}>
+        {rvw && (
+          <div>
+            <div className="row center mb8" style={{ gap: 8 }}>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button key={n} style={{ fontSize: 28, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }} onClick={() => setStars(n)}>{n <= stars ? '⭐' : '☆'}</button>
+              ))}
+            </div>
+            <textarea className="textarea" rows={3} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={t('mk_type')} />
+            <button className="btn primary block mt8" onClick={sendReview}>✅ {t('save')}</button>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
@@ -1475,8 +1817,9 @@ export function PublishPage() {
   const [sp] = useSearchParams();
   const editId = sp.get('edit');
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState({ name: '', category: 'other', subcategory: null, condition: null, description: '', price: '', phone: user?.phone || '', brand: '', size: '', area: '', photos: [] });
+  const [form, setForm] = useState({ name: '', category: 'other', subcategory: null, condition: null, description: '', price: '', phone: user?.phone || '', brand: '', size: '', area: '', photos: [], lat: null, lng: null });
   const [busy, setBusy] = useState(false);
+  const [pick, setPick] = useState(false);   // 🗺️ Phase 2 : position exacte sur la carte
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const subLbl = (k) => (SUB_LBL[k] ? (SUB_LBL[k][lang] || SUB_LBL[k].fr) : k);
 
@@ -1484,7 +1827,7 @@ export function PublishPage() {
     if (!editId) return;
     api('/listings/mine').then((d) => {
       const l = (d.listings || []).find((x) => String(x.id) === String(editId));
-      if (l) setForm({ name: l.name, category: l.category, subcategory: l.subcategory || null, condition: l.condition || null, description: l.description || '', price: String(l.price), phone: l.phone || '', brand: l.brand || '', size: l.size || '', area: l.area || '', photos: (l.photos || []).slice(0, 5) });
+      if (l) setForm({ name: l.name, category: l.category, subcategory: l.subcategory || null, condition: l.condition || null, description: l.description || '', price: String(l.price), phone: l.phone || '', brand: l.brand || '', size: l.size || '', area: l.area || '', photos: (l.photos || []).slice(0, 5), lat: l.lat ?? null, lng: l.lng ?? null });
     }).catch(() => {});
   }, [editId]);
 
@@ -1519,7 +1862,7 @@ export function PublishPage() {
     if (busy) return;
     setBusy(true);
     try {
-      const body = { name: form.name.trim(), category: form.category, subcategory: form.subcategory, condition: form.condition, description: form.description.trim(), price: parseFloat(form.price), phone: form.phone.trim(), brand: form.brand, size: form.size, area: form.area, photos: form.photos };
+      const body = { name: form.name.trim(), category: form.category, subcategory: form.subcategory, condition: form.condition, description: form.description.trim(), price: parseFloat(form.price), phone: form.phone.trim(), brand: form.brand, size: form.size, area: form.area, photos: form.photos, lat: form.lat, lng: form.lng };
       if (editId) { await api('/listings/' + editId, { method: 'PUT', body }); toast(t('listing_updated'), 'ok'); }
       else { await api('/listings', { method: 'POST', body }); toast(t('listing_published'), 'ok'); }
       nav('/app/market');
@@ -1619,13 +1962,147 @@ export function PublishPage() {
           <div className="field"><label className="label">📞 {t('listing_phone')}</label>
             <input className="input" dir="ltr" type="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="0100 123 4567" /></div>
           <div className="field"><label className="label">📍 {t('area_label')}</label>
-            <input className="input" value={form.area} onChange={(e) => set('area', e.target.value)} placeholder="ex. : Smouha, Alexandrie" /></div>
+            <div className="row" style={{ gap: 6 }}>
+              <input className="input grow" value={form.area} onChange={(e) => set('area', e.target.value)} placeholder="ex. : Smouha, Alexandrie" />
+              <button className={'btn' + (form.lat != null ? ' primary' : ' ghost')} title={t('pick_map')} onClick={() => setPick(true)}>🗺️</button>
+            </div>
+            {form.lat != null && <div className="muted xsmall mt4">✅ {t('loc_set')}</div>}
+          </div>
           <div className="row" style={{ gap: 6 }}>
             <button className="btn ghost" onClick={() => setStep(2)}>← {t('prev')}</button>
             <button className="btn primary grow" disabled={busy} onClick={submit}>{busy ? '…' : (editId ? '✅ ' + t('save') : '🚀 ' + t('publish'))}</button>
           </div>
         </div>
       )}
+
+      <Modal open={pick} onClose={() => setPick(false)} title={'🗺️ ' + t('pick_map')}>
+        {pick && (
+          <PickMap
+            initial={form.lat != null ? { lat: form.lat, lng: form.lng } : { lat: 31.2001, lng: 29.9187 }}
+            onConfirm={({ lat, lng, address }) => {
+              setForm((f) => ({ ...f, lat, lng, area: f.area || (address ? address.split(',').slice(0, 2).join(', ') : '') }));
+              toast(t('loc_set'), 'ok');
+              setPick(false);
+            }}
+          />
+        )}
+      </Modal>
+    </div>
+  );
+}
+
+// ================= 📦 Mes ventes — livraisons marché (v2026.09.26.3) =================
+export function SalesPage() {
+  const t = useT(); const { lang } = useLang(); const nav = useNavigate();
+  const [orders, setOrders] = useState(null);
+  const [acc, setAcc] = useState(null);          // commande en cours d'acceptation
+  const [pAddr, setPAddr] = useState('');
+  const [pGps, setPGps] = useState(null);
+  const [pPick, setPPick] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const load = () => api('/market/sales').then((d) => setOrders(d.orders)).catch(() => setOrders([]));
+  useEffect(() => { load(); const tm = setInterval(load, 15000); return () => clearInterval(tm); }, []);
+
+  const startAccept = (o) => { setAcc(o); setPAddr(o.store_address || ''); setPGps(o.store_lat != null ? { lat: o.store_lat, lng: o.store_lng } : null); };
+  const doAccept = async () => {
+    if (busy) return;
+    if (pAddr.trim().length < 5) return toast(t('addr_too_short'), 'err');
+    if (!pGps) return toast(t('pickup_required'), 'err');
+    setBusy(true);
+    try {
+      await api('/market/orders/' + acc.id + '/accept', { method: 'POST', body: { pickup_address: pAddr.trim(), pickup_lat: pGps.lat, pickup_lng: pGps.lng } });
+      toast(t('sale_accepted'), 'ok');
+      setAcc(null); setPPick(false); load();
+    } catch (ex) { toast(ex.message, 'err'); }
+    setBusy(false);
+  };
+  const decline = async (o) => {
+    try { await api('/market/orders/' + o.id + '/decline', { method: 'POST' }); toast(t('sale_declined')); load(); }
+    catch (ex) { toast(ex.message, 'err'); }
+  };
+  const PEND = ['pending']; const ACT = ['ready', 'assigned', 'picked_up'];
+  const pend = (orders || []).filter((o) => PEND.includes(o.status));
+  const act = (orders || []).filter((o) => ACT.includes(o.status));
+  const past = (orders || []).filter((o) => !PEND.includes(o.status) && !ACT.includes(o.status));
+
+  return (
+    <div>
+      <div className="topbar">
+        <BackBtn />
+        <div className="grow"><div className="brand-name">📦 {t('my_sales')}</div></div>
+      </div>
+      {!orders ? <Spinner /> : orders.length === 0 ? <Empty e="📦" text={t('no_sales')} /> : (
+        <div>
+          {pend.length > 0 && <div className="h2 mb8">🫳 {t('sale_requests')} ({pend.length})</div>}
+          {pend.map((o) => (
+            <div key={o.id} className="card mb12" style={{ padding: 12, border: '2px solid #fbbf24' }}>
+              <div className="row spread wrap">
+                <div style={{ fontWeight: 800 }}>🛍️ {o.store_name}</div>
+                <span className="badge">#{o.id}</span>
+              </div>
+              <div className="muted small mt4">👤 {o.client_name} · 📞 {o.phone}</div>
+              <div className="small mt4">📍 → {(o.address || '').slice(0, 60)}</div>
+              <div className="small">💰 {fmtMoney(o.subtotal)} + 🛵 {fmtMoney(o.delivery_fee)} {t('course')}</div>
+              <div className="row mt8" style={{ gap: 6 }}>
+                <button className="btn primary grow" onClick={() => startAccept(o)}>✅ {t('accept_sale')}</button>
+                <button className="btn danger" onClick={() => decline(o)}>✖</button>
+              </div>
+            </div>
+          ))}
+          {act.length > 0 && <div className="h2 mb8 mt12">🛵 {t('tab_active')} ({act.length})</div>}
+          {act.map((o) => (
+            <div key={o.id} className="card mb12" style={{ padding: 12 }}>
+              <div className="row spread wrap">
+                <div style={{ fontWeight: 800 }}>🛍️ {o.store_name}</div>
+                <StatusBadge status={o.status} />
+              </div>
+              <div className="muted small mt4">📍 {t('pickup')} : {(o.store_address || '').slice(0, 50)} → 🏠 {(o.address || '').slice(0, 50)}</div>
+              {o.driver_name && <div className="small mt4">🛵 {o.driver_name} · 📞 {o.driver_phone}</div>}
+              <Stepper status={o.status} />
+            </div>
+          ))}
+          {past.length > 0 && <div className="h2 mb8 mt12">📁 {t('history')} ({past.length})</div>}
+          {past.map((o) => (
+            <div key={o.id} className="card mb8" style={{ padding: 10 }}>
+              <div className="row spread wrap">
+                <div className="small" style={{ fontWeight: 800 }}>🛍️ {o.store_name} · #{o.id}</div>
+                <StatusBadge status={o.status} />
+              </div>
+              <div className="muted xsmall mt4">👤 {o.client_name} · {fmtDate(o.created_at, lang)} · 💰 {fmtMoney(o.subtotal)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Modal open={!!acc} onClose={() => { setAcc(null); setPPick(false); }} title={'✅ ' + t('accept_sale')}>
+        {acc && (
+          <div>
+            <div className="banner ok mb8" style={{ fontSize: 12 }}>🛵 {t('pickup_hint')}</div>
+            <div className="field">
+              <label className="label">📍 {t('pickup_addr')}</label>
+              <input className="input" value={pAddr} onChange={(e) => setPAddr(e.target.value)} placeholder="ex. : 15 rue Victor Emmanuel, Smouha" />
+              <div className="row mt8" style={{ gap: 6 }}>
+                <button className={'btn grow' + (pGps ? ' primary' : ' ghost')} onClick={() => setPPick(true)}>🗺️ {t('pick_map')}</button>
+              </div>
+              {pGps && <div className="muted xsmall mt4">✅ {t('loc_set')}</div>}
+            </div>
+            <button className="btn primary block mt8" disabled={busy} onClick={doAccept}>{busy ? '…' : '✅ ' + t('confirm_sale')}</button>
+          </div>
+        )}
+      </Modal>
+      <Modal open={pPick} onClose={() => setPPick(false)} title={'🗺️ ' + t('pick_map')}>
+        {pPick && (
+          <PickMap
+            initial={pGps || { lat: 31.2001, lng: 29.9187 }}
+            onConfirm={({ lat, lng, address }) => {
+              setPGps({ lat, lng });
+              setPAddr((a) => a || (address ? address.split(',').slice(0, 2).join(', ') : ''));
+              setPPick(false);
+              toast(t('loc_set'), 'ok');
+            }}
+          />
+        )}
+      </Modal>
     </div>
   );
 }
@@ -1700,7 +2177,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.26.1</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.26.3</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
