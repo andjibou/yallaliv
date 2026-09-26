@@ -448,18 +448,49 @@ app.post('/api/notifications/read', auth, h(async (req, res) => {
 // 🛍️ v2026.09.24.1 — MARCHÉ (style OLX) : tout utilisateur connecté publie des articles,
 // visibles par tous. Contact direct acheteur → vendeur (appel/WhatsApp), comme OLX.
 const LISTING_CATS = ['phones', 'electronics', 'home', 'fashion', 'kids', 'sports', 'beauty', 'auto', 'other'];
+// ================= 🛍️ Marché — v2026.09.26.1 Phase 1 : sous-cats, tri, favoris, vues, renouvellement =================
+const LISTING_CONDS = ['new', 'like_new', 'used'];
+const LISTING_SORTS = {
+  recent: 'COALESCE(l.renewed_at, l.created_at) DESC',
+  price_asc: 'l.price ASC',
+  price_desc: 'l.price DESC',
+  popular: 'l.views DESC, COALESCE(l.renewed_at, l.created_at) DESC',
+};
+const listingPhotos = (l) => {   // compat : photos JSON (Phase 1) ou photo unique (v1)
+  try { const a = JSON.parse(l.photos || 'null'); if (Array.isArray(a)) return a.filter(Boolean); } catch {}
+  return l.photo ? [l.photo] : [];
+};
+const cleanPhotos = (arr) => (Array.isArray(arr) ? arr : []).filter((p) => typeof p === 'string' && p.startsWith('data:image/') && p.length < 2200000).slice(0, 5);
+
 app.get('/api/listings', h(async (req, res) => {
-  const { q, cat } = req.query;
-  let sql = `SELECT l.id, l.name, l.category, l.description, l.price, l.phone, l.photo, l.created_at,
-    u.name AS seller FROM listings l JOIN users u ON u.id=l.user_id WHERE l.available=1`;
+  const { q, cat, sub, sort, page } = req.query;
+  const pmin = parseFloat(req.query.price_min); const pmax = parseFloat(req.query.price_max);
+  const pg = Math.max(1, parseInt(page) || 1); const LIM = 20;
+  let sql = `SELECT l.id, l.name, l.category, l.subcategory, l.condition, l.brand, l.size, l.area, l.description, l.price, l.phone, l.photo, l.views, l.renewed_at, l.created_at, u.name AS seller,
+    (SELECT COUNT(*) FROM listing_favorites f WHERE f.listing_id = l.id)::int AS favs
+    FROM listings l JOIN users u ON u.id = l.user_id WHERE l.available = 1`;
   const args = [];
-  if (cat && cat !== 'all') { sql += ' AND l.category=?'; args.push(cat); }
+  if (cat && cat !== 'all') { sql += ' AND l.category = ?'; args.push(cat); }
+  if (sub && sub !== 'all') { sql += ' AND l.subcategory = ?'; args.push(sub); }
+  if (!isNaN(pmin) && pmin >= 0) { sql += ' AND l.price >= ?'; args.push(pmin); }
+  if (!isNaN(pmax) && pmax > 0) { sql += ' AND l.price <= ?'; args.push(pmax); }
   if (q) { sql += ' AND (l.name ILIKE ? OR l.description ILIKE ?)'; args.push(`%${q}%`, `%${q}%`); }
-  sql += ' ORDER BY l.created_at DESC LIMIT 60';
-  res.json({ listings: await all(sql, args) });
+  sql += ` ORDER BY ${LISTING_SORTS[sort] || LISTING_SORTS.recent} LIMIT ? OFFSET ?`;
+  args.push(LIM + 1, (pg - 1) * LIM);
+  const rows = await all(sql, args);
+  const hasMore = rows.length > LIM;
+  res.json({ listings: rows.slice(0, LIM).map((l) => ({ ...l, photos: listingPhotos(l) })), hasMore });
 }));
 app.get('/api/listings/mine', auth, h(async (req, res) => {
-  res.json({ listings: await all('SELECT * FROM listings WHERE user_id=? ORDER BY created_at DESC', [req.user.id]) });
+  const rows = await all(`SELECT l.*, (SELECT COUNT(*) FROM listing_favorites f WHERE f.listing_id = l.id)::int AS favs
+    FROM listings l WHERE l.user_id = ? ORDER BY COALESCE(l.renewed_at, l.created_at) DESC`, [req.user.id]);
+  res.json({ listings: rows.map((l) => ({ ...l, photos: listingPhotos(l) })) });
+}));
+app.get('/api/listings/favorites', auth, h(async (req, res) => {
+  const rows = await all(`SELECT l.id, l.name, l.category, l.subcategory, l.condition, l.description, l.price, l.phone, l.photo, l.area, l.views, l.created_at, u.name AS seller
+    FROM listing_favorites fav JOIN listings l ON l.id = fav.listing_id JOIN users u ON u.id = l.user_id
+    WHERE fav.user_id = ? AND l.available = 1 ORDER BY fav.created_at DESC`, [req.user.id]);
+  res.json({ listings: rows.map((l) => ({ ...l, photos: listingPhotos(l) })) });
 }));
 app.post('/api/listings', auth, h(async (req, res) => {
   const name = String(req.body.name || '').trim();
@@ -467,12 +498,17 @@ app.post('/api/listings', auth, h(async (req, res) => {
   const price = parseFloat(req.body.price);
   const phone = String(req.body.phone || req.user.phone || '').trim();
   const category = LISTING_CATS.includes(req.body.category) ? req.body.category : 'other';
-  const photo = typeof req.body.photo === 'string' && req.body.photo.startsWith('data:image/') && req.body.photo.length < 2200000 ? req.body.photo : null;
+  const subcategory = /^[a-z_]{1,30}$/.test(String(req.body.subcategory || '')) ? req.body.subcategory : null;
+  const condition = LISTING_CONDS.includes(req.body.condition) ? req.body.condition : null;
+  const brand = String(req.body.brand || '').trim().slice(0, 40) || null;
+  const size = String(req.body.size || '').trim().slice(0, 20) || null;
+  const area = String(req.body.area || '').trim().slice(0, 80) || null;
+  const photos = cleanPhotos(req.body.photos != null ? req.body.photos : (req.body.photo ? [req.body.photo] : []));
   if (name.length < 2 || name.length > 80) return res.status(400).json({ error: "Nom de l'article invalide (2 à 80 caractères)" });
   if (isNaN(price) || price < 0 || price > 10000000) return res.status(400).json({ error: 'Prix invalide' });
   if (!phone) return res.status(400).json({ error: 'Téléphone requis pour que les acheteurs vous contactent' });
-  const r = await run('INSERT INTO listings(user_id,name,category,description,price,phone,photo,created_at) VALUES(?,?,?,?,?,?,?,?) RETURNING id',
-    [req.user.id, name, category, description, price, phone, photo, Date.now()]);
+  const r = await run('INSERT INTO listings(user_id,name,category,subcategory,condition,brand,size,area,description,price,phone,photo,photos,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id',
+    [req.user.id, name, category, subcategory, condition, brand, size, area, description, price, phone, photos[0] || null, JSON.stringify(photos), Date.now()]);
   res.json({ id: r.rows[0].id });
 }));
 app.put('/api/listings/:id', auth, h(async (req, res) => {
@@ -483,16 +519,55 @@ app.put('/api/listings/:id', auth, h(async (req, res) => {
   const price = req.body.price != null ? parseFloat(req.body.price) : l.price;
   if (name.length < 2) return res.status(400).json({ error: "Nom de l'article invalide" });
   if (isNaN(price) || price < 0) return res.status(400).json({ error: 'Prix invalide' });
-  await run('UPDATE listings SET name=?, category=?, description=?, price=?, phone=?, photo=?, available=? WHERE id=?', [
+  let oldPhotos; try { oldPhotos = JSON.parse(l.photos || 'null'); } catch { oldPhotos = null; }
+  const photos = cleanPhotos(req.body.photos != null ? req.body.photos : (oldPhotos || (l.photo ? [l.photo] : [])));
+  await run('UPDATE listings SET name=?, category=?, subcategory=?, condition=?, brand=?, size=?, area=?, description=?, price=?, phone=?, photo=?, photos=?, available=? WHERE id=?', [
     name,
     LISTING_CATS.includes(req.body.category) ? req.body.category : l.category,
+    req.body.subcategory !== undefined ? (/^[a-z_]{1,30}$/.test(String(req.body.subcategory || '')) ? req.body.subcategory : null) : l.subcategory,
+    req.body.condition !== undefined ? (LISTING_CONDS.includes(req.body.condition) ? req.body.condition : null) : l.condition,
+    req.body.brand !== undefined ? (String(req.body.brand || '').trim().slice(0, 40) || null) : l.brand,
+    req.body.size !== undefined ? (String(req.body.size || '').trim().slice(0, 20) || null) : l.size,
+    req.body.area !== undefined ? (String(req.body.area || '').trim().slice(0, 80) || null) : l.area,
     String(req.body.description ?? l.description ?? '').trim().slice(0, 1000),
     price,
     String(req.body.phone ?? l.phone ?? '').trim(),
-    (typeof req.body.photo === 'string' && req.body.photo.startsWith('data:image/') && req.body.photo.length < 2200000) ? req.body.photo : (req.body.photo === null ? null : l.photo),
+    photos[0] || null,
+    JSON.stringify(photos),
     req.body.available != null ? (req.body.available ? 1 : 0) : l.available,
-    l.id
+    l.id,
   ]);
+  res.json({ ok: true });
+}));
+app.get('/api/listings/:id', h(async (req, res) => {
+  const l = await get(`SELECT l.*, u.name AS seller, u.created_at AS seller_since,
+    (SELECT COUNT(*) FROM listing_favorites f WHERE f.listing_id = l.id)::int AS favs
+    FROM listings l JOIN users u ON u.id = l.user_id WHERE l.id = ?`, [req.params.id]);
+  if (!l || !l.available) return res.status(404).json({ error: 'Annonce introuvable' });
+  await run('UPDATE listings SET views = views + 1 WHERE id = ?', [l.id]);
+  const sellerAds = await all('SELECT id, name, price, photo, photos, category FROM listings WHERE user_id = ? AND available = 1 AND id <> ? ORDER BY created_at DESC LIMIT 6', [l.user_id, l.id]);
+  res.json({
+    listing: { ...l, views: (l.views || 0) + 1, photos: listingPhotos(l) },
+    seller: { name: l.seller, verified: !!l.phone, since: l.seller_since, ads: sellerAds.map((a2) => ({ ...a2, photos: listingPhotos(a2) })) },
+  });
+}));
+app.post('/api/listings/:id/fav', auth, h(async (req, res) => {
+  const l = await get('SELECT id FROM listings WHERE id = ?', [req.params.id]);
+  if (!l) return res.status(404).json({ error: 'Annonce introuvable' });
+  const ex = await get('SELECT 1 AS x FROM listing_favorites WHERE user_id = ? AND listing_id = ?', [req.user.id, l.id]);
+  if (ex) { await run('DELETE FROM listing_favorites WHERE user_id = ? AND listing_id = ?', [req.user.id, l.id]); return res.json({ fav: false }); }
+  await run('INSERT INTO listing_favorites(user_id, listing_id, created_at) VALUES(?,?,?)', [req.user.id, l.id, Date.now()]);
+  res.json({ fav: true });
+}));
+app.post('/api/listings/:id/renew', auth, h(async (req, res) => {
+  const l = await get('SELECT * FROM listings WHERE id = ?', [req.params.id]);
+  if (!l) return res.status(404).json({ error: 'Annonce introuvable' });
+  if (l.user_id !== req.user.id && req.user.role !== 'superadmin') return res.status(403).json({ error: "Ce n'est pas votre annonce" });
+  if (l.renewed_at && Date.now() - l.renewed_at < 24 * 3600 * 1000) {
+    const hLeft = Math.ceil((24 * 3600 * 1000 - (Date.now() - l.renewed_at)) / 3600000);
+    return res.status(400).json({ error: `Renouvellement possible dans ${hLeft} h` });
+  }
+  await run('UPDATE listings SET renewed_at = ? WHERE id = ?', [Date.now(), l.id]);
   res.json({ ok: true });
 }));
 app.delete('/api/listings/:id', auth, h(async (req, res) => {

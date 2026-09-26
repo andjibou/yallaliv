@@ -12,6 +12,31 @@ const TYPE_META = { restaurant: { e: '🍽️', c: '#ef6c4d' }, market: { e: '�
 
 // 🛍️ v2026.09.24.3 — Marché (style OLX) : catégories + emojis + lien WhatsApp Égypte
 const CAT_EMOJI = { phones: '📱', electronics: '🔌', home: '🏠', fashion: '👕', kids: '🧸', sports: '⚽', beauty: '💄', auto: '🚗', other: '📦' };
+// 🛍️ v2026.09.26.1 — Marché Phase 1 : sous-catégories (2e niveau), états, attributs par catégorie
+const SUBCATS = {
+  phones: [['smartphones', '📱'], ['accessories', '🎧'], ['tablets', '🖊️']],
+  electronics: [['tv', '📺'], ['audio', '🔊'], ['computers', '💻'], ['gaming', '🎮']],
+  home: [['furniture', '🛋️'], ['appliances', '🧺'], ['decor', '🖼️']],
+  fashion: [['women', '👗'], ['men', '👔'], ['shoes', '👠'], ['bags', '👜']],
+  kids: [['toys', '🧸'], ['clothes', '🧦'], ['gear', '🍼']],
+  sports: [['fitness', '🏋️'], ['football', '⚽'], ['outdoor', '🚴']],
+  beauty: [['makeup', '💄'], ['skincare', '🧴'], ['fragrance', '🌸']],
+  auto: [['cars', '🚗'], ['parts', '🔧'], ['moto', '🏍️']],
+  other: [],
+};
+const SUB_LBL = {
+  smartphones: { fr: 'Smartphones', ar: 'موبايلات', en: 'Smartphones' }, accessories: { fr: 'Accessoires', ar: 'إكسسوارات', en: 'Accessories' }, tablets: { fr: 'Tablettes', ar: 'تابلت', en: 'Tablets' },
+  tv: { fr: 'TV & écrans', ar: 'تليفزيونات', en: 'TV & displays' }, audio: { fr: 'Audio & son', ar: 'صوتيات', en: 'Audio' }, computers: { fr: 'Ordinateurs', ar: 'كمبيوتر', en: 'Computers' }, gaming: { fr: 'Gaming', ar: 'ألعاب فيديو', en: 'Gaming' },
+  furniture: { fr: 'Meubles', ar: 'أثاث', en: 'Furniture' }, appliances: { fr: 'Électroménager', ar: 'أجهزة منزلية', en: 'Appliances' }, decor: { fr: 'Décoration', ar: 'ديكور', en: 'Decor' },
+  women: { fr: 'Femme', ar: 'حريمي', en: 'Women' }, men: { fr: 'Homme', ar: 'رجالي', en: 'Men' }, shoes: { fr: 'Chaussures', ar: 'أحذية', en: 'Shoes' }, bags: { fr: 'Sacs', ar: 'حقائب', en: 'Bags' },
+  toys: { fr: 'Jouets', ar: 'ألعاب أطفال', en: 'Toys' }, clothes: { fr: 'Vêtements', ar: 'ملابس', en: 'Clothes' }, gear: { fr: 'Puériculture', ar: 'مستلزمات أطفال', en: 'Baby gear' },
+  fitness: { fr: 'Fitness', ar: 'لياقة', en: 'Fitness' }, football: { fr: 'Football', ar: 'كرة القدم', en: 'Football' }, outdoor: { fr: 'Plein air', ar: 'أنشطة خارجية', en: 'Outdoor' },
+  makeup: { fr: 'Maquillage', ar: 'مكياج', en: 'Makeup' }, skincare: { fr: 'Soins peau', ar: 'عناية بالبشرة', en: 'Skincare' }, fragrance: { fr: 'Parfums', ar: 'عطور', en: 'Fragrance' },
+  cars: { fr: 'Voitures', ar: 'عربيات', en: 'Cars' }, parts: { fr: 'Pièces', ar: 'قطع غيار', en: 'Parts' }, moto: { fr: 'Motos', ar: 'موتوسيكلات', en: 'Motorcycles' },
+};
+const CONDITIONS = [['new', '✨'], ['like_new', '🌟'], ['used', '♻️']];
+const COND_LBL = { new: { fr: 'Neuf', ar: 'جديد', en: 'New' }, like_new: { fr: 'Comme neuf', ar: 'شبه جديد', en: 'Like new' }, used: { fr: 'Occasion', ar: 'مستعمل', en: 'Used' } };
+const ATTR_FIELDS = { phones: ['brand'], electronics: ['brand'], auto: ['brand'], fashion: ['brand', 'size'], kids: ['size'], beauty: ['brand'], sports: [], home: [], other: [] };
 const waLink = (p) => 'https://wa.me/' + String(p || '').replace(/\D/g, '').replace(/^0/, '20');
 
 // 🧭 v2026.09.24.3 — Barre de navigation moderne : Accueil · Commandes · [＋] · Notifications · Paramètres
@@ -1189,34 +1214,55 @@ export function ClientProfile() {
 
 // ================= 🛍️ v2026.09.24.3 — Page Marché (toutes les annonces + mes annonces) =================
 export function MarketPage() {
-  const t = useT();
-  const nav = useNavigate();
-  const { user } = useAuth();
+  const t = useT(); const { lang } = useLang(); const nav = useNavigate(); const { user } = useAuth();
   const [spM] = useSearchParams();
-  const [cat, setCat] = useState(spM.get('cat') || 'all');   // 🛍️ catégorie depuis l'accueil
+  const [cat, setCat] = useState(spM.get('cat') || 'all');
+  const [sub, setSub] = useState('all');
   const [q, setQ] = useState('');
+  const [sort, setSort] = useState('recent');
+  const [pmin, setPmin] = useState('');
+  const [pmax, setPmax] = useState('');
+  const [showF, setShowF] = useState(false);
+  const [favOnly, setFavOnly] = useState(false);
   const [data, setData] = useState(null);
+  const [more, setMore] = useState(false);
   const [mine, setMine] = useState(null);
-  const [detail, setDetail] = useState(null);
+  const [favIds, setFavIds] = useState(null);
+  const subLbl = (k) => (SUB_LBL[k] ? (SUB_LBL[k][lang] || SUB_LBL[k].fr) : k);
+  const condLbl = (k) => (COND_LBL[k] ? (COND_LBL[k][lang] || COND_LBL[k].fr) : '');
 
-  const load = () => {
+  const load = (pg, keep) => {
+    if (favOnly) { api('/listings/favorites').then((d) => { setData(d.listings); setMore(false); }).catch(() => setData([])); return; }
     const p = new URLSearchParams();
     if (cat !== 'all') p.set('cat', cat);
+    if (sub !== 'all') p.set('sub', sub);
     if (q.trim()) p.set('q', q.trim());
-    api('/listings?' + p.toString()).then((d) => setData(d.listings)).catch(() => setData([]));
-    if (user) api('/listings/mine').then((d) => setMine(d.listings)).catch(() => {});
+    if (pmin) p.set('price_min', pmin);
+    if (pmax) p.set('price_max', pmax);
+    if (sort !== 'recent') p.set('sort', sort);
+    p.set('page', String(pg));
+    api('/listings?' + p.toString()).then((d) => { setData((old) => (keep && old ? old.concat(d.listings) : d.listings)); setMore(!!d.hasMore); })
+      .catch(() => setData([]));
   };
-  useEffect(load, [cat]);
+  useEffect(() => { setData(null); load(1, false); }, [cat, sub, sort, favOnly]); // eslint-disable-line
+  useEffect(() => {
+    if (!user) return;
+    api('/listings/mine').then((d) => setMine(d.listings)).catch(() => {});
+    api('/listings/favorites').then((d) => setFavIds(new Set(d.listings.map((l) => l.id)))).catch(() => setFavIds(new Set()));
+  }, [user]);
 
-  const toggle = async (l) => {
-    try { await api('/listings/' + l.id, { method: 'PUT', body: { available: l.available ? 0 : 1 } }); load(); }
-    catch (ex) { toast(ex.message, 'err'); }
+  const toggleFav = async (l, e) => {
+    if (e) e.stopPropagation();
+    if (!user) return nav('/login');
+    try {
+      const d = await api('/listings/' + l.id + '/fav', { method: 'POST' });
+      setFavIds((s) => { const n = new Set(s || []); if (d.fav) n.add(l.id); else n.delete(l.id); return n; });
+      if (favOnly) load(1, false);
+    } catch (ex) { toast(ex.message, 'err'); }
   };
-  const del = async (l) => {
-    if (!window.confirm(t('confirm_delete'))) return;
-    try { await api('/listings/' + l.id, { method: 'DELETE' }); toast(t('listing_deleted')); load(); }
-    catch (ex) { toast(ex.message, 'err'); }
-  };
+  const toggle = async (l) => { try { await api('/listings/' + l.id, { method: 'PUT', body: { available: l.available ? 0 : 1 } }); load(1, false); } catch (ex) { toast(ex.message, 'err'); } };
+  const del = async (l) => { if (!window.confirm(t('confirm_delete'))) return; try { await api('/listings/' + l.id, { method: 'DELETE' }); toast(t('listing_deleted')); load(1, false); } catch (ex) { toast(ex.message, 'err'); } };
+  const renew = async (l) => { try { await api('/listings/' + l.id + '/renew', { method: 'POST' }); toast(t('renewed'), 'ok'); } catch (ex) { toast(ex.message, 'err'); } };
 
   return (
     <div>
@@ -1228,29 +1274,55 @@ export function MarketPage() {
 
       <div className="row mb8" style={{ gap: 6 }}>
         <input className="grow" value={q} onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); load(); } }}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); load(1, false); } }}
           placeholder={'🔍 ' + t('search_ph')} style={{ padding: '9px 12px', borderRadius: 10, border: '1px solid #e3e9f0' }} />
-        <button className="btn blue" onClick={load}>🔍</button>
-      </div>
-      <div className="row wrap mb12" style={{ gap: 6 }}>
-        {[['all', '🛍️'], ...Object.entries(CAT_EMOJI)].map(([k, e]) => (
-          <button key={k} className={'badge' + (cat === k ? ' b-active' : '')} style={{ cursor: 'pointer', border: 'none' }}
-            onClick={() => setCat(k)}>{e} {k === 'all' ? t('all') : t('cat_' + k)}</button>
-        ))}
+        <button className={'btn' + (favOnly ? ' primary' : ' ghost')} title={t('favorites')} onClick={() => setFavOnly((v) => !v)}>❤️</button>
+        <button className={'btn' + (showF ? ' primary' : ' ghost')} title={t('sort')} onClick={() => setShowF((v) => !v)}>⚙️</button>
       </div>
 
-      {mine?.length > 0 && (
-        <div className="card mb12">
-          <div className="h2 mb8">📌 {t('my_listings')} ({mine.length})</div>
+      {showF && (
+        <div className="card mb8" style={{ padding: 10 }}>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <select className="input" value={sort} onChange={(e) => setSort(e.target.value)} style={{ padding: '8px', flexGrow: 1, minWidth: 130 }}>
+              <option value="recent">🕐 {t('sort_recent')}</option>
+              <option value="price_asc">💰 {t('sort_price_asc')}</option>
+              <option value="price_desc">💰 {t('sort_price_desc')}</option>
+              <option value="popular">🔥 {t('sort_popular')}</option>
+            </select>
+            <input className="input" dir="ltr" type="number" min="0" value={pmin} onChange={(e) => setPmin(e.target.value)} placeholder={t('price_min')} style={{ minWidth: 90, padding: '8px', flexGrow: 1 }} />
+            <input className="input" dir="ltr" type="number" min="0" value={pmax} onChange={(e) => setPmax(e.target.value)} placeholder={t('price_max')} style={{ minWidth: 90, padding: '8px', flexGrow: 1 }} />
+            <button className="btn blue" onClick={() => load(1, false)}>✅ {t('apply')}</button>
+          </div>
+        </div>
+      )}
+
+      <div className="row wrap mb8" style={{ gap: 6 }}>
+        {[['all', '🛍️'], ...Object.entries(CAT_EMOJI)].map(([k, e]) => (
+          <button key={k} className={'chip' + (cat === k && !favOnly ? ' on' : '')} onClick={() => { setCat(k); setSub('all'); setFavOnly(false); }}>{e} {k === 'all' ? t('sub_all') : t('cat_' + k)}</button>
+        ))}
+      </div>
+      {cat !== 'all' && (SUBCATS[cat] || []).length > 0 && !favOnly && (
+        <div className="row wrap mb12" style={{ gap: 6 }}>
+          {[['all', '•'], ...SUBCATS[cat]].map(([k, e]) => (
+            <button key={k} className={'chip sm' + (sub === k ? ' on' : '')} onClick={() => setSub(k)}>{e} {k === 'all' ? t('sub_all') : subLbl(k)}</button>
+          ))}
+        </div>
+      )}
+      {favOnly && <div className="muted small mb12">❤️ {t('favorites')}</div>}
+
+      {user && mine && mine.length > 0 && (
+        <div className="card mb12" style={{ padding: 12 }}>
+          <div className="h2 mb8">📋 {t('my_listings')}</div>
           {mine.map((l) => (
             <div key={l.id} className="row spread wrap" style={{ padding: '8px 0', borderBottom: '1px dashed #eef2f7', gap: 6 }}>
-              <div className="grow" style={{ minWidth: 130 }}>
+              <div className="grow" style={{ minWidth: 130, cursor: 'pointer' }} onClick={() => nav('/app/market/' + l.id)}>
                 <div className="small" style={{ fontWeight: 700 }}>{CAT_EMOJI[l.category] || '📦'} {l.name} {l.available ? '' : <span className="muted small">(masquée)</span>}</div>
-                <div className="muted small">{fmtMoney(l.price)}</div>
+                <div className="muted small">{fmtMoney(l.price)} · 👁 {l.views || 0} · ❤️ {l.favs || 0}</div>
               </div>
-              <div className="row" style={{ gap: 4 }}>
-                <button className="btn ghost sm" onClick={() => nav('/app/publish?edit=' + l.id)}>✏️ {t('edit')}</button>
-                <button className="btn ghost sm" onClick={() => toggle(l)}>{l.available ? '🚫 ' + t('hide_listing') : '✅ ' + t('show_listing')}</button>
+              <div className="row wrap" style={{ gap: 4 }}>
+                <button className="btn ghost sm" title={t('renew')} onClick={() => renew(l)}>🔄</button>
+                <button className="btn ghost sm" onClick={() => nav('/app/publish?edit=' + l.id)}>✏️</button>
+                <button className="btn ghost sm" onClick={() => toggle(l)}>{l.available ? '🚫' : '✅'}</button>
                 <button className="btn danger sm" onClick={() => del(l)}>🗑️</button>
               </div>
             </div>
@@ -1258,96 +1330,196 @@ export function MarketPage() {
         </div>
       )}
 
-      {!data ? <Spinner /> : data.length === 0 ? <Empty e="🛍️" text={t('no_listings')} /> : (
-        <div className="store-grid">
-          {data.map((l) => (
-            <div key={l.id} className="card store-card" onClick={() => setDetail(l)}>
-              {l.photo
-                ? <img src={l.photo} alt="" style={{ width: 52, height: 52, borderRadius: 14, objectFit: 'cover', flexShrink: 0, border: '1px solid var(--line)' }} />
-                : <div className="store-emoji" style={{ background: '#f1f5f9' }}>{CAT_EMOJI[l.category] || '📦'}</div>}
-              <div className="grow">
-                <div className="h2 ellipsis">{l.name}</div>
-                <div className="muted small ellipsis">👤 {l.seller}</div>
-                <div className="row mt4" style={{ gap: 6 }}>
-                  <span className="badge" style={{ background: '#dcfce7', color: '#166534' }}>{fmtMoney(l.price)}</span>
-                  <span className="badge">{CAT_EMOJI[l.category] || '📦'} {t('cat_' + l.category)}</span>
+      {!data ? <Spinner /> : data.length === 0 ? <Empty e={favOnly ? '❤️' : '🛍️'} text={favOnly ? t('favorites') : t('no_listings')} /> : (
+        <div>
+          <div className="store-grid">
+            {data.map((l) => (
+              <div key={l.id} className="card mkt-lcard" onClick={() => nav('/app/market/' + l.id)}>
+                <div className="mkt-lphoto">
+                  {l.photos && l.photos[0]
+                    ? <img src={l.photos[0]} alt="" />
+                    : <div className="mkt-nophoto">{CAT_EMOJI[l.category] || '📦'}</div>}
+                  <button className={'fav-btn' + (favIds && favIds.has(l.id) ? ' on' : '')} onClick={(e) => toggleFav(l, e)}>❤️</button>
+                  {l.condition && <span className="cond-badge">{l.condition === 'new' ? '✨' : l.condition === 'like_new' ? '🌟' : '♻️'} {condLbl(l.condition)}</span>}
+                </div>
+                <div className="mkt-lbody">
+                  <div className="small ellipsis" style={{ fontWeight: 800 }}>{l.name}</div>
+                  <div style={{ fontWeight: 900, color: 'var(--brand-dark)' }}>{fmtMoney(l.price)}</div>
+                  <div className="muted xsmall ellipsis">👤 {l.seller}{l.subcategory ? ' · ' + subLbl(l.subcategory) : ''}</div>
+                  <div className="muted xsmall">👁 {l.views || 0}{l.favs ? ' · ❤️ ' + l.favs : ''}</div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
+          {more && <button className="btn ghost block mt12" onClick={() => load(Math.ceil(data.length / 20) + 1, true)}>⬇️ {t('load_more')}</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ================= 🔍 Fiche annonce (v2026.09.26.1) =================
+export function ListingDetailPage() {
+  const t = useT(); const { lang } = useLang(); const nav = useNavigate(); const { user } = useAuth();
+  const { id } = useParams();
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  const [gi, setGi] = useState(0);
+  const [fav, setFav] = useState(false);
+  const subLbl = (k) => (SUB_LBL[k] ? (SUB_LBL[k][lang] || SUB_LBL[k].fr) : k);
+  const condLbl = (k) => (COND_LBL[k] ? (COND_LBL[k][lang] || COND_LBL[k].fr) : '');
+
+  useEffect(() => { setD(null); setErr(null); setGi(0); api('/listings/' + id).then(setD).catch((e) => setErr(e.message)); }, [id]);
+  useEffect(() => { if (user) api('/listings/favorites').then((r) => setFav(r.listings.some((l) => String(l.id) === String(id)))).catch(() => {}); }, [user, id]);
+
+  if (err) return (<div><div className="topbar"><BackBtn /><div className="grow"><div className="brand-name">🛍️ {t('market')}</div></div></div><Empty e="😕" text={err} /></div>);
+  if (!d) return (<div><div className="topbar"><BackBtn /></div><Spinner /></div>);
+  const l = d.listing;
+  const photos = (l.photos || []).filter(Boolean);
+  const own = user && (user.id === l.user_id || user.role === 'superadmin');
+  const toggleFav = async () => { if (!user) return nav('/login'); try { const r = await api('/listings/' + l.id + '/fav', { method: 'POST' }); setFav(r.fav); } catch (ex) { toast(ex.message, 'err'); } };
+  const share = async () => {
+    const url = window.location.origin + '/app/market/' + l.id;
+    try { if (navigator.share) await navigator.share({ title: l.name, url }); else { await navigator.clipboard.writeText(url); toast(t('link_copied'), 'ok'); } } catch {}
+  };
+  const since = d.seller.since ? new Date(d.seller.since).toLocaleDateString(lang === 'ar' ? 'ar-EG' : lang === 'en' ? 'en-GB' : 'fr-FR', { year: 'numeric', month: 'long' }) : '';
+
+  return (
+    <div>
+      <div className="topbar">
+        <BackBtn />
+        <div className="grow"><div className="brand-name">🛍️ {t('market')}</div></div>
+        <button className={'btn sm ' + (fav ? 'primary' : 'ghost')} onClick={toggleFav}>{fav ? '❤️' : '🤍'}</button>
+        <button className="btn ghost sm" onClick={share}>🔗</button>
+      </div>
+
+      {photos.length > 0 ? (
+        <div>
+          <div className="gal" onScroll={(e) => setGi(Math.round(Math.abs(e.target.scrollLeft) / Math.max(1, e.target.clientWidth)))}>
+            {photos.map((p, i) => <img key={i} src={p} alt="" />)}
+          </div>
+          {photos.length > 1 && (
+            <div className="gal-dots">{photos.map((_, i) => <span key={i} className={'g-dot' + (i === gi ? ' on' : '')} />)}</div>
+          )}
+          <div className="muted xsmall mt4" style={{ textAlign: 'center' }}>{gi + 1}/{photos.length} · 👁 {l.views}</div>
+        </div>
+      ) : (
+        <div className="mkt-nophoto big">{CAT_EMOJI[l.category] || '📦'}</div>
+      )}
+
+      <div className="card mt8" style={{ padding: 14 }}>
+        <div className="row spread wrap" style={{ gap: 6 }}>
+          <div className="h2">{l.name}</div>
+          <div className="h2" style={{ color: 'var(--brand-dark)' }}>{fmtMoney(l.price)}</div>
+        </div>
+        <div className="row wrap mt4" style={{ gap: 6 }}>
+          {l.condition && <span className="badge" style={{ background: '#dcfce7', color: '#166534' }}>{l.condition === 'new' ? '✨' : l.condition === 'like_new' ? '🌟' : '♻️'} {condLbl(l.condition)}</span>}
+          <span className="badge">{CAT_EMOJI[l.category]} {t('cat_' + l.category)}{l.subcategory ? ' · ' + subLbl(l.subcategory) : ''}</span>
+          {l.area && <span className="badge">📍 {l.area}</span>}
+          {l.favs > 0 && <span className="badge">❤️ {l.favs}</span>}
+        </div>
+        {l.description && <p className="small mt8" style={{ whiteSpace: 'pre-wrap' }}>{l.description}</p>}
+        {(l.brand || l.size) && (
+          <div className="mt8" style={{ borderTop: '1px dashed #eef2f7', paddingTop: 8 }}>
+            <div className="small" style={{ fontWeight: 800 }}>⚙️ {t('details')}</div>
+            {l.brand && <div className="small">🏷️ {t('brand')} : <b>{l.brand}</b></div>}
+            {l.size && <div className="small">📏 {t('size')} : <b>{l.size}</b></div>}
+          </div>
+        )}
+      </div>
+
+      <div className="card mt8" style={{ padding: 14 }}>
+        <div className="row" style={{ gap: 10 }}>
+          <div className="store-emoji" style={{ width: 46, height: 46, fontSize: 22 }}>👤</div>
+          <div className="grow" style={{ minWidth: 0 }}>
+            <div className="small" style={{ fontWeight: 800 }}>{d.seller.name} {d.seller.verified && <span className="badge" style={{ background: '#dbeafe', color: '#1e40af' }}>✓ {t('verified')}</span>}</div>
+            <div className="muted xsmall">{t('member_since')} {since} · {d.seller.ads.length + 1} {t('seller_ads')}</div>
+          </div>
+        </div>
+        {own ? (
+          <div className="row mt8" style={{ gap: 6 }}>
+            <button className="btn ghost grow" onClick={() => nav('/app/publish?edit=' + l.id)}>✏️ {t('edit')}</button>
+            <button className="btn danger" onClick={async () => { if (window.confirm(t('confirm_delete'))) { try { await api('/listings/' + l.id, { method: 'DELETE' }); toast(t('listing_deleted')); nav('/app/market'); } catch (ex) { toast(ex.message, 'err'); } } }}>🗑️</button>
+          </div>
+        ) : (
+          <div className="row mt8" style={{ gap: 6 }}>
+            <a className="btn blue grow" href={'tel:' + l.phone}>📞 {t('call')}</a>
+            <a className="btn grow" style={{ background: '#25d366', color: '#fff' }} href={waLink(l.phone)} target="_blank" rel="noopener">💬 WhatsApp</a>
+          </div>
+        )}
+      </div>
+
+      {d.seller.ads.length > 0 && (
+        <div className="card mt8" style={{ padding: 14 }}>
+          <div className="small mb8" style={{ fontWeight: 800 }}>👤 {d.seller.ads.length} {t('seller_ads')}</div>
+          <div className="mkt-mini-ads">
+            {d.seller.ads.map((a) => (
+              <button key={a.id} className="mkt-mini" onClick={() => nav('/app/market/' + a.id)}>
+                {a.photos && a.photos[0] ? <img src={a.photos[0]} alt="" /> : <span>{CAT_EMOJI[a.category] || '📦'}</span>}
+                <div className="xsmall ellipsis" style={{ fontWeight: 700 }}>{a.name}</div>
+                <div className="xsmall" style={{ color: 'var(--brand-dark)', fontWeight: 800 }}>{fmtMoney(a.price)}</div>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
-      <Modal open={!!detail} onClose={() => setDetail(null)} title={'🛍️ ' + t('market')}>
-        {detail && (
-          <div>
-            {detail.photo
-              ? <img src={detail.photo} alt="" style={{ width: '100%', maxHeight: 240, objectFit: 'cover', borderRadius: 14 }} />
-              : <div style={{ height: 150, borderRadius: 14, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 54 }}>{CAT_EMOJI[detail.category] || '📦'}</div>}
-            <div className="row spread wrap mt8">
-              <div className="h2">{detail.name}</div>
-              <div className="h2" style={{ color: 'var(--brand-dark)' }}>{fmtMoney(detail.price)}</div>
-            </div>
-            <div className="muted small mt4">👤 {detail.seller}</div>
-            {detail.description && <p className="small mt8" style={{ whiteSpace: 'pre-wrap' }}>{detail.description}</p>}
-            <div className="row mt8 wrap">
-              <a className="btn blue grow" href={'tel:' + detail.phone}>📞 {t('call')}</a>
-              <a className="btn grow" style={{ background: '#25d366', color: '#fff' }} href={waLink(detail.phone)} target="_blank" rel="noopener">💬 WhatsApp</a>
-            </div>
-          </div>
-        )}
-      </Modal>
+      <div className="banner ok mt8 mb12">🛡️ {t('safety_tip')}</div>
     </div>
   );
 }
 
 // ================= ＋ Publier / Modifier une annonce =================
 export function PublishPage() {
-  const t = useT();
-  const nav = useNavigate();
-  const { user } = useAuth();
+  const t = useT(); const { lang } = useLang(); const nav = useNavigate(); const { user } = useAuth();
   const [sp] = useSearchParams();
   const editId = sp.get('edit');
-  const [form, setForm] = useState({ name: '', category: 'other', description: '', price: '', phone: user?.phone || '', photo: null });
+  const [step, setStep] = useState(1);
+  const [form, setForm] = useState({ name: '', category: 'other', subcategory: null, condition: null, description: '', price: '', phone: user?.phone || '', brand: '', size: '', area: '', photos: [] });
   const [busy, setBusy] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const subLbl = (k) => (SUB_LBL[k] ? (SUB_LBL[k][lang] || SUB_LBL[k].fr) : k);
 
   useEffect(() => {
     if (!editId) return;
     api('/listings/mine').then((d) => {
       const l = (d.listings || []).find((x) => String(x.id) === String(editId));
-      if (l) setForm({ name: l.name, category: l.category, description: l.description || '', price: String(l.price), phone: l.phone || '', photo: l.photo });
+      if (l) setForm({ name: l.name, category: l.category, subcategory: l.subcategory || null, condition: l.condition || null, description: l.description || '', price: String(l.price), phone: l.phone || '', brand: l.brand || '', size: l.size || '', area: l.area || '', photos: (l.photos || []).slice(0, 5) });
     }).catch(() => {});
   }, [editId]);
 
-  // 📷 photo compressée côté navigateur (max 1000px, JPEG) — jamais de fichier envoyé au serveur
-  const pickPhoto = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const rd = new FileReader();
-    rd.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const k = Math.min(1, 1000 / Math.max(img.width, img.height));
-        const cv = document.createElement('canvas');
-        cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
-        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
-        set('photo', cv.toDataURL('image/jpeg', 0.82));
+  // 📷 photos compressées côté navigateur (max 1000px, JPEG) — jamais de fichier envoyé au serveur
+  const pickPhotos = (e) => {
+    const files = [...(e.target.files || [])].slice(0, 5 - form.photos.length);
+    if (!files.length) return;
+    let done = 0;
+    files.forEach((file) => {
+      const rd = new FileReader();
+      rd.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const k = Math.min(1, 1000 / Math.max(img.width, img.height));
+          const cv = document.createElement('canvas');
+          cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+          cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+          setForm((f) => (f.photos.length >= 5 ? f : { ...f, photos: [...f.photos, cv.toDataURL('image/jpeg', 0.82)] }));
+          if (++done === files.length) e.target.value = '';
+        };
+        img.src = rd.result;
       };
-      img.src = rd.result;
-    };
-    rd.readAsDataURL(file);
+      rd.readAsDataURL(file);
+    });
   };
+  const rmPhoto = (i) => setForm((f) => ({ ...f, photos: f.photos.filter((_, j) => j !== i) }));
+
+  const attrFields = ATTR_FIELDS[form.category] || [];
+  const canNext2 = form.name.trim().length >= 2 && form.price !== '' && !isNaN(parseFloat(form.price)) && form.phone.trim();
 
   const submit = async () => {
     if (busy) return;
-    if (form.name.trim().length < 2) return toast(t('listing_name') + ' ?', 'err');
-    const price = parseFloat(form.price);
-    if (isNaN(price) || price < 0) return toast(t('listing_price') + ' ?', 'err');
-    if (!form.phone.trim()) return toast(t('listing_phone') + ' ?', 'err');
     setBusy(true);
     try {
-      const body = { name: form.name.trim(), category: form.category, description: form.description.trim(), price, phone: form.phone.trim(), photo: form.photo };
+      const body = { name: form.name.trim(), category: form.category, subcategory: form.subcategory, condition: form.condition, description: form.description.trim(), price: parseFloat(form.price), phone: form.phone.trim(), brand: form.brand, size: form.size, area: form.area, photos: form.photos };
       if (editId) { await api('/listings/' + editId, { method: 'PUT', body }); toast(t('listing_updated'), 'ok'); }
       else { await api('/listings', { method: 'POST', body }); toast(t('listing_published'), 'ok'); }
       nav('/app/market');
@@ -1362,46 +1534,98 @@ export function PublishPage() {
         <div className="grow"><div className="brand-name">{editId ? '✏️ ' + t('edit') : '＋ ' + t('publish')}</div></div>
       </div>
 
-      <div className="banner ok mb12">💡 {t('sell_hint')}</div>
-
-      <div className="card mb12">
-        <div className="field">
-          <label className="label">📷 {t('add_photo')}</label>
-          <div className="row">
-            {form.photo && <img src={form.photo} alt="" style={{ width: 74, height: 74, borderRadius: 12, objectFit: 'cover' }} />}
-            <input type="file" accept="image/*" onChange={pickPhoto} style={{ fontSize: 13 }} />
-            {form.photo && <button className="btn danger sm" onClick={() => set('photo', null)}>🗑️</button>}
-          </div>
-        </div>
-        <div className="field">
-          <label className="label">📦 {t('listing_name')}</label>
-          <input className="input" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="ex. : iPhone 12 — très bon état" />
-        </div>
-        <div className="field">
-          <label className="label">🏷️ {t('listing_cat')}</label>
-          <div className="row wrap" style={{ gap: 6 }}>
-            {Object.entries(CAT_EMOJI).map(([k, e]) => (
-              <button key={k} className={'badge' + (form.category === k ? ' b-active' : '')} style={{ cursor: 'pointer', border: 'none' }}
-                onClick={() => set('category', k)}>{e} {t('cat_' + k)}</button>
-            ))}
-          </div>
-        </div>
-        <div className="row" style={{ gap: 10 }}>
-          <div className="field grow">
-            <label className="label">💰 {t('listing_price')}</label>
-            <input className="input" dir="ltr" type="number" min="0" value={form.price} onChange={(e) => set('price', e.target.value)} placeholder="0" />
-          </div>
-          <div className="field grow">
-            <label className="label">📞 {t('listing_phone')}</label>
-            <input className="input" dir="ltr" type="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="0100 123 4567" />
-          </div>
-        </div>
-        <div className="field">
-          <label className="label">📝 {t('listing_desc')}</label>
-          <textarea className="textarea" rows={3} value={form.description} onChange={(e) => set('description', e.target.value)} />
-        </div>
-        <button className="btn primary block" disabled={busy} onClick={submit}>{busy ? '…' : (editId ? '✅ ' + t('save') : '🚀 ' + t('publish'))}</button>
+      <div className="row center mb12" style={{ gap: 8 }}>
+        {[1, 2, 3].map((s) => <span key={s} className={'step-dot' + (step === s ? ' on' : step > s ? ' done' : '')}>{step > s ? '✓' : s}</span>)}
+        <span className="muted small">{t('step')} {step}/3</span>
       </div>
+
+      {step === 1 && (
+        <div className="card mb12" style={{ padding: 14 }}>
+          <div className="field"><label className="label">📦 {t('listing_cat')}</label>
+            <div className="cat-grid">
+              {Object.entries(CAT_EMOJI).map(([k, e]) => (
+                <button key={k} type="button" className={'cat-big' + (form.category === k ? ' on' : '')} onClick={() => setForm((f) => ({ ...f, category: k, subcategory: null }))}>
+                  <span className="cb-e">{e}</span><span className="cb-t">{t('cat_' + k)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          {(SUBCATS[form.category] || []).length > 0 && (
+            <div className="field"><label className="label">🏷️ {t('details')}</label>
+              <div className="row wrap" style={{ gap: 6 }}>
+                {SUBCATS[form.category].map(([k, e]) => (
+                  <button key={k} type="button" className={'chip sm' + (form.subcategory === k ? ' on' : '')} onClick={() => set('subcategory', k)}>{e} {subLbl(k)}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="field"><label className="label">✨ {t('condition_label')}</label>
+            <div className="row wrap" style={{ gap: 6 }}>
+              {CONDITIONS.map(([k, e]) => (
+                <button key={k} type="button" className={'chip sm' + (form.condition === k ? ' on' : '')} onClick={() => set('condition', k)}>{e} {COND_LBL[k][lang] || COND_LBL[k].fr}</button>
+              ))}
+            </div>
+          </div>
+          <button className="btn primary block" onClick={() => setStep(2)}>{t('next')} →</button>
+        </div>
+      )}
+
+      {step === 2 && (
+        <div className="card mb12" style={{ padding: 14 }}>
+          <div className="field">
+            <label className="label">📷 {t('add_photo')} ({form.photos.length}/5)</label>
+            <div className="row wrap" style={{ gap: 8 }}>
+              {form.photos.map((p, i) => (
+                <div key={i} className="thumb">
+                  <img src={p} alt="" />
+                  <button type="button" className="thumb-x" onClick={() => rmPhoto(i)}>✕</button>
+                  {i === 0 && <span className="thumb-cov">★</span>}
+                </div>
+              ))}
+              {form.photos.length < 5 && (
+                <label className="thumb-add">
+                  <span style={{ fontSize: 26 }}>＋</span>
+                  <input type="file" accept="image/*" multiple onChange={pickPhotos} style={{ display: 'none' }} />
+                </label>
+              )}
+            </div>
+          </div>
+          <div className="field"><label className="label">📦 {t('listing_name')}</label>
+            <input className="input" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="ex. : iPhone 12 — très bon état" /></div>
+          <div className="row" style={{ gap: 10 }}>
+            <div className="field grow"><label className="label">💰 {t('listing_price')}</label>
+              <input className="input" dir="ltr" type="number" min="0" value={form.price} onChange={(e) => set('price', e.target.value)} placeholder="0" /></div>
+            {attrFields.includes('brand') && (
+              <div className="field grow"><label className="label">🏷️ {t('brand')}</label>
+                <input className="input" value={form.brand} onChange={(e) => set('brand', e.target.value)} placeholder="ex. : Apple" /></div>
+            )}
+            {attrFields.includes('size') && (
+              <div className="field grow"><label className="label">📏 {t('size')}</label>
+                <input className="input" value={form.size} onChange={(e) => set('size', e.target.value)} placeholder="ex. : L" /></div>
+            )}
+          </div>
+          <div className="field"><label className="label">📝 {t('listing_desc')}</label>
+            <textarea className="textarea" rows={3} value={form.description} onChange={(e) => set('description', e.target.value)} /></div>
+          <div className="row" style={{ gap: 6 }}>
+            <button className="btn ghost" onClick={() => setStep(1)}>← {t('prev')}</button>
+            <button className="btn primary grow" disabled={!canNext2} onClick={() => setStep(3)}>{t('next')} →</button>
+          </div>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="card mb12" style={{ padding: 14 }}>
+          <div className="banner ok mb12">💡 {t('sell_hint')}</div>
+          <div className="field"><label className="label">📞 {t('listing_phone')}</label>
+            <input className="input" dir="ltr" type="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="0100 123 4567" /></div>
+          <div className="field"><label className="label">📍 {t('area_label')}</label>
+            <input className="input" value={form.area} onChange={(e) => set('area', e.target.value)} placeholder="ex. : Smouha, Alexandrie" /></div>
+          <div className="row" style={{ gap: 6 }}>
+            <button className="btn ghost" onClick={() => setStep(2)}>← {t('prev')}</button>
+            <button className="btn primary grow" disabled={busy} onClick={submit}>{busy ? '…' : (editId ? '✅ ' + t('save') : '🚀 ' + t('publish'))}</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1476,7 +1700,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.24.4</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.26.1</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>

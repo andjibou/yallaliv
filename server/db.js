@@ -253,6 +253,14 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_notifs_user ON notifications(user_id, read);
+
+-- ❤️ v2026.09.26.1 — Marché Phase 1 : favoris des annonces
+CREATE TABLE IF NOT EXISTS listing_favorites (
+  user_id INTEGER NOT NULL,
+  listing_id INTEGER NOT NULL,
+  created_at BIGINT NOT NULL,
+  PRIMARY KEY (user_id, listing_id)
+);
 `;
 
 // ---------- Initialisation (appelée au démarrage) ----------
@@ -271,6 +279,17 @@ export async function initDb() {
   await run('ALTER TABLE push_subscriptions ADD COLUMN fcm_token TEXT').catch(() => {});
   await run('ALTER TABLE stores ADD COLUMN photo TEXT').catch(() => {});
   await run('ALTER TABLE users ALTER COLUMN email DROP NOT NULL').catch(() => {});   // comptes par telephone (email NULL)
+  // 🛍️ v2026.09.26.1 — Marché Phase 1 : sous-catégories, état, attributs, zone, vues, renouvellement, multi-photos
+  await run('ALTER TABLE listings ADD COLUMN subcategory TEXT').catch(() => {});
+  await run('ALTER TABLE listings ADD COLUMN condition TEXT').catch(() => {});
+  await run('ALTER TABLE listings ADD COLUMN brand TEXT').catch(() => {});
+  await run('ALTER TABLE listings ADD COLUMN size TEXT').catch(() => {});
+  await run('ALTER TABLE listings ADD COLUMN area TEXT').catch(() => {});
+  await run('ALTER TABLE listings ADD COLUMN lat REAL').catch(() => {});
+  await run('ALTER TABLE listings ADD COLUMN lng REAL').catch(() => {});
+  await run('ALTER TABLE listings ADD COLUMN views INTEGER NOT NULL DEFAULT 0').catch(() => {});
+  await run('ALTER TABLE listings ADD COLUMN renewed_at BIGINT').catch(() => {});
+  await run('ALTER TABLE listings ADD COLUMN photos TEXT').catch(() => {});   // JSON : jusqu'à 5 photos data-URL
   await run("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_unique ON users (REPLACE(phone, ' ', '')) WHERE phone <> ''")
     .catch((e) => console.warn('⚠️ Index téléphone unique non créé (doublons existants ?):', e.message));
   await run(`CREATE TABLE IF NOT EXISTS password_resets (

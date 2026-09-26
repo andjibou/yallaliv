@@ -403,3 +403,38 @@ button { font-family: inherit; }
 }
 .mkt-cat:active img { transform: scale(.94); }
 .mkt-cat span { font-size: 11.5px; font-weight: 700; color: #334155; }
+
+/* ============ 🛍️ v2026.09.26.1 — Marché Phase 1 : cartes, galerie, assistant, favoris ============ */
+.xsmall { font-size: 11px; }
+.mkt-lcard { padding: 0; overflow: hidden; display: flex; flex-direction: column; cursor: pointer; }
+.mkt-lphoto { position: relative; height: 130px; background: #f1f5f9; }
+.mkt-lphoto img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mkt-nophoto { height: 100%; display: flex; align-items: center; justify-content: center; font-size: 44px; }
+.mkt-nophoto.big { height: 170px; border-radius: 16px; background: #f1f5f9; display: flex; align-items: center; justify-content: center; font-size: 64px; }
+.fav-btn { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; border-radius: 50%; border: none; background: rgba(255,255,255,.92); box-shadow: 0 2px 6px rgba(15,23,42,.25); cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; padding: 0; filter: grayscale(1); }
+.fav-btn.on { filter: none; background: #fee2e2; }
+.cond-badge { position: absolute; bottom: 8px; left: 8px; background: rgba(255,255,255,.94); border-radius: 8px; font-size: 10px; font-weight: 800; padding: 2px 7px; color: #166534; box-shadow: 0 1px 4px rgba(15,23,42,.18); }
+.mkt-lbody { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 2px; }
+.gal { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; border-radius: 16px; background: #f1f5f9; }
+.gal img { flex: 0 0 100%; scroll-snap-align: center; object-fit: cover; max-height: 330px; }
+.gal-dots { display: flex; justify-content: center; gap: 5px; margin-top: 6px; }
+.g-dot { width: 7px; height: 7px; border-radius: 50%; background: #cbd5e1; }
+.g-dot.on { background: #0e9f6e; width: 16px; border-radius: 4px; }
+.step-dot { width: 30px; height: 30px; border-radius: 50%; background: #e2e8f0; color: #64748b; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; }
+.step-dot.on { background: #0e9f6e; color: #fff; }
+.step-dot.done { background: #d1fae5; color: #065f46; }
+.cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.cat-big { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px; border-radius: 14px; border: 2px solid #e2e8f0; background: #fff; cursor: pointer; }
+.cat-big.on { border-color: #0e9f6e; background: #f0fdf4; }
+.cat-big .cb-e { font-size: 26px; }
+.cat-big .cb-t { font-size: 11px; font-weight: 800; color: #334155; }
+.thumb { position: relative; width: 74px; height: 74px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; }
+.thumb-x { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(15,23,42,.65); color: #fff; font-size: 11px; cursor: pointer; padding: 0; }
+.thumb-cov { position: absolute; bottom: 2px; left: 2px; font-size: 10px; background: rgba(14,159,110,.92); color: #fff; border-radius: 5px; padding: 0 4px; font-weight: 800; }
+.thumb-add { width: 74px; height: 74px; border-radius: 12px; border: 2px dashed #cbd5e1; display: flex; align-items: center; justify-content: center; color: #94a3b8; cursor: pointer; }
+.mkt-mini-ads { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.mkt-mini { flex: 0 0 96px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; background: none; border: 1px solid var(--line); border-radius: 12px; padding: 6px; cursor: pointer; text-align: start; }
+.mkt-mini img { width: 84px; height: 62px; object-fit: cover; border-radius: 8px; }
+.mkt-mini span { font-size: 26px; }
+.row.center { justify-content: center; }
