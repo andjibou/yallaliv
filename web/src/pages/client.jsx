@@ -714,6 +714,15 @@ export function CartPage() {
               ))}
             </div>
           )}
+          {/* 🔎 v2026.09.24.4 — vérification Google Maps : ouvre l'app Google avec le texte
+              tapé (lien officiel gratuit) — le client voit la position exacte chez Google,
+              puis touche la proposition correspondante ci-dessus. Aucune clé API. */}
+          {address.trim().length >= 4 && (
+            <button type="button" className="btn ghost sm mt8" style={{ padding: '4px 10px', fontSize: 12, alignSelf: 'flex-start' }}
+              onClick={() => window.open('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(address.trim()), '_blank')}>
+              🔎 {t('verify_gmaps')}
+            </button>
+          )}
         </div>
         <div className="row mt12 wrap" style={{ gap: 8 }}>
           <button type="button" className="btn ghost sm" onClick={useGps}>🛰️ {t('use_gps')}</button>
@@ -1467,7 +1476,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.24.3</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.24.4</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
