@@ -337,9 +337,9 @@ app.post('/api/partner', auth, h(async (req, res) => {
   if (String(store_phone || '').replace(/\D/g, '').length < 10) return res.status(400).json({ error: 'Téléphone invalide (ex. : 0100 123 4567)' });
   if (!store_address || !String(store_address).trim()) return res.status(400).json({ error: 'Adresse du magasin requise (ex. : 12 rue Saad Zaghloul, Alexandrie)' });
   if (!req.user.phone) await run('UPDATE users SET phone=? WHERE id=?', [store_phone, req.user.id]);   // complète le compte
-  const validTypes = ['restaurant', 'market', 'pharmacy', 'home', 'clothes', 'electronics'];
+  const validTypes = ['restaurant', 'market', 'pharmacy', 'home', 'clothes', 'electronics', 'appliance'];   // 🧺 v2026.09.27.1 : électroménager
   const type = validTypes.includes(store_type) ? store_type : 'market';
-  const TYPE_EMOJI = { restaurant: '🍽️', pharmacy: '💊', market: '🛒', home: '🛋️', clothes: '👕', electronics: '📱' };
+  const TYPE_EMOJI = { restaurant: '🍽️', pharmacy: '💊', market: '🛒', home: '🛋️', clothes: '👕', electronics: '📱', appliance: '🧺' };
   // Position choisie sur la carte (recommandée : livraison + recherche à proximité). Sinon -> centre-ville.
   let lat = parseFloat(req.body.store_lat), lng = parseFloat(req.body.store_lng);
   if (!(Math.abs(lat) <= 90 && Math.abs(lng) <= 180)) { lat = CITY.lat + (Math.random() - .5) * .03; lng = CITY.lng + (Math.random() - .5) * .03; }
@@ -792,6 +792,63 @@ app.post('/api/market/orders/:id/decline', auth, h(async (req, res) => {
   pushTo([o.client_id], `Commande #${o.id}`, '🚫 Le vendeur a décliné la demande de livraison');
   res.json({ ok: true });
 }));
+
+// ================= 🛵 📣 v2026.09.27.1 — Services à la demande (bandeau accueil) + Publicités =================
+app.post('/api/services', auth, requireRole('client', 'merchant', 'superadmin'), h(async (req, res) => {
+  const description = String(req.body.description || '').trim().slice(0, 300);
+  const pickup_address = String(req.body.pickup_address || '').trim().slice(0, 200);
+  const address = String(req.body.address || '').trim().slice(0, 200);   // point de LIVRAISON
+  const phone = String(req.body.phone || req.user.phone || '').trim();
+  const plat = parseFloat(req.body.pickup_lat); const plng = parseFloat(req.body.pickup_lng);
+  const clat = parseFloat(req.body.lat); const clng = parseFloat(req.body.lng);
+  if (description.length < 5) return res.status(400).json({ error: 'Décrivez la course (5 caractères minimum)' });
+  if (pickup_address.length < 5) return res.status(400).json({ error: 'Adresse de récupération trop courte' });
+  if (address.length < 5) return res.status(400).json({ error: 'Adresse de livraison trop courte' });
+  if (!phone) return res.status(400).json({ error: 'Téléphone requis' });
+  if (isNaN(plat) || isNaN(plng) || isNaN(clat) || isNaN(clng)) return res.status(400).json({ error: 'Positions requises (récupération et livraison)' });
+  let fee = parseFloat(req.body.delivery_fee);
+  if (isNaN(fee)) fee = 25;
+  fee = Math.max(15, Math.min(80, Math.round(fee * 100) / 100));
+  const open = await get("SELECT COUNT(*)::int AS n FROM orders WHERE client_id = ? AND kind = 'service' AND status IN ('pending','assigned','picked_up')", [req.user.id]);
+  if (open.n >= 3) return res.status(400).json({ error: 'Trop de demandes de service en cours (max 3)' });
+  const pin = String(1000 + Math.floor(Math.random() * 9000));
+  const now = Date.now();
+  const r = await run(`INSERT INTO orders(kind,seller_id,listing_id,client_id,store_id,driver_id,status,payment,paid,subtotal,delivery_fee,commission,total,address,phone,note,pickup_address,pickup_lat,pickup_lng,client_lat,client_lng,visibility,pin,created_at,updated_at)
+    VALUES('service',NULL,NULL,?,NULL,NULL,'pending','cash',0,0,?,0,?,?,?,?,?,?,?,?,?,'public',?,?,?) RETURNING id`,
+    [req.user.id, fee, fee, address, phone, description.slice(0, 200), pickup_address, plat, plng, clat, clng, pin, now, now]);
+  const oid = r.rows[0].id;
+  await run('INSERT INTO order_items(order_id,product_id,name,emoji,price,qty) VALUES(?,?,?,?,?,?)', [oid, null, description.slice(0, 80), '🛵', 0, 1]);
+  try {   // prévenir les livreurs généraux en ligne
+    const ds = await all("SELECT id FROM users WHERE role='driver' AND store_id IS NULL AND status='active' AND online=1");
+    pushTo(ds.map((d) => d.id), '🛵 Nouvelle demande de service', description.slice(0, 60), '/driver');
+  } catch {}
+  res.json({ order_id: oid, pin, delivery_fee: fee });
+}));
+app.get('/api/ads', h(async (req, res) => {
+  res.json({ ads: await all('SELECT id, image, link FROM ads WHERE active=1 ORDER BY created_at DESC LIMIT 10') });
+}));
+app.get('/api/admin/ads', auth, requireRole('superadmin'), h(async (req, res) => {
+  res.json({ ads: await all('SELECT * FROM ads ORDER BY created_at DESC') });
+}));
+app.post('/api/admin/ads', auth, requireRole('superadmin'), h(async (req, res) => {
+  const image = typeof req.body.image === 'string' && req.body.image.startsWith('data:image/') && req.body.image.length < 2200000 ? req.body.image : null;
+  if (!image) return res.status(400).json({ error: 'Image invalide (data-URL < 2,2 Mo)' });
+  const link = String(req.body.link || '').trim().slice(0, 300) || null;
+  const r = await run('INSERT INTO ads(image, link, created_at) VALUES(?,?,?) RETURNING id', [image, link, Date.now()]);
+  res.json({ id: r.rows[0].id });
+}));
+app.put('/api/admin/ads/:id', auth, requireRole('superadmin'), h(async (req, res) => {
+  const a = await get('SELECT * FROM ads WHERE id=?', [req.params.id]);
+  if (!a) return res.status(404).json({ error: 'Pub introuvable' });
+  const link = req.body.link !== undefined ? (String(req.body.link || '').trim().slice(0, 300) || null) : a.link;
+  const active = req.body.active != null ? (req.body.active ? 1 : 0) : a.active;
+  await run('UPDATE ads SET link=?, active=? WHERE id=?', [link, active, a.id]);
+  res.json({ ok: true });
+}));
+app.delete('/api/admin/ads/:id', auth, requireRole('superadmin'), h(async (req, res) => {
+  await run('DELETE FROM ads WHERE id=?', [req.params.id]);
+  res.json({ ok: true });
+}));
 app.delete('/api/listings/:id', auth, h(async (req, res) => {
   const l = await get('SELECT * FROM listings WHERE id=?', [req.params.id]);
   if (!l) return res.status(404).json({ error: 'Annonce introuvable' });
@@ -932,13 +989,13 @@ app.post('/api/orders', auth, requireRole('client', 'merchant', 'superadmin'), h
 
 const ORDER_WITH_JOINS = `
   SELECT o.*,
-    CASE WHEN o.kind='market' THEN COALESCE(l.name, '🛍️ Marché') ELSE s.name END AS store_name,        -- 🛍️ Phase 3 : commande marché = nom de l'article
-    CASE WHEN o.kind='market' THEN '🛍️' ELSE s.emoji END AS store_emoji,
-    CASE WHEN o.kind='market' THEN 'market' ELSE s.type END AS store_type,
-    CASE WHEN o.kind='market' THEN se.phone ELSE s.phone END AS store_phone,                           -- tél vendeur = contact récupération
-    CASE WHEN o.kind='market' THEN COALESCE(o.pickup_address, l.area, '') ELSE s.address END AS store_address,
-    CASE WHEN o.kind='market' THEN o.pickup_lat ELSE s.lat END AS store_lat,                           -- point de récupération = chez le vendeur
-    CASE WHEN o.kind='market' THEN o.pickup_lng ELSE s.lng END AS store_lng,
+    CASE WHEN o.kind='market' THEN COALESCE(l.name, '🛍️ Marché') WHEN o.kind='service' THEN '🛵 Service à la demande' ELSE s.name END AS store_name,
+    CASE WHEN o.kind='market' THEN '🛍️' WHEN o.kind='service' THEN '🛵' ELSE s.emoji END AS store_emoji,
+    CASE WHEN o.kind='market' THEN 'market' WHEN o.kind='service' THEN 'service' ELSE s.type END AS store_type,
+    CASE WHEN o.kind='market' THEN se.phone WHEN o.kind='service' THEN o.phone ELSE s.phone END AS store_phone,
+    CASE WHEN o.kind IN ('market','service') THEN COALESCE(o.pickup_address, l.area, '') ELSE s.address END AS store_address,
+    CASE WHEN o.kind IN ('market','service') THEN o.pickup_lat ELSE s.lat END AS store_lat,
+    CASE WHEN o.kind IN ('market','service') THEN o.pickup_lng ELSE s.lng END AS store_lng,
     c.name AS client_name, d.name AS driver_name, d.phone AS driver_phone, d.vehicle AS driver_vehicle,
     r.store_stars AS rev_store, r.driver_stars AS rev_driver,
     (SELECT m.text FROM messages m WHERE m.order_id=o.id ORDER BY m.id DESC LIMIT 1) AS last_msg,
@@ -1383,7 +1440,10 @@ const stripPin = (rows) => rows.map((r) => { const has = r.pin != null; delete r
 app.get('/api/driver/available', auth, requireRole('driver'), h(async (req, res) => {
   // Livreur boutique : livraisons PRIVEES de son magasin uniquement
   // Livreur general : livraisons PUBLIQUES de toutes les boutiques uniquement
-  if (!req.user.store_id) return res.json({ orders: [], auto: true }); // attribution automatique pour les generaux
+  if (!req.user.store_id) {   // 🛵 v2026.09.27.1 — livreur général : demandes de SERVICE à accepter volontairement
+    const orders = await all(`${ORDER_WITH_JOINS} WHERE o.kind='service' AND o.status='pending' AND o.driver_id IS NULL ORDER BY o.created_at ASC`);
+    return res.json({ orders: await withItems(stripPin(orders)) });
+  }
   let sql = `${ORDER_WITH_JOINS} WHERE o.status='ready' AND o.driver_id IS NULL`;
   const args = [];
   if (req.user.store_id) { sql += ' AND o.store_id=? AND o.visibility=?'; args.push(req.user.store_id, 'private'); }
@@ -1399,7 +1459,14 @@ app.get('/api/driver/mine', auth, requireRole('driver'), h(async (req, res) => {
 
 app.post('/api/driver/orders/:id/accept', auth, requireRole('driver'), h(async (req, res) => {
   if (req.user.status !== 'active') return res.status(403).json({ error: 'Compte non validé' });
-  if (!req.user.store_id) return res.status(403).json({ error: 'Attribution automatique : les livraisons publiques vous sont assignées par la plateforme' });
+  if (!req.user.store_id) {   // 🛵 v2026.09.27.1 — le général accepte VOLONTAIREMENT une demande de service
+    const r = await run(`UPDATE orders SET driver_id=?, status='assigned', updated_at=? WHERE id=? AND kind='service' AND status='pending' AND driver_id IS NULL`,
+      [req.user.id, Date.now(), req.params.id]);
+    if (r.rowCount === 0) return res.status(400).json({ error: "Cette demande n'est plus disponible" });
+    const o = await get('SELECT * FROM orders WHERE id=?', [req.params.id]);
+    pushTo([o.client_id], `Commande #${o.id}`, `🛵 ${req.user.name} a accepté votre demande de service — il arrive !`);
+    return res.json({ ok: true });
+  }
   const target = await get('SELECT * FROM orders WHERE id=?', [req.params.id]);
   if (!target) return res.status(404).json({ error: 'Commande introuvable' });
   if (req.user.store_id && (target.store_id !== req.user.store_id || target.visibility !== 'private')) {
@@ -1428,7 +1495,10 @@ app.post('/api/driver/orders/:id/status', auth, requireRole('driver'), h(async (
   const paid = next === 'delivered' && o.payment === 'cash' ? 1 : o.paid;
   await run('UPDATE orders SET status=?, paid=?, updated_at=? WHERE id=?', [next, paid, Date.now(), o.id]);
   if (next === 'picked_up') pushTo([o.client_id], `Commande #${o.id}`, '📦 Colis récupéré — en route vers vous 🛵');
-  if (next === 'delivered') pushTo([o.client_id], `Commande #${o.id}`, o.kind === 'market' ? '🎉 Article livré — notez le vendeur ⭐' : '🎉 Livrée ! Bon appétit — notez votre commande ⭐');
+  if (next === 'delivered') pushTo([o.client_id], `Commande #${o.id}`,
+    o.kind === 'market' ? '🎉 Article livré — notez le vendeur ⭐'
+    : o.kind === 'service' ? '🎉 Service réalisé ✓ — merci !'
+    : '🎉 Livrée ! Bon appétit — notez votre commande ⭐');
   if (o.kind === 'market') {   // 🛍️ Phase 3 : le vendeur suit aussi
     if (next === 'picked_up') pushTo([o.seller_id], `Commande #${o.id}`, '📦 Votre article a été récupéré par le livreur');
     if (next === 'delivered') {

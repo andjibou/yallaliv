@@ -312,6 +312,15 @@ CREATE TABLE IF NOT EXISTS listing_reports (
   created_at BIGINT NOT NULL,
   handled INTEGER NOT NULL DEFAULT 0
 );
+
+-- 📣 v2026.09.27.1 — bannières publicitaires de l'accueil (gérées par le superadmin)
+CREATE TABLE IF NOT EXISTS ads (
+  id SERIAL PRIMARY KEY,
+  image TEXT NOT NULL,
+  link TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at BIGINT NOT NULL
+);
 `;
 
 // ---------- Initialisation (appelée au démarrage) ----------

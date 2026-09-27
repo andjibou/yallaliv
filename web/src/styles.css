@@ -453,3 +453,27 @@ button { font-family: inherit; }
 .msg-meta { font-size: 9.5px; opacity: .65; margin-top: 3px; }
 .chat-quick { padding: 14px; }
 .chat-input { position: sticky; bottom: 0; padding: 10px 0; background: var(--bg, #f6f8fb); gap: 8px; }
+
+/* ============ 🟩 v2026.09.27.1 — Refonte accueil : en-tête dégradé, bandeau, pubs, cartes, départements ============ */
+.home-head { background: linear-gradient(140deg, #0e9f6e 0%, #0b7a54 78%, #095e42 100%); border-radius: 0 0 24px 24px; padding: 14px 14px 16px; margin: -4px -14px 4px; box-shadow: 0 6px 18px rgba(11,122,84,.28); }
+.home-head .input { border: none; }
+.lang-btn { background: rgba(255,255,255,.18); color: #fff; border: 1px solid rgba(255,255,255,.35); border-radius: 99px; padding: 5px 11px; font-weight: 800; font-size: 12.5px; cursor: pointer; }
+.lang-menu { position: absolute; right: 0; top: calc(100% + 6px); background: #fff; border-radius: 14px; box-shadow: 0 12px 32px rgba(15,23,42,.22); padding: 6px; z-index: 160; min-width: 160px; }
+.lang-opt { display: block; width: 100%; text-align: start; background: none; border: none; padding: 9px 12px; border-radius: 9px; cursor: pointer; font-size: 13.5px; font-weight: 700; color: #334155; }
+.lang-opt.on { background: #f0fdf4; color: #065f46; }
+.head-icon { position: relative; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35); border-radius: 50%; width: 36px; height: 36px; font-size: 16px; cursor: pointer; color: #fff; display: flex; align-items: center; justify-content: center; }
+.svc-banner { display: flex; align-items: center; gap: 12px; width: 100%; text-align: start; background: linear-gradient(135deg, #10b981, #0b7a54); border: none; border-radius: 18px; padding: 13px 14px; margin-top: 12px; cursor: pointer; box-shadow: 0 8px 20px rgba(11,122,84,.3); }
+.svc-emoji { width: 46px; height: 46px; border-radius: 50%; background: rgba(255,255,255,.2); display: flex; align-items: center; justify-content: center; font-size: 23px; flex-shrink: 0; }
+.svc-cta { background: #fff; color: #0b7a54; font-weight: 900; font-size: 12.5px; border-radius: 99px; padding: 7px 13px; flex-shrink: 0; }
+.ads-row { display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; margin-top: 12px; border-radius: 16px; }
+.ad-card { flex: 0 0 100%; scroll-snap-align: center; border-radius: 16px; overflow: hidden; }
+.ad-card img { width: 100%; height: 150px; object-fit: cover; display: block; }
+.stc-row { display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; padding: 2px 2px 6px; }
+.stc-card { flex: 0 0 138px; scroll-snap-align: start; background: none; border: none; padding: 0; cursor: pointer; text-align: start; }
+.stc-card img { width: 138px; height: 96px; object-fit: cover; border-radius: 16px; box-shadow: 0 5px 14px rgba(15,23,42,.16); border: 1px solid var(--line); }
+.stc-card span { display: block; font-size: 12px; font-weight: 800; color: #334155; margin-top: 6px; padding: 0 2px; }
+.dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
+.dept-tile { display: flex; flex-direction: column; align-items: center; gap: 6px; background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 12px 6px 10px; cursor: pointer; }
+.dept-tile img { width: 62px; height: 62px; border-radius: 16px; object-fit: cover; box-shadow: 0 4px 10px rgba(15,23,42,.14); }
+.dept-emoji { width: 62px; height: 62px; border-radius: 16px; background: #d1fae5; display: flex; align-items: center; justify-content: center; font-size: 28px; }
+.dept-tile span { font-size: 11px; font-weight: 800; color: #334155; text-align: center; line-height: 1.25; }

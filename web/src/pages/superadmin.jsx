@@ -19,6 +19,7 @@ export default function AdminApp() {
     { id: 'gdrivers', label: '🛵 ' + t('general_drivers') },
     { id: 'promos', label: '🎁 ' + t('promos') },
     { id: 'reports', label: '🚨 ' + t('reports_tab') },   // 🚨 v2026.09.26.2 — modération Marché
+    { id: 'ads', label: '📣 ' + t('ads_tab') },   // 📣 v2026.09.27.1 — pubs de l'accueil
     { id: 'settings', label: '⚙️ ' + t('sa_settings') }
   ];
   return (
@@ -56,6 +57,7 @@ export default function AdminApp() {
         {tab === 'gdrivers' && <GeneralDrivers />}
         {tab === 'promos' && <Promos />}
         {tab === 'reports' && <Reports />}
+        {tab === 'ads' && <Ads />}
         {tab === 'settings' && <Settings />}
       </ErrorBoundary>
     </div>
@@ -652,6 +654,67 @@ function Reports() {
           <div className="row mt8" style={{ gap: 6 }}>
             <button className="btn ghost sm grow" onClick={() => act(r.id, 'dismiss')}>✅ {t('dismiss')}</button>
             <button className="btn danger sm grow" onClick={() => act(r.id, 'delete')}>🗑️ {t('del_listing')}</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ================= 📣 v2026.09.27.1 — Publicités de l'accueil =================
+function Ads() {
+  const t = useT();
+  const [rows, setRows] = useState(null);
+  const [link, setLink] = useState('');
+  const [busy, setBusy] = useState(false);
+  const load = () => api('/admin/ads').then((d) => setRows(d.ads)).catch(() => setRows([]));
+  useEffect(() => { load(); }, []);
+
+  const pick = (e) => {   // compression navigateur (comme le marché)
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, 1000 / img.width);
+        const cv = document.createElement('canvas');
+        cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        const data = cv.toDataURL('image/jpeg', 0.82);
+        setBusy(true);
+        api('/admin/ads', { method: 'POST', body: { image: data, link } }).then(() => { toast(t('ad_added'), 'ok'); setLink(''); load(); }).catch((ex) => toast(ex.message, 'err')).finally(() => setBusy(false));
+      };
+      img.src = rd.result;
+    };
+    rd.readAsDataURL(file);
+  };
+  const toggle = async (a) => { try { await api('/admin/ads/' + a.id, { method: 'PUT', body: { active: !a.active } }); load(); } catch (ex) { toast(ex.message, 'err'); } };
+  const del = async (a) => { if (!window.confirm(t('delete_ad') + ' ?')) return; try { await api('/admin/ads/' + a.id, { method: 'DELETE' }); load(); } catch (ex) { toast(ex.message, 'err'); } };
+
+  return (
+    <div>
+      <div className="card mb12" style={{ padding: 14 }}>
+        <div className="small mb8" style={{ fontWeight: 800 }}>➕ {t('ads_add')}</div>
+        <div className="field"><label className="label">🔗 {t('ads_link')}</label>
+          <input className="input" dir="ltr" value={link} onChange={(e) => setLink(e.target.value)} placeholder="/app/store/1 ou https://…" /></div>
+        <label className="btn primary block mt8" style={{ cursor: 'pointer' }}>
+          {busy ? '…' : '📷 ' + t('ads_add')}
+          <input type="file" accept="image/*" onChange={pick} style={{ display: 'none' }} />
+        </label>
+      </div>
+      {!rows ? <Spinner /> : rows.length === 0 ? <Empty e="📣" text={t('ads_empty')} /> : rows.map((a) => (
+        <div key={a.id} className="card mb8" style={{ padding: 10 }}>
+          <div className="row" style={{ gap: 10 }}>
+            <img src={a.image} alt="" style={{ width: 92, height: 56, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />
+            <div className="grow" style={{ minWidth: 0 }}>
+              <div className="muted xsmall ellipsis">🔗 {a.link || '—'}</div>
+              <span className="badge" style={{ background: a.active ? '#dcfce7' : '#f1f5f9', color: a.active ? '#166534' : '#64748b' }}>{a.active ? '✅ ' + t('ads_active') : '⏸️ ' + t('ads_inactive')}</span>
+            </div>
+          </div>
+          <div className="row mt8" style={{ gap: 6 }}>
+            <button className="btn ghost sm grow" onClick={() => toggle(a)}>{a.active ? '⏸️' : '▶️'}</button>
+            <button className="btn danger sm grow" onClick={() => del(a)}>🗑️</button>
           </div>
         </div>
       ))}

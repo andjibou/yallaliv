@@ -9,6 +9,22 @@ import AccountSettings from '../AccountSettings.jsx';
 import { StoresMap } from '../RouteMap.jsx';
 
 const TYPE_META = { restaurant: { e: '🍽️', c: '#ef6c4d' }, market: { e: '🛒', c: '#3b82f6' }, pharmacy: { e: '💊', c: '#14b8a6' } };
+// 🏪 v2026.09.27.1 — cartes magasins de l'accueil (photos réalistes) + départements
+const STORE_CARDS = [
+  { type: 'restaurant', img: '/stores/restaurant.jpg', key: 'restaurant' },
+  { type: 'market', img: '/stores/supermarket.jpg', key: 'supermarket' },
+  { type: 'pharmacy', img: '/stores/pharmacy.jpg', key: 'pharmacy' },
+  { type: 'electronics', img: '/stores/electronics.jpg', key: 'electronics' },
+  { type: 'appliance', img: '/stores/appliance.jpg', key: 'appliance' },
+];
+const DEPTS = [
+  { id: 'property', img: '/dept/property.jpg' },
+  { id: 'contracting', img: '/dept/contracting.jpg' },
+  { id: 'electronics', img: '/dept/electronics.jpg' },
+  { id: 'automotive', img: '/dept/automotive.jpg' },
+  { id: 'jobs', img: '/dept/jobs.jpg' },
+  { id: 'services', img: null },   // ⏳ icône réaliste au prochain tour (limite de génération)
+];
 
 // 🛍️ v2026.09.24.3 — Marché (style OLX) : catégories + emojis + lien WhatsApp Égypte
 const CAT_EMOJI = { phones: '📱', electronics: '🔌', home: '🏠', fashion: '👕', kids: '🧸', sports: '⚽', beauty: '💄', auto: '🚗', other: '📦' };
@@ -43,7 +59,8 @@ const waLink = (p) => 'https://wa.me/' + String(p || '').replace(/\D/g, '').repl
 function ClientNav() {
   const t = useT();
   const [unread, setUnread] = useState(0);
-  usePoll(() => api('/notifications').then((d) => setUnread(d.unread || 0)).catch(() => {}), 15000);
+  // 💬 v2026.09.27.1 — l'onglet central bas = MESSAGES (chat marché) ; la cloche 🔔 est remontée dans l'en-tête
+  usePoll(() => api('/market/chats').then((d) => setUnread(d.unread || 0)).catch(() => {}), 15000);
   const it = (to, icon, label, end) => (
     <NavLink key={to} to={to} end={end} className={({ isActive }) => 'cnav-item' + (isActive ? ' on' : '')}>
       <span className="ci">{icon}</span>{label}
@@ -59,8 +76,8 @@ function ClientNav() {
             <span style={{ fontSize: 8.5, fontWeight: 800, lineHeight: 1.5 }}>{t('publish')}</span>
           </NavLink>
       </div>
-      <NavLink to="/app/notifications" className={({ isActive }) => 'cnav-item' + (isActive ? ' on' : '')}>
-        <span className="ci">🔔{unread > 0 && <span className="cnav-badge">{unread > 99 ? '99+' : unread}</span>}</span>{t('notifications')}
+      <NavLink to="/app/chats" className={({ isActive }) => 'cnav-item' + (isActive ? ' on' : '')}>
+        <span className="ci">💬{unread > 0 && <span className="cnav-badge">{unread > 99 ? '99+' : unread}</span>}</span>{t('messages')}
       </NavLink>
       {it('/app/settings', '⚙️', t('settings'))}
     </nav>
@@ -79,47 +96,73 @@ export function ClientLayout() {
   );
 }
 
-/* ================= HOME ================= */
+/* ================= HOME (v2026.09.27.1 — refonte : en-tête dégradé, bandeau service, pubs, cartes magasins, départements) ================= */
+// 🌐 sélecteur de langue (remplace l'ancien FR ع EN)
+function LangSelect() {
+  const { lang, setLang } = useLang();
+  const [open, setOpen] = useState(false);
+  const LBL = { fr: '🇫🇷 FR', ar: '🇪🇬 ع', en: '🇬🇧 EN' };
+  return (
+    <div style={{ position: 'relative' }}>
+      <button type="button" className="lang-btn" onClick={() => setOpen((v) => !v)}>{LBL[lang] || '🌐'} ▾</button>
+      {open && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setOpen(false)} />
+          <div className="lang-menu">
+            {[['fr', '🇫🇷 Français'], ['ar', '🇪🇬 العربية'], ['en', '🇬🇧 English']].map(([k, l]) => (
+              <button key={k} type="button" className={'lang-opt' + (lang === k ? ' on' : '')} onClick={() => { setLang(k); setOpen(false); }}>{l} {lang === k ? '✓' : ''}</button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// 🔄 carrousel auto-défilant (pubs, cartes magasins) : avance tout seul, pause quand l'utilisateur touche
+function AutoScroll({ children, delay = 3500, className = '' }) {
+  const ref = useRef(null);
+  const pause = useRef(0);
+  useEffect(() => {
+    const tm = setInterval(() => {
+      if (Date.now() < pause.current) return;
+      const el = ref.current;
+      if (!el || el.scrollWidth <= el.clientWidth) return;
+      const step = el.clientWidth * 0.8;
+      const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 8;
+      el.scrollTo({ left: atEnd ? 0 : el.scrollLeft + step, behavior: 'smooth' });
+    }, delay);
+    return () => clearInterval(tm);
+  }, [delay]);
+  return (
+    <div ref={ref} className={className}
+      onTouchStart={() => { pause.current = Date.now() + 7000; }}
+      onMouseDown={() => { pause.current = Date.now() + 7000; }}>
+      {children}
+    </div>
+  );
+}
+
 export function ClientHome() {
   const t = useT();
   const nav = useNavigate();
   const { user } = useAuth();
   const { add, items, setQty } = useCart();
-  const [sp, setSp] = useSearchParams();
+  const [q, setQ] = useState('');
   const [stores, setStores] = useState(null);
   const [products, setProducts] = useState(null);
-  // vue / filtres restaures depuis l'URL : le bouton retour ramene exactement ou on etait
-  const [view, setView] = useState(sp.get('v') === 'map' || sp.get('v') === 'products' ? sp.get('v') : 'stores');
-  const [type, setType] = useState(sp.get('t') || 'all');
-  const [q, setQ] = useState(sp.get('q') || '');
-  const [gDetail, setGDetail] = useState(null); // fiche produit ouverte depuis la vue Produits
+  const [ads, setAds] = useState(null);
+  const [gDetail, setGDetail] = useState(null);   // fiche produit ouverte depuis la recherche
   const [gQty, setGQty] = useState(1);
   const [gBig, setGBig] = useState(null);
+  const [unread, setUnread] = useState(0);        // 🔔 cloche de l'en-tête
+  usePoll(() => api('/notifications').then((d) => setUnread(d.unread || 0)).catch(() => {}), 15000);
 
-  const prevVT = useRef(view + '|' + type);
   useEffect(() => {
-    const next = new URLSearchParams();
-    if (view !== 'stores') next.set('v', view);
-    if (type !== 'all') next.set('t', type);
-    if (q.trim()) next.set('q', q.trim());
-    if (sp.toString() !== next.toString()) {
-      // changer de VUE ou de filtre = vraie navigation (le retour y revient) · la recherche tape = remplacement
-      const isNav = prevVT.current !== view + '|' + type;
-      prevVT.current = view + '|' + type;
-      setSp(next, { replace: !isNav });
-    }
-  }, [view, type, q]);
-  // ← bouton retour : l'URL rechange → re-synchroniser la vue affichée
-  useEffect(() => {
-    const sync = () => {
-      const v = sp.get('v');
-      setView(v === 'map' || v === 'products' ? v : 'stores');
-      setType(sp.get('t') || 'all');
-      setQ(sp.get('q') || '');
-    };
-    window.addEventListener('popstate', sync);
-    return () => window.removeEventListener('popstate', sync);
-  }, [sp]);
+    api('/stores').then((d) => setStores(d.stores)).catch(() => setStores([]));
+    api('/products').then((d) => setProducts(d.products)).catch(() => setProducts([]));
+    api('/ads').then((d) => setAds(d.ads)).catch(() => setAds([]));   // 📣 pubs du superadmin
+  }, []);
 
   // Ouvre la FICHE PRODUIT (pas le magasin) : charge le produit complet + sa boutique
   const openProduct = async (p) => {
@@ -146,173 +189,95 @@ export function ClientHome() {
     setGDetail(null);
   };
 
-  useEffect(() => {
-    setStores(null);
-    const params = new URLSearchParams();
-    if (type !== 'all') params.set('type', type);
-    if (q.trim()) params.set('q', q.trim());
-    const id = setTimeout(() => {
-      api('/stores?' + params.toString()).then((d) => setStores(d.stores)).catch(() => setStores([]));
-    }, 250);
-    return () => clearTimeout(id);
-  }, [type, q]);
-
-  useEffect(() => {
-    if (view !== 'products') return;
-    setProducts(null);
-    const params = new URLSearchParams();
-    if (type !== 'all') params.set('type', type);
-    if (q.trim()) params.set('q', q.trim());
-    const id = setTimeout(() => {
-      api('/products?' + params.toString()).then((d) => setProducts(d.products)).catch(() => setProducts([]));
-    }, 250);
-    return () => clearTimeout(id);
-  }, [view, type, q]);
-
-  const chips = [
-    { id: 'all', label: t('type_all'), e: '🛍️' },
-    { id: 'restaurant', label: t('type_restaurant'), e: '🍽️' },
-    { id: 'market', label: t('type_market'), e: '🛒' },
-    { id: 'pharmacy', label: t('type_pharmacy'), e: '💊' },
-    { id: 'home', label: t('type_home'), e: '🛋️' },
-    { id: 'clothes', label: t('type_clothes'), e: '👕' },
-    { id: 'electronics', label: t('type_electronics'), e: '📱' }
-  ];
+  const hour = new Date().getHours();
+  const greet = hour < 12 ? t('good_morning') : hour < 18 ? t('good_afternoon') : t('good_evening');
 
   return (
-    <>
-      <div className="topbar">
-        <div className="logo">🚀</div>
-        <div className="grow">
-          <div className="brand-name">Yalla<span className="accent">Liv</span></div>
-          <div className="muted small ellipsis">{t('home_title')} {user?.name?.split(' ')[0]} 👋</div>
-        </div>
-        <LangSwitch />
-        <button className="icon-btn" onClick={() => nav('/app/profile')} title={t('profile')} aria-label={t('profile')} style={{ fontSize: 19 }}>👤</button>
-      </div>
-
-      <SuggestBox
-        value={q}
-        onChange={setQ}
-        placeholder={'🔍 ' + (view === 'products' ? t('search_product_ph') : t('search_ph'))}
-        clearTitle={t('clear_search')}
-        getSugs={() => {
-          const s = q.trim().toLowerCase();
-          if (view === 'products') {
-            return (products || []).filter((p) => (p.name || '').toLowerCase().includes(s) || (p.store_name || '').toLowerCase().includes(s))
-              .map((p) => ({ key: 'p' + p.id, icon: p.store_emoji || '🏪', label: p.name, sub: p.store_name, p }));
-          }
-          return (stores || []).filter((st) => (st.name || '').toLowerCase().includes(s))
-            .map((st) => ({ key: 's' + st.id, icon: st.photo ? <img src={photoUrl(st.photo, 'thumb')} alt="" style={{ width: 24, height: 24, borderRadius: 7, objectFit: 'cover' }} /> : (st.emoji || '🏪'), label: st.name, sub: t('type_' + st.type), st }));
-        }}
-        onPick={(s) => {
-          if (s.p) openProduct(s.p);                                   // vue Produits : ouvre la fiche produit
-          else nav(`/app/store/${s.st.id}`);                            // vue Magasins/Carte : ouvre la boutique
-        }}
-      />
-
-      <div className="chips mt12">
-        {chips.map((c) => (
-          <button key={c.id} className={'chip' + (type === c.id ? ' on' : '')} onClick={() => setType(c.id)}>
-            {c.e} {c.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="chips mt12" style={{ gap: 6 }}>
-        {[{ id: 'stores', e: '🏪' }, { id: 'map', e: '🗺️' }, { id: 'products', e: '🛍️' }].map((v) => (
-          <button key={v.id} className={'chip' + (view === v.id ? ' on' : '')} onClick={() => setView(v.id)} style={{ fontWeight: 800 }}>
-            {v.e} {t('tab_' + v.id)}
-          </button>
-        ))}
-      </div>
-
-      {view === 'map' && (
-        <div className="card mt12" style={{ padding: 8 }}>
-          {!stores ? <Spinner /> : stores.filter((s) => s.lat != null).length === 0
-            ? <Empty e="🗺️" text={t('no_data')} />
-            : <StoresMap stores={stores} height={430} onSelect={(s) => nav(`/app/store/${s.id}`)} />}
-        </div>
-      )}
-
-      {view === 'products' && (
-        !products ? <Spinner /> : products.length === 0
-          ? <Empty e="🔎" text={t('no_data')} />
-          : (
-            <div className="prod-grid">
-              {products.map((p) => (
-                <div key={p.id} className="card prod-card" onClick={() => openProduct(p)}>
-                  {p.photo
-                    ? <img className="prod-photo" src={photoUrl(p.photo, 'thumb')} alt="" loading="lazy" />
-                    : <NoPhoto full h={96} radius={10} />}
-                  <div className="ellipsis" style={{ fontWeight: 800, marginTop: 6 }}>{p.name}</div>
-                  {p.qty != null && <div className="muted small" style={{ marginTop: 2 }}>📦 {p.qty} dispo.</div>}
-                  <div className="row mt4" style={{ gap: 6, alignItems: 'center' }}>
-                    {p.store_photo
-                      ? <img src={photoUrl(p.store_photo, 'thumb')} alt="" style={{ width: 22, height: 22, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} />
-                      : <div className="store-emoji" style={{ width: 22, height: 22, fontSize: 12, background: p.store_color || '#0e9f6e', flexShrink: 0 }}>{p.store_emoji || '🏪'}</div>}
-                    <span className="muted small ellipsis">{p.store_name}</span>
-                  </div>
-                  <div className="row spread mt4" style={{ alignItems: 'center' }}>
-                    <b style={{ color: 'var(--brand-dark)' }}>{fmtMoney(p.price)}</b>
-                    <button className="badge" style={{ background: '#dcfce7', color: '#166534', cursor: 'pointer', border: 'none' }}
-                      onClick={(e) => { e.stopPropagation(); nav(`/app/store/${p.store_id}`); }}>🏪 {t('open_store')}</button>
-                  </div>
-                </div>
-              ))}
+    <div>
+      {/* 🟩 En-tête dégradé vert : logo + sélecteur langue + 🔔 notifications + 👤 profil */}
+      <div className="home-head">
+        <div className="row spread mb8">
+          <div className="row" style={{ gap: 10 }}>
+            <div className="logo">🚀</div>
+            <div>
+              <div className="brand-name" style={{ color: '#fff' }}>Yalla<span style={{ color: '#a7f3d0' }}>Liv</span></div>
+              <div className="xsmall" style={{ color: 'rgba(255,255,255,.88)' }}>{greet} {user?.name?.split(' ')[0]} 👋</div>
             </div>
-          )
-      )}
-
-      {view === 'stores' && (
-        <div className="card mb12">
-          <div className="row spread mb8">
-            <div className="h2">🛍️ {t('market')}</div>
-            <button className="btn ghost sm" onClick={() => nav('/app/market')}>{t('see_all')} →</button>
           </div>
-          {/* 🛍️ v2026.09.24.3 — grandes icônes 3D réalistes par catégorie, défilement gauche/droite */}
-          <div className="mkt-cats">
-            {Object.keys(CAT_EMOJI).map((k) => (
-              <button key={k} type="button" className="mkt-cat" onClick={() => nav('/app/market?cat=' + k)}>
-                <img src={'/market/' + k + '.jpg'} alt={t('cat_' + k)} loading="lazy" />
-                <span>{t('cat_' + k)}</span>
-              </button>
-            ))}
+          <div className="row" style={{ gap: 6 }}>
+            <LangSelect />
+            <button type="button" className="head-icon" onClick={() => nav('/app/notifications')} title={t('notifications')} aria-label={t('notifications')}>
+              🔔{unread > 0 && <span className="dot-badge">{unread > 99 ? '99+' : unread}</span>}
+            </button>
+            <button type="button" className="head-icon" onClick={() => nav('/app/profile')} title={t('profile')} aria-label={t('profile')}>👤</button>
           </div>
         </div>
+        <SuggestBox
+          value={q}
+          onChange={setQ}
+          placeholder={'🔍 ' + t('search_ph')}
+          clearTitle={t('clear_search')}
+          getSugs={() => {
+            const s = q.trim().toLowerCase();
+            const st = (stores || []).filter((x) => (x.name || '').toLowerCase().includes(s))
+              .map((x) => ({ key: 's' + x.id, icon: x.photo ? <img src={photoUrl(x.photo, 'thumb')} alt="" style={{ width: 24, height: 24, borderRadius: 7, objectFit: 'cover' }} /> : (x.emoji || '🏪'), label: x.name, sub: t('type_' + x.type), st: x }));
+            const pr = (products || []).filter((x) => (x.name || '').toLowerCase().includes(s))
+              .map((x) => ({ key: 'p' + x.id, icon: x.store_emoji || '🏪', label: x.name, sub: x.store_name, p: x }));
+            return [...st, ...pr];
+          }}
+          onPick={(s) => {
+            if (s.p) openProduct(s.p);
+            else nav('/app/store/' + s.st.id);
+          }}
+        />
+      </div>
+
+      {/* 🛵 Bandeau : demander un service à un livreur général (acceptation volontaire) */}
+      <button type="button" className="svc-banner" onClick={() => nav('/app/service')}>
+        <span className="svc-emoji">🛵</span>
+        <span className="grow" style={{ minWidth: 0 }}>
+          <span style={{ display: 'block', fontWeight: 900, fontSize: 15.5, color: '#fff' }}>{t('svc_title')}</span>
+          <span className="xsmall" style={{ display: 'block', color: 'rgba(255,255,255,.92)' }}>{t('svc_sub')}</span>
+        </span>
+        <span className="svc-cta">{t('svc_cta')} →</span>
+      </button>
+
+      {/* 🧃 Publicités (publiées depuis l'espace superadmin) — défilement automatique + manuel */}
+      {ads && ads.length > 0 && (
+        <AutoScroll className="ads-row" delay={3500}>
+          {ads.map((a) => (
+            <a key={a.id} className="ad-card" href={a.link || '#'} target={a.link && a.link.startsWith('http') ? '_blank' : undefined} rel="noopener">
+              <img src={a.image} alt="" />
+            </a>
+          ))}
+        </AutoScroll>
       )}
 
-      {view === 'stores' && (
-      !stores ? (
-        <Spinner />
-      ) : stores.length === 0 ? (
-        <Empty e="🔎" text={t('no_data')} />
-      ) : (
-        <div className="store-grid">
-          {stores.map((s) => {
-            const meta = TYPE_META[s.type] || TYPE_META.market;
-            return (
-              <div key={s.id} className="card store-card" onClick={() => nav(`/app/store/${s.id}`)}>
-                {s.photo
-              ? <img src={photoUrl(s.photo, 'thumb')} alt="" style={{ width: 52, height: 52, borderRadius: 14, objectFit: 'cover', flexShrink: 0, border: '1px solid var(--line)' }} />
-              : <div className="store-emoji" style={{ background: s.color || meta.c }}>{s.emoji || meta.e}</div>}
-                <div className="grow">
-                  <div className="h2 ellipsis">{s.name}</div>
-                  <div className="muted small ellipsis">{t('type_' + s.type)} · ⭐ {Number(s.rating).toFixed(1)}</div>
-                  <div className="row mt4" style={{ gap: 6 }}>
-                    <span className="badge">{meta.e} {s.product_count} {t('products_count')}</span>
-                    <span className="badge">{t('delivery_fee')} {fmtMoney(s.delivery_fee)}</span>
-                    <span className="badge">⏱ {etaRange(s.type, null).join('-')} min</span>
-                  </div>
-                </div>
-                {!s.is_open && <span className="badge st-cancelled">{t('closed')}</span>}
-              </div>
-            );
-          })}
-        </div>
-        )
-      )}
+      {/* 🏪 Magasins par catégorie — cartes horizontales réalistes auto-défilantes */}
+      <div className="h2 mb8 mt12">🏪 {t('stores_by_type')}</div>
+      <AutoScroll className="stc-row" delay={4000}>
+        {STORE_CARDS.map((c) => (
+          <button key={c.type} type="button" className="stc-card" onClick={() => nav('/app/stores/' + c.type)}>
+            <img src={c.img} alt="" loading="lazy" />
+            <span>{t('stc_' + c.key)}</span>
+          </button>
+        ))}
+      </AutoScroll>
 
+      {/* 🧱 Départements */}
+      <div className="h2 mb8 mt12">🧱 {t('departments')}</div>
+      <div className="dept-grid">
+        {DEPTS.map((d) => (
+          <button key={d.id} type="button" className="dept-tile" onClick={() => nav('/app/dept/' + d.id)}>
+            {d.img
+              ? <img src={d.img} alt="" loading="lazy" />
+              : <span className="dept-emoji">👥</span>}
+            <span>{t('dept_' + d.id)}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* fiche produit rapide (depuis la recherche) */}
       <Modal open={!!gDetail} onClose={() => setGDetail(null)} title={t('product_details')}>
         {gDetail?.loading ? <Spinner /> : gDetail?.store && gDetail?.product ? (
           <div style={{ textAlign: 'center' }}>
@@ -355,7 +320,7 @@ export function ClientHome() {
           </div>
         ) : null}
       </Modal>
-    </>
+    </div>
   );
 }
 
@@ -1162,6 +1127,7 @@ export function ClientProfile() {
             <option value="home">🛋️ {t('type_home')}</option>
             <option value="clothes">👕 {t('type_clothes')}</option>
             <option value="electronics">📱 {t('type_electronics')}</option>
+            <option value="appliance">🧺 {t('type_appliance')}</option>
           </select>
         </div>
         <div className="field">
@@ -2107,6 +2073,181 @@ export function SalesPage() {
   );
 }
 
+// ================= 🛵 Demande de service à un livreur général (v2026.09.27.1) =================
+export function ServiceRequestPage() {
+  const t = useT(); const { lang } = useLang(); const nav = useNavigate(); const { user } = useAuth();
+  const [desc, setDesc] = useState('');
+  const [pAddr, setPAddr] = useState(''); const [pGps, setPGps] = useState(null); const [pSugg, setPSugg] = useState(null);
+  const [dAddr, setDAddr] = useState(''); const [dGps, setDGps] = useState(null); const [dSugg, setDSugg] = useState(null);
+  const [phone, setPhone] = useState(user?.phone || '');
+  const [busy, setBusy] = useState(false);
+  const [pPick, setPPick] = useState(false); const [dPick, setDPick] = useState(false);
+  const pTm = useRef(null); const dTm = useRef(null);
+
+  const onAddr = (which) => (e) => {
+    const v = e.target.value;
+    if (which === 'p') setPAddr(v); else setDAddr(v);
+    clearTimeout(which === 'p' ? pTm.current : dTm.current);
+    if (v.trim().length < 4) { if (which === 'p') setPSugg(null); else setDSugg(null); return; }
+    const tm = setTimeout(async () => {
+      try { const r = (await geocodeSearch(v.trim(), lang, { lat: 31.2001, lng: 29.9187 })).slice(0, 5); if (which === 'p') setPSugg(r); else setDSugg(r); }
+      catch { if (which === 'p') setPSugg(null); else setDSugg(null); }
+    }, 500);
+    if (which === 'p') pTm.current = tm; else dTm.current = tm;
+  };
+  const pick = (which, r) => {
+    if (which === 'p') { setPAddr(r.label.split(',').slice(0, 3).join(', ')); setPGps({ lat: r.lat, lng: r.lng }); setPSugg(null); }
+    else { setDAddr(r.label.split(',').slice(0, 3).join(', ')); setDGps({ lat: r.lat, lng: r.lng }); setDSugg(null); }
+  };
+  const feeEst = pGps && dGps
+    ? Math.max(15, Math.min(80, Math.round(20 + Math.max(0, distM(pGps.lat, pGps.lng, dGps.lat, dGps.lng) / 1000 - 2) * 2.5)))
+    : null;
+  const submit = async () => {
+    if (busy) return;
+    if (desc.trim().length < 5) return toast(t('svc_desc_ph') + ' ?', 'err');
+    if (!pGps) return toast(t('pickup_required'), 'err');
+    if (!dGps) return toast(t('loc_required'), 'err');
+    if (!phone.trim()) return toast(t('listing_phone') + ' ?', 'err');
+    setBusy(true);
+    try {
+      const r = await api('/services', { method: 'POST', body: { description: desc.trim(), pickup_address: pAddr.trim(), pickup_lat: pGps.lat, pickup_lng: pGps.lng, address: dAddr.trim(), lat: dGps.lat, lng: dGps.lng, phone: phone.trim(), delivery_fee: feeEst || 25 } });
+      toast(t('deliver_ok') + ' 🔑 ' + r.pin, 'ok');
+      nav('/app/orders');
+    } catch (ex) { toast(ex.message, 'err'); }
+    setBusy(false);
+  };
+  // ⚠️ fonction APPELÉE (pas un composant imbriqué) : un composant redéclaré à chaque rendu
+  // ferait perdre le focus au champ après chaque caractère tapé.
+  const addrField = (which, label, val, gps, sugg) => (
+    <div className="field">
+      <label className="label">{label}</label>
+      <div className="row" style={{ gap: 6 }}>
+        <input className="input grow" value={val} onChange={onAddr(which)} placeholder={t('addr_ph')} />
+        <button type="button" className={'btn' + (gps ? ' primary' : ' ghost')} title={t('pick_map')} onClick={() => (which === 'p' ? setPPick(true) : setDPick(true))}>🗺️</button>
+      </div>
+      {sugg && sugg.length > 0 && (
+        <div style={{ marginTop: 6, border: '1px solid #eef2f7', borderRadius: 10, overflow: 'hidden' }}>
+          {sugg.map((r, i) => (
+            <button key={i} type="button" onClick={() => pick(which, r)}
+              style={{ display: 'block', width: '100%', textAlign: 'start', padding: '7px 10px', background: 'transparent', border: 'none', borderBottom: i < sugg.length - 1 ? '1px solid #f1f5f9' : 'none', cursor: 'pointer', fontSize: 12.5 }}>📍 {r.label}</button>
+          ))}
+        </div>
+      )}
+      {gps && <div className="muted xsmall mt4">✅ {t('loc_set')}</div>}
+    </div>
+  );
+  return (
+    <div>
+      <div className="topbar">
+        <BackBtn />
+        <div className="grow"><div className="brand-name">🛵 {t('svc_form_title')}</div></div>
+      </div>
+      <div className="banner ok mb12">💡 {t('svc_pay_note')}</div>
+      <div className="card mb12" style={{ padding: 14 }}>
+        <div className="field">
+          <label className="label">📝 {t('svc_desc')}</label>
+          <textarea className="textarea" rows={3} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder={t('svc_desc_ph')} />
+        </div>
+        {addrField('p', '📍 ' + t('svc_pickup'), pAddr, pGps, pSugg)}
+        {addrField('d', '🏁 ' + t('svc_dropoff'), dAddr, dGps, dSugg)}
+        <div className="field">
+          <label className="label">📞 {t('listing_phone')}</label>
+          <input className="input" dir="ltr" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0100 123 4567" />
+        </div>
+        <div className="row spread mt8" style={{ padding: '8px 12px', background: '#f0fdf4', borderRadius: 10 }}>
+          <span className="small" style={{ fontWeight: 800 }}>🛵 {t('deliver_fee')}</span>
+          <span className="small" style={{ fontWeight: 900, color: 'var(--brand-dark)' }}>{feeEst ? '≈ ' + fmtMoney(feeEst) : '≈ ' + fmtMoney(25)}</span>
+        </div>
+        {pGps && dGps && <div className="muted xsmall mt4">📏 ≈ {Math.max(1, Math.round(distM(pGps.lat, pGps.lng, dGps.lat, dGps.lng) / 1000))} km — base 20 EGP + 2,5 EGP/km au-delà de 2 km</div>}
+        <button className="btn primary block mt8" disabled={busy} onClick={submit}>{busy ? '…' : '🛵 ' + t('svc_send')}</button>
+      </div>
+
+      <Modal open={pPick} onClose={() => setPPick(false)} title={'🗺️ ' + t('svc_pickup')}>
+        {pPick && (
+          <PickMap initial={pGps || { lat: 31.2001, lng: 29.9187 }}
+            onConfirm={({ lat, lng, address }) => { setPGps({ lat, lng }); setPAddr((a) => a || (address ? address.split(',').slice(0, 2).join(', ') : '')); setPPick(false); toast(t('loc_set'), 'ok'); }} />
+        )}
+      </Modal>
+      <Modal open={dPick} onClose={() => setDPick(false)} title={'🗺️ ' + t('svc_dropoff')}>
+        {dPick && (
+          <PickMap initial={dGps || { lat: 31.2001, lng: 29.9187 }}
+            onConfirm={({ lat, lng, address }) => { setDGps({ lat, lng }); setDAddr((a) => a || (address ? address.split(',').slice(0, 2).join(', ') : '')); setDPick(false); toast(t('loc_set'), 'ok'); }} />
+        )}
+      </Modal>
+    </div>
+  );
+}
+
+// ================= 🏪 Magasins par catégorie (v2026.09.27.1) =================
+export function StoresByTypePage() {
+  const t = useT(); const nav = useNavigate();
+  const { type } = useParams();
+  const [stores, setStores] = useState(null);
+  useEffect(() => {
+    setStores(null);
+    api('/stores?type=' + type).then((d) => setStores(d.stores)).catch(() => setStores([]));
+  }, [type]);
+  const key = { restaurant: 'restaurant', market: 'supermarket', pharmacy: 'pharmacy', electronics: 'electronics', appliance: 'appliance' }[type] || type;
+  return (
+    <div>
+      <div className="topbar">
+        <BackBtn />
+        <div className="grow"><div className="brand-name">🏪 {t('stc_' + key)}</div></div>
+      </div>
+      {!stores ? <Spinner /> : stores.length === 0 ? <Empty e="🏪" text={t('no_stores_type')} /> : (
+        <div className="store-grid">
+          {stores.map((s) => {
+            const meta = TYPE_META[s.type] || TYPE_META.market;
+            return (
+              <div key={s.id} className="card store-card" onClick={() => nav('/app/store/' + s.id)}>
+                {s.photo
+                  ? <img src={photoUrl(s.photo, 'thumb')} alt="" style={{ width: 52, height: 52, borderRadius: 14, objectFit: 'cover', flexShrink: 0, border: '1px solid var(--line)' }} />
+                  : <div className="store-emoji" style={{ background: s.color || meta.c }}>{s.emoji || meta.e}</div>}
+                <div className="grow">
+                  <div className="h2 ellipsis">{s.name}</div>
+                  <div className="muted small ellipsis">{t('type_' + s.type)} · ⭐ {Number(s.rating).toFixed(1)}</div>
+                  <div className="row mt4 wrap" style={{ gap: 6 }}>
+                    <span className="badge">{meta.e} {s.product_count} {t('products_count')}</span>
+                    <span className="badge">{t('delivery_fee')} {fmtMoney(s.delivery_fee)}</span>
+                    <span className="badge">⏱ {etaRange(s.type, null).join('-')} min</span>
+                  </div>
+                </div>
+                {!s.is_open && <span className="badge st-cancelled">{t('closed')}</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ================= 🧱 Département (v2026.09.27.1 — bientôt disponible) =================
+export function DepartmentPage() {
+  const t = useT(); const nav = useNavigate();
+  const { id } = useParams();
+  const dept = DEPTS.find((d) => d.id === id);
+  if (!dept) return (<div><div className="topbar"><BackBtn /></div><Empty e="🧱" text="?" /></div>);
+  return (
+    <div>
+      <div className="topbar">
+        <BackBtn />
+        <div className="grow"><div className="brand-name">🧱 {t('dept_' + dept.id)}</div></div>
+      </div>
+      <div className="card mb12" style={{ padding: 20, textAlign: 'center' }}>
+        {dept.img
+          ? <img src={dept.img} alt="" style={{ width: 120, height: 120, borderRadius: 28, objectFit: 'cover', boxShadow: '0 8px 22px rgba(15,23,42,.16)', margin: '0 auto 10px', display: 'block' }} />
+          : <div className="dept-emoji" style={{ margin: '0 auto 10px', width: 120, height: 120, fontSize: 54 }}>👥</div>}
+        <div className="h2">{t('dept_' + dept.id)}</div>
+        <p className="muted small mt8">{t('dept_desc_' + dept.id)}</p>
+        <span className="badge mt8" style={{ background: '#fef3c7', color: '#92400e', fontSize: 13, padding: '6px 14px' }}>🚀 {t('coming_soon')}</span>
+        <p className="muted xsmall mt8">{t('dept_soon_text')}</p>
+        <button className="btn primary block mt12" onClick={() => nav('/app/market')}>🛍️ {t('browse_market')}</button>
+      </div>
+    </div>
+  );
+}
+
 // ================= 🔔 Centre de notifications =================
 export function NotificationsPage() {
   const t = useT();
@@ -2177,7 +2318,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.26.3</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.27.1</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
