@@ -100,7 +100,7 @@ function ClientMiniHeader() {
         <div className="brand-name" style={{ color: '#fff', fontSize: 15 }}>Yalla<span style={{ color: '#a7f3d0' }}>Liv</span></div>
       </div>
       <div className="row" style={{ gap: 6 }}>
-        <LangSelect />
+        {/* 🌐 v2026.09.27.3 : le sélecteur de langue n'apparaît que sur l'en-tête de l'accueil */}
         <button type="button" className="head-icon" style={{ width: 32, height: 32, fontSize: 14 }} onClick={() => nav('/app/notifications')} title={t('notifications')} aria-label={t('notifications')}>
           🔔{unread > 0 && <span className="dot-badge">{unread > 99 ? '99+' : unread}</span>}
         </button>
@@ -113,10 +113,12 @@ function ClientMiniHeader() {
 export function ClientLayout() {
   return (
     <div className="app-client">
-      <UpdatesBanner role="client" />
-      <NotifNag role="client" />
       <ClientMiniHeader />
       <Outlet />
+      {/* 📌 v2026.09.27.3 : bannières d'info déplacées SOUS le contenu (elles ne poussent plus
+          les sections de l'accueil hors du premier écran) */}
+      <UpdatesBanner role="client" />
+      <NotifNag role="client" />
       <CartBar />
       <ClientNav />
     </div>
@@ -312,14 +314,17 @@ export function ClientHome() {
       {/* 🛍️ Ligne de produits (v2026.09.27.2) */}
       <div className="h2 mb8 mt12">🛍️ {t('products_row')}</div>
       <div className="hp-row">
-        {(products || []).slice(0, 10).map((p) => (
-          <button key={p.id} type="button" className="hp-card" onClick={() => openProduct(p)}>
-            {p.photo
-              ? <img src={photoUrl(p.photo, 'thumb')} alt="" loading="lazy" />
-              : <NoPhoto full h={74} radius={10} />}
-            <div className="ellipsis hp-name">{p.name}</div>
-            <div style={{ fontWeight: 900, color: 'var(--brand-dark)', fontSize: 12.5 }}>{fmtMoney(p.price)}</div>
-            <div className="muted xsmall ellipsis">🏪 {p.store_name}</div>
+        {(products || []).slice(0, 12).map((p) => (
+          <button key={p.id} type="button" className="hp-card" onClick={() => openProduct(p)} title={p.name}>
+            <span className="hp-photo">
+              {p.photo
+                ? <img src={photoUrl(p.photo, 'thumb')} alt="" loading="lazy" />
+                : <NoPhoto full h={96} radius={0} />}
+            </span>
+            <span className="hp-meta">
+              <span className="ellipsis hp-name">{p.name}</span>
+              <span className="hp-price">{fmtMoney(p.price)}</span>
+            </span>
           </button>
         ))}
       </div>
@@ -2404,7 +2409,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.27.2</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.27.3</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>

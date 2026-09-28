@@ -523,3 +523,18 @@ button { font-family: inherit; }
 .hp-card img { width: 88px; height: 58px; border-radius: 8px; }
 .hp-name { font-size: 11px; }
 .app-client .h2 { font-size: 15px; }
+
+/* ============ 🖼️ v2026.09.27.3 — cartes produits modernes + pubs plus hautes ============ */
+.hp-card { flex: 0 0 148px; display: flex; flex-direction: column; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 0; cursor: pointer; text-align: start; overflow: hidden; box-shadow: 0 3px 10px rgba(15,23,42,.07); }
+.hp-photo { display: block; width: 100%; height: 96px; background: #f1f5f9; }
+.hp-photo img { width: 100%; height: 96px; object-fit: cover; display: block; }
+.hp-meta { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px 7px; }
+.hp-name { font-size: 11.5px; font-weight: 800; color: #334155; }
+.hp-price { font-size: 12.5px; font-weight: 900; color: var(--brand-dark); }
+.ad-card img { height: 122px; }
+
+/* 📏 v2026.09.27.3 — ajustements : Départements visibles sans scroll malgré les plus grandes cartes */
+.app-client .h2 { margin: 10px 0 6px; }
+.hp-photo, .hp-photo img { height: 80px; }
+.ad-card img { height: 110px; }
+.stc-card img { height: 64px; }
