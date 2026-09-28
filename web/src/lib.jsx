@@ -219,6 +219,7 @@ const DICT = {
     dept_desc_electronics: 'Informatique, gadgets et équipements électroniques.', dept_desc_automotive: 'Ventes et services automobiles.',
     dept_desc_jobs: 'Offres et recherches d’emploi.', dept_desc_services: 'Tous les autres services.',
     coming_soon: 'Bientôt disponible', dept_soon_text: 'Cette section est en préparation — en attendant, explorez le Marché !', browse_market: 'Explorer le Marché',
+    products_row: 'Produits', immo_auto: 'Immobilier & Automotive', immo_auto_empty: 'Aucune annonce immobilière ou auto pour le moment — publiez la première !', cat_property: 'Immobilier',
     type_appliance: 'Électroménager', ads_tab: 'Publicités', ads_add: 'Ajouter une publicité', ads_link: 'Lien (optionnel)',
     ads_empty: 'Aucune publicité', ad_added: 'Publicité ajoutée ✓', ads_active: 'Active', ads_inactive: 'Désactivée', delete_ad: 'Supprimer',
     cat_phones: 'Téléphones', cat_electronics: 'Électronique', cat_home: 'Maison', cat_fashion: 'Mode', cat_kids: 'Enfants', cat_sports: 'Sport', cat_beauty: 'Beauté', cat_auto: 'Auto', cat_other: 'Autres',
@@ -401,6 +402,7 @@ const DICT = {
     dept_desc_electronics: 'كمبيوتر وأجهزة ومعدات إلكترونية.', dept_desc_automotive: 'بيع وخدمات السيارات.',
     dept_desc_jobs: 'عروض وطلبات العمل.', dept_desc_services: 'باقي الخدمات.',
     coming_soon: 'قريبًا', dept_soon_text: 'هذا القسم قيد الإعداد — في الانتظار، تصفح السوق!', browse_market: 'تصفح السوق',
+    products_row: 'منتجات', immo_auto: 'عقارات وسيارات', immo_auto_empty: 'لا إعلانات عقارات أو سيارات حاليًا — انشر أول إعلان!', cat_property: 'عقارات',
     type_appliance: 'أجهزة منزلية', ads_tab: 'الإعلانات', ads_add: 'إضافة إعلان', ads_link: 'رابط (اختياري)',
     ads_empty: 'لا إعلانات', ad_added: 'تمت إضافة الإعلان ✓', ads_active: 'نشط', ads_inactive: 'متوقف', delete_ad: 'حذف',
     cat_phones: 'هواتف', cat_electronics: 'إلكترونيات', cat_home: 'منزل', cat_fashion: 'أزياء', cat_kids: 'أطفال', cat_sports: 'رياضة', cat_beauty: 'تجميل', cat_auto: 'سيارات', cat_other: 'أخرى',
@@ -583,6 +585,7 @@ const DICT = {
     dept_desc_electronics: 'Computers, gadgets and electronic equipment.', dept_desc_automotive: 'Car sales and services.',
     dept_desc_jobs: 'Job offers and searches.', dept_desc_services: 'All other services.',
     coming_soon: 'Coming soon', dept_soon_text: 'This section is being prepared — meanwhile, explore the Market!', browse_market: 'Explore the Market',
+    products_row: 'Products', immo_auto: 'Property & Automotive', immo_auto_empty: 'No property or automotive listings yet — post the first one!', cat_property: 'Property',
     type_appliance: 'Home appliances', ads_tab: 'Ads', ads_add: 'Add an ad', ads_link: 'Link (optional)',
     ads_empty: 'No ads', ad_added: 'Ad added ✓', ads_active: 'Active', ads_inactive: 'Inactive', delete_ad: 'Delete',
     cat_phones: 'Phones', cat_electronics: 'Electronics', cat_home: 'Home', cat_fashion: 'Fashion', cat_kids: 'Kids', cat_sports: 'Sports', cat_beauty: 'Beauty', cat_auto: 'Auto', cat_other: 'Other',
@@ -1024,23 +1027,25 @@ export function NotifNag({ role }) {
   if (hidden) return null;
   const later = () => { try { localStorage.setItem('yl_notif_nag_' + role, String(Date.now())); } catch {} setHidden(true); };
   return (
-    <div className="card" style={{ background: '#fffbeb', border: '1px solid #f59e0b', padding: '10px 14px', fontSize: 13, marginBottom: 10 }}>
-      <div style={{ fontWeight: 800, marginBottom: 2 }}>🔔 {t('notif_enable')}</div>
-      <div className="muted small" style={{ marginBottom: 8 }}>
+    <div className="card" style={{ background: '#fffbeb', border: '1px solid #f59e0b', padding: '6px 11px', fontSize: 12, marginBottom: 8 }}>
+      <div className="row spread wrap" style={{ gap: 6 }}>
+        <div style={{ fontWeight: 800 }}>🔔 {t('notif_enable')}</div>
+        <div className="row" style={{ gap: 6 }}>
+          {st === 'prompt' && (
+            <button className="btn primary sm" onClick={async () => {
+              const r = await pushSubscribe();
+              toast(r === 'granted' ? t('push_on') : r === 'denied' ? t('notif_off') : t('push_fail'), r === 'granted' ? 'ok' : 'err');
+              notifStatus().then(setSt);
+              if (r === 'granted') later();
+            }}>{t('notif_activate')}</button>
+          )}
+          <button className="btn ghost sm" onClick={later}>{t('later')}</button>
+        </div>
+      </div>
+      <div className="muted xsmall" style={{ marginBottom: 4 }}>
         {st === 'denied'
           ? t('notif_blocked_hint')
           : role === 'merchant' ? t('notif_nag_merchant') : role === 'driver' ? t('notif_nag_driver') : t('notif_nag_client')}
-      </div>
-      <div className="row" style={{ gap: 8 }}>
-        {st === 'prompt' && (
-          <button className="btn primary sm" onClick={async () => {
-            const r = await pushSubscribe();
-            toast(r === 'granted' ? t('push_on') : r === 'denied' ? t('notif_off') : t('push_fail'), r === 'granted' ? 'ok' : 'err');
-            notifStatus().then(setSt);
-            if (r === 'granted') later();
-          }}>🔔 {t('notif_activate')}</button>
-        )}
-        <button className="btn ghost sm" onClick={later}>{t('later')}</button>
       </div>
     </div>
   );
@@ -1085,16 +1090,24 @@ export const UPDATES = {
 
 export function UpdatesBanner({ role }) {
   const [seen, setSeen] = useState(() => { try { return localStorage.getItem('yl_upd_' + role) || ''; } catch { return ''; } });
+  const [open, setOpen] = useState(false);   // 📌 v2026.09.27.2 : repliée par défaut (une ligne) — libère l'écran d'accueil
   const latest = (UPDATES[role] || [])[0];
   if (!latest || seen === latest.v) return null;
   const ok = () => { try { localStorage.setItem('yl_upd_' + role, latest.v); } catch {} setSeen(latest.v); };
   return (
-    <div className="card" style={{ background: '#e0e7ff', border: '1px solid #6366f1', padding: '10px 14px', fontSize: 13, marginBottom: 10 }}>
-      <div style={{ fontWeight: 800, marginBottom: 4 }}>🎉 Nouveautés de cette version</div>
-      <ul style={{ margin: '0 0 8px 16px', padding: 0 }}>
-        {latest.items.map((x, i) => <li key={i} style={{ marginBottom: 3 }}>{x}</li>)}
-      </ul>
-      <button className="btn sm" style={{ background: '#6366f1', color: '#fff' }} onClick={ok}>✓ Vu</button>
+    <div className="card" style={{ background: '#e0e7ff', border: '1px solid #6366f1', padding: '7px 12px', fontSize: 12.5, marginBottom: 8 }}>
+      <div className="row spread">
+        <div style={{ fontWeight: 800 }}>🎉 Nouveautés — v{latest.v}</div>
+        <div className="row" style={{ gap: 6 }}>
+          <button className="btn sm ghost" onClick={() => setOpen((v) => !v)}>{open ? '▲' : '▼'}</button>
+          <button className="btn sm" style={{ background: '#6366f1', color: '#fff' }} onClick={ok}>✓ Vu</button>
+        </div>
+      </div>
+      {open && (
+        <ul style={{ margin: '6px 0 2px 16px', padding: 0 }}>
+          {latest.items.map((x, i) => <li key={i} style={{ marginBottom: 3 }}>{x}</li>)}
+        </ul>
+      )}
     </div>
   );
 }

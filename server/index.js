@@ -447,7 +447,7 @@ app.post('/api/notifications/read', auth, h(async (req, res) => {
 
 // 🛍️ v2026.09.24.1 — MARCHÉ (style OLX) : tout utilisateur connecté publie des articles,
 // visibles par tous. Contact direct acheteur → vendeur (appel/WhatsApp), comme OLX.
-const LISTING_CATS = ['phones', 'electronics', 'home', 'fashion', 'kids', 'sports', 'beauty', 'auto', 'other'];
+const LISTING_CATS = ['phones', 'electronics', 'home', 'fashion', 'kids', 'sports', 'beauty', 'auto', 'property', 'other'];   // 🏢 v2026.09.27.2 : immobilier
 // ================= 🛍️ Marché — v2026.09.26.1 Phase 1 : sous-cats, tri, favoris, vues, renouvellement =================
 const LISTING_CONDS = ['new', 'like_new', 'used'];
 const LISTING_SORTS = {

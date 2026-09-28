@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Link, NavLink, useNavigate, useParams, Outlet, useSearchParams } from 'react-router-dom';
+import { Link, NavLink, useNavigate, useParams, useLocation, Outlet, useSearchParams } from 'react-router-dom';
 import TrackMap from '../TrackMap.jsx';
 import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton } from '../lib.jsx';
 import { BottomNav, CartBar, StatusBadge, PayBadge, Stepper, Empty, Spinner, BackBtn, LangSwitch, Modal, Stars, SuggestBox, NoPhoto } from '../ui.jsx';
@@ -23,11 +23,11 @@ const DEPTS = [
   { id: 'electronics', img: '/dept/electronics.jpg' },
   { id: 'automotive', img: '/dept/automotive.jpg' },
   { id: 'jobs', img: '/dept/jobs.jpg' },
-  { id: 'services', img: null },   // ⏳ icône réaliste au prochain tour (limite de génération)
+  { id: 'services', img: '/dept/services.jpg' },
 ];
 
 // 🛍️ v2026.09.24.3 — Marché (style OLX) : catégories + emojis + lien WhatsApp Égypte
-const CAT_EMOJI = { phones: '📱', electronics: '🔌', home: '🏠', fashion: '👕', kids: '🧸', sports: '⚽', beauty: '💄', auto: '🚗', other: '📦' };
+const CAT_EMOJI = { phones: '📱', electronics: '🔌', home: '🏠', fashion: '👕', kids: '🧸', sports: '⚽', beauty: '💄', auto: '🚗', property: '🏢', other: '📦' };   // 🏢 v2026.09.27.2 : immobilier
 // 🛍️ v2026.09.26.1 — Marché Phase 1 : sous-catégories (2e niveau), états, attributs par catégorie
 const SUBCATS = {
   phones: [['smartphones', '📱'], ['accessories', '🎧'], ['tablets', '🖊️']],
@@ -84,11 +84,38 @@ function ClientNav() {
   );
 }
 
+// 🔔👤 v2026.09.27.2 — barre compacte fixe : cloche + profil accessibles sur TOUTES les pages
+// (sauf Accueil qui a son grand en-tête, Profil et Paramètres qui sont les pages concernées)
+function ClientMiniHeader() {
+  const t = useT();
+  const nav = useNavigate();
+  const loc = useLocation();
+  const [unread, setUnread] = useState(0);
+  usePoll(() => api('/notifications').then((d) => setUnread(d.unread || 0)).catch(() => {}), 15000);
+  if (loc.pathname === '/app' || loc.pathname === '/app/profile' || loc.pathname === '/app/settings') return null;
+  return (
+    <div className="mini-head">
+      <div className="row" style={{ gap: 8 }}>
+        <div className="logo" style={{ width: 30, height: 30, fontSize: 15 }}>🚀</div>
+        <div className="brand-name" style={{ color: '#fff', fontSize: 15 }}>Yalla<span style={{ color: '#a7f3d0' }}>Liv</span></div>
+      </div>
+      <div className="row" style={{ gap: 6 }}>
+        <LangSelect />
+        <button type="button" className="head-icon" style={{ width: 32, height: 32, fontSize: 14 }} onClick={() => nav('/app/notifications')} title={t('notifications')} aria-label={t('notifications')}>
+          🔔{unread > 0 && <span className="dot-badge">{unread > 99 ? '99+' : unread}</span>}
+        </button>
+        <button type="button" className="head-icon" style={{ width: 32, height: 32, fontSize: 14 }} onClick={() => nav('/app/profile')} title={t('profile')} aria-label={t('profile')}>👤</button>
+      </div>
+    </div>
+  );
+}
+
 export function ClientLayout() {
   return (
     <div className="app-client">
       <UpdatesBanner role="client" />
       <NotifNag role="client" />
+      <ClientMiniHeader />
       <Outlet />
       <CartBar />
       <ClientNav />
@@ -152,6 +179,9 @@ export function ClientHome() {
   const [stores, setStores] = useState(null);
   const [products, setProducts] = useState(null);
   const [ads, setAds] = useState(null);
+  const [immo, setImmo] = useState(null);      // 🏢🚗 v2026.09.27.2 : immobilier + automotive (section basse)
+  const revRef = useRef(null);
+  const [revIn, setRevIn] = useState(false);   // révélée au scroll (bas -> haut)
   const [gDetail, setGDetail] = useState(null);   // fiche produit ouverte depuis la recherche
   const [gQty, setGQty] = useState(1);
   const [gBig, setGBig] = useState(null);
@@ -162,7 +192,25 @@ export function ClientHome() {
     api('/stores').then((d) => setStores(d.stores)).catch(() => setStores([]));
     api('/products').then((d) => setProducts(d.products)).catch(() => setProducts([]));
     api('/ads').then((d) => setAds(d.ads)).catch(() => setAds([]));   // 📣 pubs du superadmin
+    Promise.all([api('/listings?cat=property'), api('/listings?cat=auto')])
+      .then(([p, a2]) => setImmo([...p.listings, ...a2.listings]))
+      .catch(() => setImmo([]));
   }, []);
+  // 🎬 la section du bas se révèle (translation bas->haut) quand l'utilisateur scrolle jusqu'à elle.
+  // ⚠️ l'observateur est armé APRÈS le chargement des annonces (sinon il se déclenche pendant
+  // le chargement où la section, réduite à un spinner, entre fugacement dans le champ).
+  useEffect(() => {
+    const el = revRef.current;
+    if (!el || immo === null) return;
+    let armed = false;
+    const io = new IntersectionObserver((es) => { if (armed && es[0].isIntersecting) setRevIn(true); }, { threshold: 0.12 });
+    io.observe(el);
+    const tm = setTimeout(() => {
+      armed = true;
+      if (el.getBoundingClientRect().top < window.innerHeight) setRevIn(true);   // déjà visible (écran large / peu d'annonces)
+    }, 700);
+    return () => { io.disconnect(); clearTimeout(tm); };
+  }, [immo]);
 
   // Ouvre la FICHE PRODUIT (pas le magasin) : charge le produit complet + sa boutique
   const openProduct = async (p) => {
@@ -235,10 +283,7 @@ export function ClientHome() {
       {/* 🛵 Bandeau : demander un service à un livreur général (acceptation volontaire) */}
       <button type="button" className="svc-banner" onClick={() => nav('/app/service')}>
         <span className="svc-emoji">🛵</span>
-        <span className="grow" style={{ minWidth: 0 }}>
-          <span style={{ display: 'block', fontWeight: 900, fontSize: 15.5, color: '#fff' }}>{t('svc_title')}</span>
-          <span className="xsmall" style={{ display: 'block', color: 'rgba(255,255,255,.92)' }}>{t('svc_sub')}</span>
-        </span>
+        <span className="grow ellipsis" style={{ minWidth: 0, fontWeight: 900, fontSize: 14, color: '#fff' }}>{t('svc_title')}</span>
         <span className="svc-cta">{t('svc_cta')} →</span>
       </button>
 
@@ -264,6 +309,21 @@ export function ClientHome() {
         ))}
       </AutoScroll>
 
+      {/* 🛍️ Ligne de produits (v2026.09.27.2) */}
+      <div className="h2 mb8 mt12">🛍️ {t('products_row')}</div>
+      <div className="hp-row">
+        {(products || []).slice(0, 10).map((p) => (
+          <button key={p.id} type="button" className="hp-card" onClick={() => openProduct(p)}>
+            {p.photo
+              ? <img src={photoUrl(p.photo, 'thumb')} alt="" loading="lazy" />
+              : <NoPhoto full h={74} radius={10} />}
+            <div className="ellipsis hp-name">{p.name}</div>
+            <div style={{ fontWeight: 900, color: 'var(--brand-dark)', fontSize: 12.5 }}>{fmtMoney(p.price)}</div>
+            <div className="muted xsmall ellipsis">🏪 {p.store_name}</div>
+          </button>
+        ))}
+      </div>
+
       {/* 🧱 Départements */}
       <div className="h2 mb8 mt12">🧱 {t('departments')}</div>
       <div className="dept-grid">
@@ -275,6 +335,31 @@ export function ClientHome() {
             <span>{t('dept_' + d.id)}</span>
           </button>
         ))}
+      </div>
+
+      {/* 🏢🚗 Immobilier & Automotive — espace final révélé au scroll (accueil uniquement) */}
+      <div ref={revRef} className={'prop-reveal' + (revIn ? ' in' : '')}>
+        <div className="h2 mb8 mt12">🏢🚗 {t('immo_auto')}</div>
+        {immo === null ? <Spinner /> : immo.length === 0 ? (
+          <div className="card mb12" style={{ padding: 16, textAlign: 'center' }}>
+            <div className="small" style={{ fontWeight: 800 }}>🏢🚗 {t('immo_auto_empty')}</div>
+            <button className="btn primary mt8" onClick={() => nav('/app/publish?cat=property')}>＋ {t('publish')}</button>
+          </div>
+        ) : (
+          <div className="store-grid mb12">
+            {immo.map((l) => (
+              <div key={l.id} className="card mkt-lcard" onClick={() => nav('/app/market/' + l.id)}>
+                <div className="mkt-lphoto">
+                  {l.photos && l.photos[0] ? <img src={l.photos[0]} alt="" /> : <div className="mkt-nophoto">{CAT_EMOJI[l.category] || '📦'}</div>}
+                </div>
+                <div className="mkt-lbody">
+                  <div className="small ellipsis" style={{ fontWeight: 800 }}>{l.name}</div>
+                  <div style={{ fontWeight: 900, color: 'var(--brand-dark)' }}>{fmtMoney(l.price)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* fiche produit rapide (depuis la recherche) */}
@@ -1783,7 +1868,8 @@ export function PublishPage() {
   const [sp] = useSearchParams();
   const editId = sp.get('edit');
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState({ name: '', category: 'other', subcategory: null, condition: null, description: '', price: '', phone: user?.phone || '', brand: '', size: '', area: '', photos: [], lat: null, lng: null });
+  const preCat = sp.get('cat');   // 🏢 v2026.09.27.2 : catégorie présélectionnée (ex. depuis l'accueil)
+  const [form, setForm] = useState({ name: '', category: preCat && CAT_EMOJI[preCat] ? preCat : 'other', subcategory: null, condition: null, description: '', price: '', phone: user?.phone || '', brand: '', size: '', area: '', photos: [], lat: null, lng: null });
   const [busy, setBusy] = useState(false);
   const [pick, setPick] = useState(false);   // 🗺️ Phase 2 : position exacte sur la carte
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -2318,7 +2404,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.27.1</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.27.2</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
