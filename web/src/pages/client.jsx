@@ -181,9 +181,10 @@ export function ClientHome() {
   const [stores, setStores] = useState(null);
   const [products, setProducts] = useState(null);
   const [ads, setAds] = useState(null);
-  const [immo, setImmo] = useState(null);      // 🏢🚗 v2026.09.27.2 : immobilier + automotive (section basse)
-  const revRef = useRef(null);
-  const [revIn, setRevIn] = useState(false);   // révélée au scroll (bas -> haut)
+  const [immo, setImmo] = useState(null);      // 🏢🚗 immobilier + automotive
+  const [sheet, setSheet] = useState(false);   // 🎬 v2026.09.27.4 : panneau qui glisse du bas vers le HAUT, PAR-DESSUS la page (comme le menu du téléphone inversé)
+  const sheetRef = useRef(null);
+  const dragRef = useRef({ y0: 0, dy: 0 });
   const [gDetail, setGDetail] = useState(null);   // fiche produit ouverte depuis la recherche
   const [gQty, setGQty] = useState(1);
   const [gBig, setGBig] = useState(null);
@@ -198,21 +199,32 @@ export function ClientHome() {
       .then(([p, a2]) => setImmo([...p.listings, ...a2.listings]))
       .catch(() => setImmo([]));
   }, []);
-  // 🎬 la section du bas se révèle (translation bas->haut) quand l'utilisateur scrolle jusqu'à elle.
-  // ⚠️ l'observateur est armé APRÈS le chargement des annonces (sinon il se déclenche pendant
-  // le chargement où la section, réduite à un spinner, entre fugacement dans le champ).
+  // 🎬 v2026.09.27.4 — le panneau s'ouvre automatiquement quand l'utilisateur atteint le BAS de l'accueil,
+  // et se réarme s'il remonte (chaque retour en bas le rouvre). Fermeture : ✕, fond, ou glisser vers le bas.
   useEffect(() => {
-    const el = revRef.current;
-    if (!el || immo === null) return;
-    let armed = false;
-    const io = new IntersectionObserver((es) => { if (armed && es[0].isIntersecting) setRevIn(true); }, { threshold: 0.12 });
-    io.observe(el);
-    const tm = setTimeout(() => {
-      armed = true;
-      if (el.getBoundingClientRect().top < window.innerHeight) setRevIn(true);   // déjà visible (écran large / peu d'annonces)
-    }, 700);
-    return () => { io.disconnect(); clearTimeout(tm); };
+    let armed = true;
+    const onScroll = () => {
+      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 48;
+      if (atBottom && armed && immo !== null) { setSheet(true); armed = false; }
+      else if (!atBottom) armed = true;   // 🐛 v2026.09.27.4 : réarme dès qu'on quitte le bas (la page est courte, un seuil fixe ne réarmait jamais)
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
   }, [immo]);
+  // 👆 glisser le panneau vers le bas pour le fermer (comme le menu du téléphone)
+  const onDragStart = (e) => { if (!e.touches || !e.touches[0]) return; dragRef.current = { y0: e.touches[0].clientY, dy: 0 }; if (sheetRef.current) sheetRef.current.style.transition = 'none'; };
+  const onDragMove = (e) => {
+    if (!sheetRef.current || !e.touches || !e.touches[0]) return;
+    dragRef.current.dy = e.touches[0].clientY - dragRef.current.y0;
+    if (dragRef.current.dy > 0) sheetRef.current.style.transform = 'translateY(' + dragRef.current.dy + 'px)';
+  };
+  const onDragEnd = () => {
+    if (!sheetRef.current) return;
+    sheetRef.current.style.transition = '';
+    sheetRef.current.style.transform = '';
+    if (dragRef.current.dy > 90) setSheet(false);   // glissé assez loin -> ferme
+    dragRef.current.dy = 0;
+  };
 
   // Ouvre la FICHE PRODUIT (pas le magasin) : charge le produit complet + sa boutique
   const openProduct = async (p) => {
@@ -342,30 +354,44 @@ export function ClientHome() {
         ))}
       </div>
 
-      {/* 🏢🚗 Immobilier & Automotive — espace final révélé au scroll (accueil uniquement) */}
-      <div ref={revRef} className={'prop-reveal' + (revIn ? ' in' : '')}>
-        <div className="h2 mb8 mt12">🏢🚗 {t('immo_auto')}</div>
-        {immo === null ? <Spinner /> : immo.length === 0 ? (
-          <div className="card mb12" style={{ padding: 16, textAlign: 'center' }}>
-            <div className="small" style={{ fontWeight: 800 }}>🏢🚗 {t('immo_auto_empty')}</div>
-            <button className="btn primary mt8" onClick={() => nav('/app/publish?cat=property')}>＋ {t('publish')}</button>
-          </div>
-        ) : (
-          <div className="store-grid mb12">
-            {immo.map((l) => (
-              <div key={l.id} className="card mkt-lcard" onClick={() => nav('/app/market/' + l.id)}>
-                <div className="mkt-lphoto">
-                  {l.photos && l.photos[0] ? <img src={l.photos[0]} alt="" /> : <div className="mkt-nophoto">{CAT_EMOJI[l.category] || '📦'}</div>}
+      {/* 🏢🚗 v2026.09.27.4 — PANNEAU Immobilier & Automotive : glisse du bas vers le haut PAR-DESSUS la page
+          (déclenché en bas de l'accueil · fermeture par ✕, fond ou glisser vers le bas) */}
+      {sheet && (
+        <>
+          <div className="sheet-backdrop" onClick={() => setSheet(false)} />
+          <div className="sheet" ref={sheetRef}>
+            <div className="sheet-grab" onTouchStart={onDragStart} onTouchMove={onDragMove} onTouchEnd={onDragEnd}>
+              <span className="sheet-handle" />
+            </div>
+            <div className="row spread mb8" style={{ alignItems: 'center' }}>
+              <div className="h2">🏢🚗 {t('immo_auto')}</div>
+              <button className="btn ghost sm" onClick={() => setSheet(false)}>✕</button>
+            </div>
+            <div className="sheet-body">
+              {immo === null ? <Spinner /> : immo.length === 0 ? (
+                <div className="card" style={{ padding: 18, textAlign: 'center' }}>
+                  <div className="small" style={{ fontWeight: 800 }}>🏢🚗 {t('immo_auto_empty')}</div>
+                  <button className="btn primary mt8" onClick={() => nav('/app/publish?cat=property')}>＋ {t('publish')}</button>
                 </div>
-                <div className="mkt-lbody">
-                  <div className="small ellipsis" style={{ fontWeight: 800 }}>{l.name}</div>
-                  <div style={{ fontWeight: 900, color: 'var(--brand-dark)' }}>{fmtMoney(l.price)}</div>
+              ) : (
+                <div className="store-grid">
+                  {immo.map((l) => (
+                    <div key={l.id} className="card mkt-lcard" onClick={() => nav('/app/market/' + l.id)}>
+                      <div className="mkt-lphoto">
+                        {l.photos && l.photos[0] ? <img src={l.photos[0]} alt="" /> : <div className="mkt-nophoto">{CAT_EMOJI[l.category] || '📦'}</div>}
+                      </div>
+                      <div className="mkt-lbody">
+                        <div className="small ellipsis" style={{ fontWeight: 800 }}>{l.name}</div>
+                        <div style={{ fontWeight: 900, color: 'var(--brand-dark)' }}>{fmtMoney(l.price)}</div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
-            ))}
+              )}
+            </div>
           </div>
-        )}
-      </div>
+        </>
+      )}
 
       {/* fiche produit rapide (depuis la recherche) */}
       <Modal open={!!gDetail} onClose={() => setGDetail(null)} title={t('product_details')}>
@@ -2409,7 +2435,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.27.3</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.27.4</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
