@@ -111,11 +111,8 @@ function ClientMiniHeader() {
 }
 
 export function ClientLayout() {
-  const loc = useLocation();
-  // 🟩 v2026.09.28.1 : sur l'accueil, le vert de l'en-tête remplit tout l'écran (fond du contenu)
-  const home = loc.pathname === '/app' || loc.pathname === '/app/';
   return (
-    <div className={'app-client' + (home ? ' green-bg' : '')}>
+    <div className="app-client">
       <ClientMiniHeader />
       <Outlet />
       {/* 📌 v2026.09.27.3 : bannières d'info déplacées SOUS le contenu (elles ne poussent plus
@@ -209,27 +206,37 @@ export function ClientHome() {
       .then(([p, a2]) => setImmo([...p.listings, ...a2.listings]))
       .catch(() => setImmo([]));
   }, []);
-  // 🎬 v2026.09.28.1 — en bas de l'accueil, le panneau se montre en "peek" (languette de 88px, glissement
-  // doux). L'utilisateur le déroule ensuite LUI-MÊME avec le doigt. La languette se range dès qu'on remonte.
+  // 🎬 v2026.09.28.2 — dès que l'utilisateur atteint la FIN de la page d'accueil, le panneau se
+  // DÉROULE automatiquement (transition douce .38s, pas de sortie brusque). S'il le referme, il ne
+  // revient qu'après être remonté puis redescendu. Le doigt garde le contrôle à tout moment.
   useEffect(() => {
     const atBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 48;
     let armed = true;
     const onScroll = () => {
       if (atBottom()) {
-        if (armed && immo !== null) { setSheet((s) => (s === 'open' ? s : 'peek')); armed = false; }
+        if (armed && immo !== null) { setSheet((s) => (s === 'open' ? s : 'open')); armed = false; }   // 🎬 v2026.09.28.2 : DÉROULEMENT AUTOMATIQUE (animation douce)
       } else {
         setSheet((s) => (s === 'open' ? s : 'closed'));
         if (window.innerHeight + window.scrollY < document.documentElement.scrollHeight - 160) armed = true;
       }
     };
     window.addEventListener('scroll', onScroll, { passive: true });
-    if (immo !== null && atBottom()) setSheet((s) => (s === 'open' ? s : 'peek'));   // déjà en bas au chargement des annonces
+    if (immo !== null && atBottom()) setSheet((s) => (s === 'open' ? s : 'open'));   // déjà en bas au chargement des annonces
     return () => window.removeEventListener('scroll', onScroll);
   }, [immo]);
-  // 🟩 v2026.09.28.1 : le vert de l'en-tête déborde aussi dans les zones d'étirement du navigateur
+  // 🟩 v2026.09.28.2 : le vert couvre UNIQUEMENT la partie supérieure restante de l'en-tête —
+  // la barre d'état / barre d'adresse du téléphone (theme-color) + la zone d'étirement du navigateur.
+  // Le reste de la page reste clair.
   useEffect(() => {
-    document.documentElement.style.background = 'var(--brand-dark)';
-    return () => { document.documentElement.style.background = ''; };
+    document.documentElement.style.background = '#0e9f6e';   // même vert que le HAUT de l'en-tête (continuité parfaite)
+    let meta = document.querySelector('meta[name="theme-color"]');
+    const before = meta ? meta.getAttribute('content') : null;
+    if (!meta) { meta = document.createElement('meta'); meta.setAttribute('name', 'theme-color'); document.head.appendChild(meta); }
+    meta.setAttribute('content', '#0e9f6e');
+    return () => {
+      document.documentElement.style.background = '';
+      if (before === null) meta.remove(); else meta.setAttribute('content', before);
+    };
   }, []);
   // 👆 v2026.09.28.1 — le panneau suit EXACTEMENT le doigt (montée comme descente) ; au relâchement,
   // il s'ancre sur l'état le plus proche — la vitesse du geste départage les ex æquo (flick = intention).
@@ -2486,7 +2493,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.28.1</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.28.2</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
