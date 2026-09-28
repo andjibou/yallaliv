@@ -555,3 +555,17 @@ button { font-family: inherit; }
 .head-icon { width: 36px; height: 36px; font-size: 15px; }
 .home-head .lang-btn { padding: 6px 11px; font-size: 12.5px; }
 .ad-card img { height: 132px; }
+
+/* ============ 🟩🎬 v2026.09.28.1 — fond vert plein écran (accueil) + panneau piloté au doigt ============ */
+/* 🟩 le vert de l'en-tête remplit toute la partie restante de l'écran (accueil uniquement) */
+.app-client.green-bg { min-height: 100vh; min-height: 100dvh; background: linear-gradient(180deg, #0b7a54 0%, #096b4d 55%, #095e42 100%); }
+.green-bg .h2 { color: #fff; text-shadow: 0 1px 2px rgba(9,94,66,.35); }
+.sheet .h2 { color: var(--ink); text-shadow: none; }   /* le panneau est blanc : titre sombre (prime sur la règle verte) */
+/* 🎬 panneau 3 états : caché / languette (peek) / déroulé — il suit le doigt, plus d'apparition brusque */
+.sheet { height: calc(100vh - 118px); height: calc(100dvh - 118px); animation: none; transition: transform .34s cubic-bezier(.2,.8,.25,1); }
+.sheet.closed { transform: translateY(100%); }
+.sheet.peek { transform: translateY(calc(100% - 88px)); }
+.sheet.open { transform: translateY(0); }
+.sheet-grab { user-select: none; -webkit-user-select: none; }
+.sheet-backdrop { animation: none; background: #0f172a; opacity: 0; pointer-events: none; transition: opacity .3s ease; }
+.sheet-backdrop.on { opacity: .48; pointer-events: auto; }

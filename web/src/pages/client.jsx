@@ -111,8 +111,11 @@ function ClientMiniHeader() {
 }
 
 export function ClientLayout() {
+  const loc = useLocation();
+  // 🟩 v2026.09.28.1 : sur l'accueil, le vert de l'en-tête remplit tout l'écran (fond du contenu)
+  const home = loc.pathname === '/app' || loc.pathname === '/app/';
   return (
-    <div className="app-client">
+    <div className={'app-client' + (home ? ' green-bg' : '')}>
       <ClientMiniHeader />
       <Outlet />
       {/* 📌 v2026.09.27.3 : bannières d'info déplacées SOUS le contenu (elles ne poussent plus
@@ -172,6 +175,8 @@ function AutoScroll({ children, delay = 3500, className = '' }) {
   );
 }
 
+const SHEET_PEEK = 88;   // 🎬 v2026.09.28.1 : hauteur visible de la languette du panneau (px) — doit matcher .sheet.peek en CSS
+
 export function ClientHome() {
   const t = useT();
   const nav = useNavigate();
@@ -182,9 +187,14 @@ export function ClientHome() {
   const [products, setProducts] = useState(null);
   const [ads, setAds] = useState(null);
   const [immo, setImmo] = useState(null);      // 🏢🚗 immobilier + automotive
-  const [sheet, setSheet] = useState(false);   // 🎬 v2026.09.27.4 : panneau qui glisse du bas vers le HAUT, PAR-DESSUS la page (comme le menu du téléphone inversé)
+  // 🎬 v2026.09.28.1 : panneau Immobilier & Automotive — 3 états :
+  //   'closed' (caché) · 'peek' (languette en bas de l'accueil) · 'open' (déroulé par l'utilisateur)
+  // Il ne saute plus : il suit le doigt (déroulé à la vitesse du geste, jusqu'à l'en-tête).
+  const [sheet, setSheet] = useState('closed');
   const sheetRef = useRef(null);
-  const dragRef = useRef({ y0: 0, dy: 0 });
+  const backdropRef = useRef(null);
+  const dragRef = useRef({ y0: 0, base: 0, H: 0, ty: 0, v: 0, lastY: 0, lastT: 0 });
+  const movedRef = useRef(0);
   const [gDetail, setGDetail] = useState(null);   // fiche produit ouverte depuis la recherche
   const [gQty, setGQty] = useState(1);
   const [gBig, setGBig] = useState(null);
@@ -199,31 +209,69 @@ export function ClientHome() {
       .then(([p, a2]) => setImmo([...p.listings, ...a2.listings]))
       .catch(() => setImmo([]));
   }, []);
-  // 🎬 v2026.09.27.4 — le panneau s'ouvre automatiquement quand l'utilisateur atteint le BAS de l'accueil,
-  // et se réarme s'il remonte (chaque retour en bas le rouvre). Fermeture : ✕, fond, ou glisser vers le bas.
+  // 🎬 v2026.09.28.1 — en bas de l'accueil, le panneau se montre en "peek" (languette de 88px, glissement
+  // doux). L'utilisateur le déroule ensuite LUI-MÊME avec le doigt. La languette se range dès qu'on remonte.
   useEffect(() => {
+    const atBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 48;
     let armed = true;
     const onScroll = () => {
-      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 48;
-      if (atBottom && armed && immo !== null) { setSheet(true); armed = false; }
-      else if (!atBottom) armed = true;   // 🐛 v2026.09.27.4 : réarme dès qu'on quitte le bas (la page est courte, un seuil fixe ne réarmait jamais)
+      if (atBottom()) {
+        if (armed && immo !== null) { setSheet((s) => (s === 'open' ? s : 'peek')); armed = false; }
+      } else {
+        setSheet((s) => (s === 'open' ? s : 'closed'));
+        if (window.innerHeight + window.scrollY < document.documentElement.scrollHeight - 160) armed = true;
+      }
     };
     window.addEventListener('scroll', onScroll, { passive: true });
+    if (immo !== null && atBottom()) setSheet((s) => (s === 'open' ? s : 'peek'));   // déjà en bas au chargement des annonces
     return () => window.removeEventListener('scroll', onScroll);
   }, [immo]);
-  // 👆 glisser le panneau vers le bas pour le fermer (comme le menu du téléphone)
-  const onDragStart = (e) => { if (!e.touches || !e.touches[0]) return; dragRef.current = { y0: e.touches[0].clientY, dy: 0 }; if (sheetRef.current) sheetRef.current.style.transition = 'none'; };
+  // 🟩 v2026.09.28.1 : le vert de l'en-tête déborde aussi dans les zones d'étirement du navigateur
+  useEffect(() => {
+    document.documentElement.style.background = 'var(--brand-dark)';
+    return () => { document.documentElement.style.background = ''; };
+  }, []);
+  // 👆 v2026.09.28.1 — le panneau suit EXACTEMENT le doigt (montée comme descente) ; au relâchement,
+  // il s'ancre sur l'état le plus proche — la vitesse du geste départage les ex æquo (flick = intention).
+  const onDragStart = (e) => {
+    if (!e.touches || !e.touches[0] || !sheetRef.current) return;
+    const H = sheetRef.current.offsetHeight;
+    const base = sheet === 'open' ? 0 : sheet === 'peek' ? H - SHEET_PEEK : H;
+    dragRef.current = { y0: e.touches[0].clientY, base, H, ty: base, v: 0, lastY: e.touches[0].clientY, lastT: performance.now() };
+    movedRef.current = 0;
+    sheetRef.current.style.transition = 'none';
+  };
   const onDragMove = (e) => {
-    if (!sheetRef.current || !e.touches || !e.touches[0]) return;
-    dragRef.current.dy = e.touches[0].clientY - dragRef.current.y0;
-    if (dragRef.current.dy > 0) sheetRef.current.style.transform = 'translateY(' + dragRef.current.dy + 'px)';
+    const d = dragRef.current;
+    if (!d.H || !sheetRef.current || !e.touches || !e.touches[0]) return;
+    const y = e.touches[0].clientY;
+    const now = performance.now();
+    if (now > d.lastT) d.v = (y - d.lastY) / (now - d.lastT);   // px/ms — positif = vers le bas
+    d.lastY = y; d.lastT = now;
+    const dy = y - d.y0;
+    movedRef.current = Math.max(movedRef.current, Math.abs(dy));
+    d.ty = Math.min(d.H, Math.max(0, d.base + dy));
+    sheetRef.current.style.transform = 'translateY(' + d.ty + 'px)';
+    if (backdropRef.current) {
+      const p = Math.min(1, Math.max(0, (d.H - SHEET_PEEK - d.ty) / (d.H - SHEET_PEEK)));
+      backdropRef.current.style.opacity = String(0.48 * p);   // le fond s'assombrit au fil du déroulé
+    }
   };
   const onDragEnd = () => {
-    if (!sheetRef.current) return;
+    const d = dragRef.current;
+    if (!d.H || !sheetRef.current) return;
     sheetRef.current.style.transition = '';
     sheetRef.current.style.transform = '';
-    if (dragRef.current.dy > 90) setSheet(false);   // glissé assez loin -> ferme
-    dragRef.current.dy = 0;
+    if (backdropRef.current) backdropRef.current.style.opacity = '';
+    setTimeout(() => { movedRef.current = 0; }, 120);   // laisse passer le click généré juste après le geste
+    let target = 'open', best = Infinity;
+    for (const [k, p] of Object.entries({ open: 0, peek: d.H - SHEET_PEEK, closed: d.H })) {
+      const dd = Math.abs(d.ty - p);
+      if (dd < best) { best = dd; target = k; }
+    }
+    if (d.v <= -0.35) target = 'open';                                                          // flick vers le haut -> ouvert
+    else if (d.v >= 0.35 && target === 'open') target = d.ty > d.H * 0.55 ? 'closed' : 'peek';  // flick vers le bas -> replié
+    setSheet(target);
   };
 
   // Ouvre la FICHE PRODUIT (pas le magasin) : charge le produit complet + sa boutique
@@ -354,19 +402,24 @@ export function ClientHome() {
         ))}
       </div>
 
-      {/* 🏢🚗 v2026.09.27.4 — PANNEAU Immobilier & Automotive : glisse du bas vers le haut PAR-DESSUS la page
-          (déclenché en bas de l'accueil · fermeture par ✕, fond ou glisser vers le bas) */}
-      {sheet && (
-        <>
-          <div className="sheet-backdrop" onClick={() => setSheet(false)} />
-          <div className="sheet" ref={sheetRef}>
-            <div className="sheet-grab" onTouchStart={onDragStart} onTouchMove={onDragMove} onTouchEnd={onDragEnd}>
-              <span className="sheet-handle" />
-            </div>
-            <div className="row spread mb8" style={{ alignItems: 'center' }}>
-              <div className="h2">🏢🚗 {t('immo_auto')}</div>
-              <button className="btn ghost sm" onClick={() => setSheet(false)}>✕</button>
-            </div>
+      {/* 🏢🚗 v2026.09.28.1 — PANNEAU Immobilier & Automotive : en bas de l'accueil une languette apparaît
+          doucement (peek) ; l'utilisateur la DÉROULE avec son doigt — elle suit exactement le geste, jusqu'à
+          l'en-tête. Fermeture : ✕, fond, ou glisser vers le bas. Liste défilante à l'intérieur. */}
+      <div className={'sheet-backdrop' + (sheet === 'open' ? ' on' : '')} ref={backdropRef} onClick={() => setSheet('closed')} />
+      <div className={'sheet ' + sheet} ref={sheetRef}>
+        <div
+          className="sheet-grab"
+          onTouchStart={onDragStart}
+          onTouchMove={onDragMove}
+          onTouchEnd={onDragEnd}
+          onClick={() => { if (movedRef.current < 8) setSheet(sheet === 'open' ? 'peek' : 'open'); }}
+        >
+          <span className="sheet-handle" />
+        </div>
+        <div className="row spread mb8" style={{ alignItems: 'center' }}>
+          <div className="h2" onClick={() => { if (movedRef.current < 8) setSheet(sheet === 'open' ? 'peek' : 'open'); }}>🏢🚗 {t('immo_auto')}</div>
+          <button className="btn ghost sm" onClick={() => setSheet('closed')}>✕</button>
+        </div>
             <div className="sheet-body">
               {immo === null ? <Spinner /> : immo.length === 0 ? (
                 <div className="card" style={{ padding: 18, textAlign: 'center' }}>
@@ -389,9 +442,7 @@ export function ClientHome() {
                 </div>
               )}
             </div>
-          </div>
-        </>
-      )}
+      </div>
 
       {/* fiche produit rapide (depuis la recherche) */}
       <Modal open={!!gDetail} onClose={() => setGDetail(null)} title={t('product_details')}>
@@ -2435,7 +2486,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.27.4</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.28.1</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
