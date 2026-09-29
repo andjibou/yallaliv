@@ -34,6 +34,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: YallaLiv-Livreur-APK
-          path: YallaLiv-Livreur.apk
+          name: YallaLiv-APK
+          path: YallaLiv.apk
           retention-days: 90
