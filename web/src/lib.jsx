@@ -1091,7 +1091,7 @@ export const UPDATES = {
 // 🔄 v2026.09.29.1 — version minimale de l'application Android (UNE seule source de vérité partagée
 // par tous les espaces). La bannière ci-dessous s'affiche dans l'APK pour TOUS les rôles
 // (client, magasin, livreur, superadmin) — sur le site web elle ne s'affiche pas (mise à jour auto).
-export const APK_REQUIRED = '3.2.0';   // v3.2.0 : edge-to-edge — Status Bar transparente, en-tête vert derrière
+export const APK_REQUIRED = '3.2.1';   // v3.2.1 : edge-to-edge garanti sur toutes les versions d'Android
 
 export function ApkUpdateBanner() {
   const t = useT();

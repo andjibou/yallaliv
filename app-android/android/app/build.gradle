@@ -8,8 +8,8 @@ android {
         applicationId "com.yallaliv.driver"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2   // v3.2.0 : edge-to-edge
-        versionName "3.2.0"
+        versionCode 3   // v3.2.0 : edge-to-edge
+        versionName "3.2.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

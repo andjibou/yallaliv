@@ -1,6 +1,7 @@
 package com.yallaliv.driver;
 
 import android.os.Bundle;
+import androidx.core.view.WindowCompat;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
@@ -11,6 +12,10 @@ public class MainActivity extends BridgeActivity {
         // (Appelé après = plugin invisible pour le site = bug « APK ANCIEN » de la v3.)
         registerPlugin(YallaGps.class);
         super.onCreate(savedInstanceState);
+        // 🟩 v3.2.1 — EDGE-TO-EDGE : le site dessine jusqu'au bord supérieur de l'écran,
+        // le vert de l'en-tête passe DERRIÈRE la Status Bar transparente.
+        // Garanti sur TOUTES les versions d'Android (7.0 → 16), pas seulement Android 15+.
+        try { WindowCompat.setDecorFitsSystemWindows(getWindow(), false); } catch (Throwable ignored) {}
     }
 
     // 🔙 Bouton RETOUR du téléphone : navigue en arrière dans l'app (comme le bouton

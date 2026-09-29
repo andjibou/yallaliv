@@ -29,5 +29,11 @@
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
+        <!-- 🟩 v3.2.1 : Edge-to-Edge — c'est CE thème que MainActivity utilise réellement :
+             barres transparentes ici aussi (sinon la Status Bar restait opaque sur certains Android). -->
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>
