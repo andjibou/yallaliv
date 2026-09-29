@@ -1,6 +1,6 @@
 {
   "appId": "com.yallaliv.driver",
-  "appName": "YallaLiv Livreur",
+  "appName": "YallaLiv",
   "webDir": "www",
   "server": {
     "url": "https://yallaliv.vercel.app"

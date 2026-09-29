@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useNavigate, useParams, useLocation, Outlet, useSearchParams } from 'react-router-dom';
 import TrackMap from '../TrackMap.jsx';
-import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton } from '../lib.jsx';
+import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner } from '../lib.jsx';
 import { BottomNav, CartBar, StatusBadge, PayBadge, Stepper, Empty, Spinner, BackBtn, LangSwitch, Modal, Stars, SuggestBox, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import PickMap, { reverseGeocode, geocodeSearch } from '../PickMap.jsx';
@@ -114,6 +114,7 @@ export function ClientLayout() {
   return (
     <div className="app-client">
       <ClientMiniHeader />
+      <ApkUpdateBanner />   {/* 🔄 v2026.09.29.1 : mise à jour de l'APK visible aussi côté client */}
       <Outlet />
       {/* 📌 v2026.09.27.3 : bannières d'info déplacées SOUS le contenu (elles ne poussent plus
           les sections de l'accueil hors du premier écran) */}
@@ -2493,7 +2494,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.28.3</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.29.1</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>

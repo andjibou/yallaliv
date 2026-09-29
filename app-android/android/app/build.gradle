@@ -8,8 +8,8 @@ android {
         applicationId "com.yallaliv.driver"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "3.1.8"
+        versionCode 2   // v3.2.0 : edge-to-edge
+        versionName "3.2.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -17,10 +17,25 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        yallaliv {
+            // 🔑 v3.2.0 : signature FIXE (commitée dans le dépôt) — indispensable pour que les
+            // mises à jour s'installent PAR-DESSUS l'ancienne version. Avant, chaque build avait
+            // une signature aléatoire (debug.keystore jetable) : la mise à jour auto échouait.
+            storeFile file('yallaliv.keystore')
+            storePassword 'yallaliv2026'
+            keyAlias 'yallaliv'
+            keyPassword 'yallaliv2026'
+        }
+    }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.yallaliv   // signature stable même en debug
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.yallaliv
         }
     }
 }

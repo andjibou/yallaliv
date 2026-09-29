@@ -219,7 +219,7 @@ const DICT = {
     dept_desc_electronics: 'Informatique, gadgets et équipements électroniques.', dept_desc_automotive: 'Ventes et services automobiles.',
     dept_desc_jobs: 'Offres et recherches d’emploi.', dept_desc_services: 'Tous les autres services.',
     coming_soon: 'Bientôt disponible', dept_soon_text: 'Cette section est en préparation — en attendant, explorez le Marché !', browse_market: 'Explorer le Marché',
-    products_row: 'Produits', immo_auto: 'Immobilier & Automotive', immo_auto_empty: 'Aucune annonce immobilière ou auto pour le moment — publiez la première !', cat_property: 'Immobilier',
+    products_row: 'Produits', immo_auto: 'Immobilier & Automotive', immo_auto_empty: 'Aucune annonce immobilière ou auto pour le moment — publiez la première !', cat_property: 'Immobilier', apk_update: 'Mise à jour de l\'application disponible', apk_update_now: 'Mettre à jour maintenant', apk_downloading: 'Téléchargement…',
     type_appliance: 'Électroménager', ads_tab: 'Publicités', ads_add: 'Ajouter une publicité', ads_link: 'Lien (optionnel)',
     ads_empty: 'Aucune publicité', ad_added: 'Publicité ajoutée ✓', ads_active: 'Active', ads_inactive: 'Désactivée', delete_ad: 'Supprimer',
     cat_phones: 'Téléphones', cat_electronics: 'Électronique', cat_home: 'Maison', cat_fashion: 'Mode', cat_kids: 'Enfants', cat_sports: 'Sport', cat_beauty: 'Beauté', cat_auto: 'Auto', cat_other: 'Autres',
@@ -402,7 +402,7 @@ const DICT = {
     dept_desc_electronics: 'كمبيوتر وأجهزة ومعدات إلكترونية.', dept_desc_automotive: 'بيع وخدمات السيارات.',
     dept_desc_jobs: 'عروض وطلبات العمل.', dept_desc_services: 'باقي الخدمات.',
     coming_soon: 'قريبًا', dept_soon_text: 'هذا القسم قيد الإعداد — في الانتظار، تصفح السوق!', browse_market: 'تصفح السوق',
-    products_row: 'منتجات', immo_auto: 'عقارات وسيارات', immo_auto_empty: 'لا إعلانات عقارات أو سيارات حاليًا — انشر أول إعلان!', cat_property: 'عقارات',
+    products_row: 'منتجات', immo_auto: 'عقارات وسيارات', immo_auto_empty: 'لا إعلانات عقارات أو سيارات حاليًا — انشر أول إعلان!', cat_property: 'عقارات', apk_update: 'تحديث التطبيق متاح', apk_update_now: 'حدّث الآن', apk_downloading: 'جارٍ التحميل…',
     type_appliance: 'أجهزة منزلية', ads_tab: 'الإعلانات', ads_add: 'إضافة إعلان', ads_link: 'رابط (اختياري)',
     ads_empty: 'لا إعلانات', ad_added: 'تمت إضافة الإعلان ✓', ads_active: 'نشط', ads_inactive: 'متوقف', delete_ad: 'حذف',
     cat_phones: 'هواتف', cat_electronics: 'إلكترونيات', cat_home: 'منزل', cat_fashion: 'أزياء', cat_kids: 'أطفال', cat_sports: 'رياضة', cat_beauty: 'تجميل', cat_auto: 'سيارات', cat_other: 'أخرى',
@@ -585,7 +585,7 @@ const DICT = {
     dept_desc_electronics: 'Computers, gadgets and electronic equipment.', dept_desc_automotive: 'Car sales and services.',
     dept_desc_jobs: 'Job offers and searches.', dept_desc_services: 'All other services.',
     coming_soon: 'Coming soon', dept_soon_text: 'This section is being prepared — meanwhile, explore the Market!', browse_market: 'Explore the Market',
-    products_row: 'Products', immo_auto: 'Property & Automotive', immo_auto_empty: 'No property or automotive listings yet — post the first one!', cat_property: 'Property',
+    products_row: 'Products', immo_auto: 'Property & Automotive', immo_auto_empty: 'No property or automotive listings yet — post the first one!', cat_property: 'Property', apk_update: 'App update available', apk_update_now: 'Update now', apk_downloading: 'Downloading…',
     type_appliance: 'Home appliances', ads_tab: 'Ads', ads_add: 'Add an ad', ads_link: 'Link (optional)',
     ads_empty: 'No ads', ad_added: 'Ad added ✓', ads_active: 'Active', ads_inactive: 'Inactive', delete_ad: 'Delete',
     cat_phones: 'Phones', cat_electronics: 'Electronics', cat_home: 'Home', cat_fashion: 'Fashion', cat_kids: 'Kids', cat_sports: 'Sports', cat_beauty: 'Beauty', cat_auto: 'Auto', cat_other: 'Other',
@@ -1087,6 +1087,43 @@ export const UPDATES = {
     ] },
   ],
 };
+
+// 🔄 v2026.09.29.1 — version minimale de l'application Android (UNE seule source de vérité partagée
+// par tous les espaces). La bannière ci-dessous s'affiche dans l'APK pour TOUS les rôles
+// (client, magasin, livreur, superadmin) — sur le site web elle ne s'affiche pas (mise à jour auto).
+export const APK_REQUIRED = '3.2.0';   // v3.2.0 : edge-to-edge — Status Bar transparente, en-tête vert derrière
+
+export function ApkUpdateBanner() {
+  const t = useT();
+  const [v, setV] = useState('');            // version de l'APK installé ('' = pas une application)
+  const [installing, setInstalling] = useState(false);
+  const YG = (typeof window !== 'undefined' && window.Capacitor?.isNativePlatform?.()) ? (window.Capacitor.Plugins?.YallaGps || null) : null;
+  useEffect(() => {
+    if (!YG) return;
+    let alive = true;
+    YG.status?.().then((s) => { if (alive) setV(s?.apkVersion || ''); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  if (!YG || !v || v === APK_REQUIRED) return null;
+  const p = (s) => String(s || '').split('.').map(Number);
+  const a = p(v), b = p(APK_REQUIRED);
+  const older = a.length >= 3 && b.length >= 3 && (a[0] < b[0] || (a[0] === b[0] && (a[1] < b[1] || (a[1] === b[1] && a[2] < b[2]))));
+  if (!older) return null;   // déjà à jour (ou plus récente)
+  const updateApp = () => {
+    setInstalling(true);
+    YG.downloadAndInstall?.({ url: window.location.origin + '/apk/latest.apk' })
+      .catch((e) => toast('Mise à jour impossible : ' + (e?.message || e), 'err'))
+      .finally(() => setInstalling(false));
+  };
+  return (
+    <div className="card" style={{ background: '#e0e7ff', border: '1px solid #6366f1', padding: '10px 14px', fontSize: 13 }}>
+      🔄 <b>{t('apk_update')}</b> (v{v} → v{APK_REQUIRED})
+      <button className="btn" style={{ padding: '4px 12px', fontSize: 13, marginLeft: 10 }} disabled={installing} onClick={updateApp}>
+        {installing ? '⏳ ' + t('apk_downloading') : '🔄 ' + t('apk_update_now')}
+      </button>
+    </div>
+  );
+}
 
 export function UpdatesBanner({ role }) {
   const [seen, setSeen] = useState(() => { try { return localStorage.getItem('yl_upd_' + role) || ''; } catch { return ''; } });

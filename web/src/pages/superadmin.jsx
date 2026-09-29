@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast , FieldErr, V, runV, hasErr } from '../lib.jsx';
+import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast , FieldErr, V, runV, hasErr, ApkUpdateBanner } from '../lib.jsx';
 import { Empty, Spinner, LangSwitch, StatusBadge, PayBadge, Modal, ErrorBoundary } from '../ui.jsx';
 import AccountSettings from '../AccountSettings.jsx';
 import { BarsChart, compactMoney } from '../Chart.jsx';
@@ -24,6 +24,7 @@ export default function AdminApp() {
   ];
   return (
     <div className="shell">
+      <ApkUpdateBanner />   {/* 🔄 v2026.09.29.1 : mise à jour de l'APK visible aussi côté superadmin */}
       <div className="topbar">
         <div className="logo">👑</div>
         <div className="grow">

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { api, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, pushSubscribe , UpdatesBanner, NotifNag, BellButton } from '../lib.jsx';
+import { api, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, pushSubscribe , UpdatesBanner, NotifNag, BellButton, APK_REQUIRED } from '../lib.jsx';
 import { Empty, Spinner, LangSwitch, StatusBadge, PayBadge, Modal } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import RouteMap, { DualRouteMap, TourMap, buildTour } from '../RouteMap.jsx';
@@ -265,7 +265,7 @@ export default function DriverApp() {
   const YG = isNative ? (window.Capacitor.Plugins?.YallaGps || null) : null;
   const openAppSettings = () => { try { YG?.openSettings?.().catch(() => {}); } catch {} };
   // 🔄 Version minimale de l'APK — si le téléphone a moins, proposer la mise à jour automatique
-  const APK_REQUIRED = '3.1.8'; // + FCM : notifications reçues même app fermée
+  // 🔄 APK_REQUIRED est importé de lib.jsx (v2026.09.29.1 : source unique pour tous les espaces)
   const [installing, setInstalling] = useState(false);
   const [brandHelp, setBrandHelp] = useState(false); // modal guide par marque
   const [pinAsk, setPinAsk] = useState(null); // 🔑 commande en cours de validation par code
