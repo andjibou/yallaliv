@@ -243,9 +243,6 @@ CREATE TABLE IF NOT EXISTS statuses (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_statuses_created ON statuses (created_at DESC);
-  -- v2026.09.30.2 : vidéos des statuts (les médias vivent dans photos/videos, jamais en texte dans statuses)
-  ALTER TABLE statuses ADD COLUMN kind TEXT;
-  ALTER TABLE statuses ADD COLUMN video TEXT;
 
 CREATE TABLE IF NOT EXISTS listings (
   id SERIAL PRIMARY KEY,
@@ -346,6 +343,12 @@ CREATE TABLE IF NOT EXISTS ads (
 // ---------- Initialisation (appelée au démarrage) ----------
 export async function initDb() {
   await pool.query(SCHEMA);
+  // 🐛 v2026.09.30.4 — URGENT : ces ALTER étaient dans le bloc SCHEMA (multi-instructions exécuté
+  // d'un seul tenant). Au 2e démarrage les colonnes existaient déjà -> tout le SCHEMA échouait ->
+  // le serveur plantait au boot (FUNCTION_INVOCATION_FAILED en production). Elles sont désormais
+  // des migrations individuelles tolérantes, comme toutes les autres.
+  await run('ALTER TABLE statuses ADD COLUMN kind TEXT').catch(() => {});
+  await run('ALTER TABLE statuses ADD COLUMN video TEXT').catch(() => {});
   // Migrations sûres (bases existantes) — ex. store_id pour les livreurs boutique
   await run('ALTER TABLE users ADD COLUMN store_id INTEGER').catch(() => {});
   await run("ALTER TABLE orders ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'").catch(() => {});
