@@ -69,7 +69,7 @@ function ClientNav() {
   return (
     <nav className="cnav">
       {it('/app', '🏠', t('home'), true)}
-      {it('/app/status', '📸', t('status'))}   {/* 📸 v2026.09.30.1 : Statuts façon WhatsApp */}
+      {it('/app/status', '✨', t('status'))}   {/* ✨ v2026.09.30.2 : icône « nouveau » */}
       <div className="cnav-fab-wrap">
         <NavLink to="/app/publish" className="cnav-fab" title={t('publish')} aria-label={t('publish')}>
             <span style={{ fontSize: 32, lineHeight: 1 }}>＋</span>
@@ -214,6 +214,56 @@ export function ClientHome() {
       if (before === null) meta.remove(); else meta.setAttribute('content', before);
     };
   }, []);
+  // 🎬 v2026.09.30.2 — arrivé en BAS de l'accueil : la page se FIGE (gel en position fixe) et la
+  // section Immobilier & Automotive monte PAR-DESSUS, pilotée par le scroll, jusqu'à l'en-tête.
+  const endSpacerRef = useRef(null);
+  const endPanelRef = useRef(null);
+  useEffect(() => {
+    const panel = endPanelRef.current, spacer = endSpacerRef.current;
+    const app = document.querySelector('.app-client');
+    if (!panel || !spacer || !app) return;
+    let raf = 0, frozen = false, ghost = null, saved = null;
+    const measure = () => {
+      const head = document.querySelector('.home-head');
+      const H = Math.max(240, window.innerHeight - (head ? head.offsetHeight : 110));
+      spacer.style.height = H + 'px';
+      panel.style.height = H + 'px';
+    };
+    const freeze = (startY) => {          // 🧊 la page reste affichée TELLE QUELLE pendant la montée
+      frozen = true;
+      saved = { pos: app.style.position, top: app.style.top, left: app.style.left, right: app.style.right, h: document.documentElement.scrollHeight };
+      app.style.position = 'fixed';
+      app.style.top = (-startY) + 'px';
+      app.style.left = '0'; app.style.right = '0';
+      ghost = document.createElement('div');
+      ghost.style.height = saved.h + 'px';   // conserve la hauteur de scroll pendant le gel
+      document.body.appendChild(ghost);
+    };
+    const unfreeze = () => {
+      if (!frozen) return;
+      frozen = false;
+      if (ghost) { ghost.remove(); ghost = null; }
+      app.style.position = saved?.pos || ''; app.style.top = saved?.top || ''; app.style.left = saved?.left || ''; app.style.right = saved?.right || '';
+    };
+    const paint = () => {
+      raf = 0;
+      const contentEnd = frozen ? -parseFloat(app.style.top) + window.innerHeight : spacer.getBoundingClientRect().top + window.scrollY;
+      const startY = contentEnd - window.innerHeight;
+      const H = panel.offsetHeight || 1;
+      const p = Math.min(1, Math.max(0, (window.scrollY - startY) / H));
+      if (p > 0 && !frozen) freeze(startY);
+      if (p <= 0 && frozen) unfreeze();
+      panel.style.transform = 'translateY(' + ((1 - p) * 100) + '%)';
+      panel.classList.toggle('lift', p > 0.02);
+    };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(paint); };
+    const onResize = () => { if (!frozen) measure(); paint(); };
+    measure(); paint();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onResize);
+    const tm = setTimeout(() => { if (!frozen) measure(); paint(); }, 900);   // après chargement des annonces
+    return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onResize); clearTimeout(tm); unfreeze(); };
+  }, [immo]);
   // Ouvre la FICHE PRODUIT (pas le magasin) : charge le produit complet + sa boutique
   const openProduct = async (p) => {
     setGDetail({ loading: true });
@@ -342,31 +392,48 @@ export function ClientHome() {
         ))}
       </div>
 
-      {/* 🏢🚗 v2026.09.30.1 — SECTION FINALE de l'accueil (sous 🧱 Départements) : elle scrolle
-          NATURELLEMENT avec la page (plus de panneau style téléphone) et, quand l'utilisateur
-          atteint la fin de la page, elle occupe tout l'écran jusqu'à l'en-tête. */}
-      <div className="end-section">
-        <div className="h2 mb8 mt12">🏢🚗 {t('immo_auto')}</div>
-        {immo === null ? <Spinner /> : immo.length === 0 ? (
-          <div className="card" style={{ padding: 18, textAlign: 'center' }}>
-            <div className="small" style={{ fontWeight: 800 }}>🏢🚗 {t('immo_auto_empty')}</div>
-            <button className="btn primary mt8" onClick={() => nav('/app/publish?cat=property')}>＋ {t('publish')}</button>
-          </div>
-        ) : (
-          <div className="store-grid">
-            {immo.map((l) => (
-              <div key={l.id} className="card mkt-lcard" onClick={() => nav('/app/market/' + l.id)}>
-                <div className="mkt-lphoto">
-                  {l.photos && l.photos[0] ? <img src={l.photos[0]} alt="" /> : <div className="mkt-nophoto">{CAT_EMOJI[l.category] || '📦'}</div>}
+      {/* 🏢🚗 v2026.09.30.2 — BANDEAU D'APPEL : en bas de l'accueil, un tap déclenche la montée */}
+      <button type="button" className="end-teaser" onClick={() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })}>
+        <span style={{ fontWeight: 900 }}>🏢🚗 {t('immo_auto')}</span>
+        <span className="muted small grow" style={{ textAlign: 'end' }}>{t('immo_hint')}</span>
+        <span style={{ fontSize: 18 }}>▲</span>
+      </button>
+
+      {/* 🎬 espaceur : sa hauteur devient du scroll « supplémentaire » qui pilote la montée du panneau */}
+      <div ref={endSpacerRef} />
+
+      {/* 🏢🚗 PANNEAU qui monte PAR-DESSUS la page figée (couvre l'écran jusqu'à l'en-tête) */}
+      <div className="end-panel" ref={endPanelRef}>
+        <div className="row spread" style={{ alignItems: 'center', padding: '12px 14px 6px' }}>
+          <div className="h2">🏢🚗 {t('immo_auto')}</div>
+          <button className="btn ghost sm" onClick={() => {
+            const sp = endSpacerRef.current;
+            const y = sp ? sp.getBoundingClientRect().top + window.scrollY - window.innerHeight - 5 : 0;
+            window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
+          }}>✕</button>
+        </div>
+        <div className="end-body">
+          {immo === null ? <Spinner /> : immo.length === 0 ? (
+            <div className="card" style={{ padding: 18, textAlign: 'center' }}>
+              <div className="small" style={{ fontWeight: 800 }}>🏢🚗 {t('immo_auto_empty')}</div>
+              <button className="btn primary mt8" onClick={() => nav('/app/publish?cat=property')}>＋ {t('publish')}</button>
+            </div>
+          ) : (
+            <div className="store-grid">
+              {immo.map((l) => (
+                <div key={l.id} className="card mkt-lcard" onClick={() => nav('/app/market/' + l.id)}>
+                  <div className="mkt-lphoto">
+                    {l.photos && l.photos[0] ? <img src={l.photos[0]} alt="" /> : <div className="mkt-nophoto">{CAT_EMOJI[l.category] || '📦'}</div>}
+                  </div>
+                  <div className="mkt-lbody">
+                    <div className="small ellipsis" style={{ fontWeight: 800 }}>{l.name}</div>
+                    <div style={{ fontWeight: 900, color: 'var(--brand-dark)' }}>{fmtMoney(l.price)}</div>
+                  </div>
                 </div>
-                <div className="mkt-lbody">
-                  <div className="small ellipsis" style={{ fontWeight: 800 }}>{l.name}</div>
-                  <div style={{ fontWeight: 900, color: 'var(--brand-dark)' }}>{fmtMoney(l.price)}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* fiche produit rapide (depuis la recherche) */}
@@ -710,6 +777,8 @@ export function CartPage() {
           items: items.map((i) => ({ product_id: i.product_id, qty: i.qty }))
         }
       });
+
+
       if (user && !user.phone) setUser({ ...user, phone: finalPhone });   // mémorisé aussi côté interface (sans recharger)
       setPhone(finalPhone);
       setConfirmOpen(false);
@@ -1192,7 +1261,7 @@ export function ClientProfile() {
       </div>
       <div className="card mt12">
         <div style={{ fontWeight: 700 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.1</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.2</div>
       </div>
 
       {user.role === 'client' && (
@@ -2390,70 +2459,133 @@ export function NotificationsPage() {
 }
 
 // ================= ⚙️ Paramètres =================
-// 📸 v2026.09.30.1 — STATUTS façon WhatsApp : tout utilisateur connecté publie des statuts
-// (photo et/ou texte), affichés en LIGNES horizontales, une par catégorie :
-// 1re ligne Immobilier, 2de Produits supermarché, et ainsi de suite. Expirent après 24 h.
+// ✨ v2026.09.30.2 — STATUTS façon WhatsApp : photos ET VIDÉOS, lignes par catégorie.
+// Lecteur plein écran avec barre de progression : à la fin d'un statut, enchaîne sur le suivant
+// de la MÊME catégorie, puis se ferme. L'anneau vert devient gris une fois le statut ouvert.
 export const STATUS_CATS = [
   { id: 'property', emoji: '🏢' }, { id: 'market', emoji: '🛒' }, { id: 'phones', emoji: '📱' },
   { id: 'electronics', emoji: '🔌' }, { id: 'home', emoji: '🏠' }, { id: 'fashion', emoji: '👕' },
   { id: 'kids', emoji: '🧸' }, { id: 'sports', emoji: '⚽' }, { id: 'beauty', emoji: '💄' },
   { id: 'auto', emoji: '🚗' }, { id: 'other', emoji: '📦' },
 ];
+const ST_PHOTO_MS = 5000;   // ⏱️ durée d'affichage d'une photo
+const ST_SEEN_KEY = 'yl_st_seen';
+
+function loadSeen() { try { return JSON.parse(localStorage.getItem(ST_SEEN_KEY) || '{}'); } catch { return {}; } }
 
 export function StatusPage() {
   const t = useT();
-  const nav = useNavigate();
   const [items, setItems] = useState(null);
   const [pub, setPub] = useState(false);
-  const [form, setForm] = useState({ category: 'property', text: '', photo: null, thumb: null });
+  const [form, setForm] = useState({ category: 'property', text: '', photo: null, thumb: null, video: null, videoMime: '' });
   const [busy, setBusy] = useState(false);
-  const [view, setView] = useState(null);   // statut affiché en grand (lecteur)
+  const [view, setView] = useState(null);      // { list, idx } — file des statuts d'une catégorie
+  const [progress, setProgress] = useState(0); // 0..1 pour le statut en cours
+  const [seen, setSeen] = useState(() => loadSeen());
+  const videoRef = useRef(null);
   const load = () => api('/statuses').then((d) => setItems(d.statuses)).catch(() => setItems([]));
   useEffect(() => { load(); }, []);
+
+  const markSeen = (id) => {
+    setSeen((s) => {
+      if (s[id]) return s;
+      const n = { ...s, [id]: 1 };
+      try { localStorage.setItem(ST_SEEN_KEY, JSON.stringify(n)); } catch {}
+      return n;
+    });
+  };
+
+  // ⏱️ progression : photos = 5 s ; vidéos = leur durée réelle (timeupdate)
+  useEffect(() => {
+    if (!view) return;
+    const cur = view.list[view.idx];
+    if (!cur) return;
+    markSeen(cur.id);
+    setProgress(0);
+    let raf = 0; const t0 = performance.now();
+    const isPhoto = !cur.video;
+    if (isPhoto) {
+      const tick = () => {
+        const p = Math.min(1, (performance.now() - t0) / ST_PHOTO_MS);
+        setProgress(p);
+        if (p >= 1) { next(); return; }
+        raf = requestAnimationFrame(tick);
+      };
+      raf = requestAnimationFrame(tick);
+    }
+    return () => { if (raf) cancelAnimationFrame(raf); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view?.idx, view?.list]);
+
+  const next = () => {
+    setView((v) => (!v ? null : v.idx + 1 < v.list.length ? { ...v, idx: v.idx + 1 } : null));   // fin de file -> ferme
+  };
+  const prev = () => { setView((v) => (v && v.idx > 0 ? { ...v, idx: v.idx - 1 } : v)); };
+
+  const openStory = (s) => {
+    const list = (items || []).filter((x) => x.category === s.category);   // file = même catégorie
+    setView({ list, idx: Math.max(0, list.findIndex((x) => x.id === s.id)) });
+  };
+
   const pick = async (e) => {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
+    if (f.type.startsWith('video/')) {
+      if (f.size > 3 * 1024 * 1024) { toast(t('video_too_big'), 'err'); return; }
+      const rd = new FileReader();
+      rd.onload = () => setForm((s) => ({ ...s, video: rd.result, videoMime: f.type, photo: null, thumb: null }));
+      rd.readAsDataURL(f);
+      return;
+    }
     const r = await processImage(f);
     if (r.error) { toast('Photo invalide', 'err'); return; }
-    setForm((s) => ({ ...s, photo: r.display, thumb: r.thumb }));
+    setForm((s) => ({ ...s, photo: r.display, thumb: r.thumb, video: null, videoMime: '' }));
   };
   const post = async () => {
     setBusy(true);
     try {
-      await api('/statuses', { method: 'POST', body: { category: form.category, text: form.text, photo: form.photo, photo_thumb: form.thumb } });
+      const body = form.video
+        ? { category: form.category, text: form.text, kind: 'video', video_data: form.video, video_mime: form.videoMime }
+        : { category: form.category, text: form.text, kind: 'photo', thumb: form.thumb, display: form.photo };
+      await api('/statuses', { method: 'POST', body });
       toast(t('status_posted'));
-      setPub(false); setForm({ category: 'property', text: '', photo: null, thumb: null });
+      setPub(false); setForm({ category: 'property', text: '', photo: null, thumb: null, video: null, videoMime: '' });
       load();
     } catch (ex) { toast(ex.message, 'err'); }
     finally { setBusy(false); }
   };
   const label = (id) => t(id === 'market' ? 'cat_market' : 'cat_' + id);
+  const cur = view ? view.list[view.idx] : null;
+
   return (
     <div>
       <div className="topbar">
         <BackBtn />
-        <div className="grow"><div className="brand-name">📸 {t('status')}</div></div>
+        <div className="grow"><div className="brand-name">✨ {t('status')}</div></div>
         <button className="btn primary sm" onClick={() => setPub(true)}>＋ {t('status_publish')}</button>
       </div>
 
       {items === null ? <Spinner /> : items.length === 0 ? (
         <div className="card" style={{ padding: 22, textAlign: 'center' }}>
-          <div style={{ fontSize: 34 }}>📸</div>
+          <div style={{ fontSize: 34 }}>✨</div>
           <div className="small" style={{ fontWeight: 800 }}>{t('status_none')}</div>
           <button className="btn primary mt8" onClick={() => setPub(true)}>＋ {t('status_publish')}</button>
         </div>
       ) : (
         STATUS_CATS.map((c) => {
           const list = items.filter((s) => s.category === c.id);
-          if (!list.length) return null;   // ligne masquée si la catégorie n'a pas de statut
+          if (!list.length) return null;
           return (
             <div key={c.id} className="mt12">
               <div className="h2 mb8">{c.emoji} {label(c.id)}</div>
               <div className="st-row">
                 {list.map((s) => (
-                  <button key={s.id} type="button" className="st-bubble" onClick={() => setView(s)}>
-                    <span className="st-ring">
-                      <span className="st-thumb">{s.photo_thumb ? <img src={s.photo_thumb} alt="" /> : (s.text || '💬').slice(0, 2)}</span>
+                  <button key={s.id} type="button" className="st-bubble" onClick={() => openStory(s)}>
+                    <span className={'st-ring' + (seen[s.id] ? ' seen' : '')}>
+                      <span className="st-thumb">
+                        {s.photo_thumb ? <img src={s.photo_thumb} alt="" /> : (s.text || '💬').slice(0, 2)}
+                        {s.video && <span className="st-play">▶</span>}
+                      </span>
                     </span>
                     <span className="st-name">{s.user_name}</span>
                     <span className="st-time">{new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -2465,25 +2597,38 @@ export function StatusPage() {
         })
       )}
 
-      {/* lecteur plein écran (comme WhatsApp) */}
-      {view && (
-        <div className="st-viewer" onClick={() => setView(null)}>
-          <div className="st-viewer-in" onClick={(e) => e.stopPropagation()}>
-            <div className="row spread mb8">
-              <div style={{ fontWeight: 800 }}>📸 {view.user_name}</div>
+      {/* 📖 LECTEUR PLEIN ÉCRAN (story) : barre de progression, enchaînement auto, fermeture à la fin */}
+      {cur && (
+        <div className="st-viewer">
+          <div className="st-segs">
+            {view.list.map((_, i2) => (
+              <span key={i2} className="st-seg"><span style={{ width: (i2 < view.idx ? 100 : i2 === view.idx ? progress * 100 : 0) + '%' }} /></span>
+            ))}
+          </div>
+          <div className="row spread st-head">
+            <div style={{ fontWeight: 800, color: '#fff' }}>✨ {cur.user_name}</div>
+            <div className="row" style={{ gap: 8 }}>
+              <span className="muted xsmall" style={{ color: '#cbd5e1' }}>{new Date(cur.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
               <button className="btn ghost sm" onClick={() => setView(null)}>✕</button>
             </div>
-            {view.photo
-              ? <img src={view.photo} alt="" style={{ width: '100%', borderRadius: 14 }} />
-              : <div className="st-bigtext">{view.text}</div>}
-            {view.photo && view.text ? <div className="mt8" style={{ fontWeight: 600 }}>{view.text}</div> : null}
-            <div className="muted xsmall mt8">{label(view.category)} · {fmtDate(view.created_at)}</div>
           </div>
+          <div className="st-tap left" onClick={prev} />
+          <div className="st-tap right" onClick={next} />
+          <div className="st-media" onClick={next}>
+            {cur.video
+              ? <video ref={videoRef} src={cur.video} autoPlay playsInline
+                  onTimeUpdate={(e) => setProgress(Math.min(1, e.currentTarget.currentTime / (e.currentTarget.duration || 1)))}
+                  onEnded={next}
+                  onError={next}
+                  onLoadedMetadata={(e) => { e.currentTarget.play().catch(() => { e.currentTarget.muted = true; e.currentTarget.play().catch(() => {}); }); }} />
+              : <img src={cur.photo} alt="" />}
+          </div>
+          {cur.text && <div className="st-caption">{cur.text}</div>}
         </div>
       )}
 
-      {/* publication d'un statut */}
-      <Modal open={pub} onClose={() => setPub(false)} title={'📸 ' + t('status_publish')}>
+      {/* publication d'un statut (photo OU vidéo) */}
+      <Modal open={pub} onClose={() => setPub(false)} title={'✨ ' + t('status_publish')}>
         <div className="label mb4">{t('category')}</div>
         <div className="row wrap" style={{ gap: 6, marginBottom: 10 }}>
           {STATUS_CATS.map((c) => (
@@ -2494,11 +2639,12 @@ export function StatusPage() {
         <div className="row mt8" style={{ gap: 8, alignItems: 'center' }}>
           <label className="btn soft" style={{ cursor: 'pointer' }}>
             🖼️ {t('add_photo')}
-            <input type="file" accept="image/*" style={{ display: 'none' }} onChange={pick} />
+            <input type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={pick} />
           </label>
           {form.thumb && <img src={form.thumb} alt="" style={{ width: 44, height: 44, borderRadius: 10, objectFit: 'cover' }} />}
+          {form.video && <span className="small" style={{ fontWeight: 800 }}>🎬 vidéo prête</span>}
         </div>
-        <button className="btn primary block mt12" disabled={busy || (!form.text.trim() && !form.photo)} onClick={post}>{busy ? '…' : '✅ ' + t('status_publish')}</button>
+        <button className="btn primary block mt12" disabled={busy || (!form.text.trim() && !form.photo && !form.video)} onClick={post}>{busy ? '…' : '✅ ' + t('status_publish')}</button>
       </Modal>
     </div>
   );
@@ -2538,7 +2684,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.1</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.2</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>

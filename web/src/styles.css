@@ -579,18 +579,35 @@ button { font-family: inherit; }
 .ad-card img { height: 142px; }     /* 📣 pubs un peu plus hautes */
 .stc-card img { height: 70px; }     /* 🏪 cartes magasins un peu plus hautes */
 .hp-photo, .hp-photo img { height: 86px; }   /* 🛍️ photos produits un peu plus hautes */
-/* 🏢🚗 section finale de l'accueil : scrolle naturellement, couvre l'écran jusqu'à l'en-tête en fin de page */
-.end-section { min-height: calc(100dvh - 112px - max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px))); }
+/* 🎬 v2026.09.30.2 — bas de l'accueil : la page se FIGE, la section monte PAR-DESSUS (pilotée par le scroll) */
+.end-teaser { width: 100%; display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; margin-top: 12px; box-shadow: 0 3px 10px rgba(15,23,42,.06); cursor: pointer; }
+.end-panel { position: fixed; left: 0; right: 0; bottom: 0; z-index: 78; max-width: 640px; margin: 0 auto; background: #fff; border-radius: 22px 22px 0 0; box-shadow: 0 -10px 40px rgba(15,23,42,.25); transform: translateY(100%); display: flex; flex-direction: column; overflow: hidden; }
+.end-panel .end-body { overflow-y: auto; flex: 1; padding: 4px 14px 16px; -webkit-overflow-scrolling: touch; }
 /* 📸 statuts : lignes horizontales par catégorie, bulles rondes façon WhatsApp */
 .st-row { display: flex; gap: 12px; overflow-x: auto; padding: 2px 0 8px; }
 .st-bubble { flex: 0 0 74px; display: flex; flex-direction: column; align-items: center; gap: 3px; background: none; border: none; padding: 0; cursor: pointer; }
 .st-ring { width: 62px; height: 62px; border-radius: 50%; padding: 2.5px; background: linear-gradient(135deg, #0e9f6e, #0ea5e9); display: block; }
+.st-ring.seen { background: #cbd5e1; }   /* 👁️ statut déjà ouvert : l'anneau vert disparaît (gris) */
 .st-thumb { width: 100%; height: 100%; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; overflow: hidden; font-size: 18px; font-weight: 800; color: #475569; }
 .st-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .st-name { font-size: 10.5px; font-weight: 700; max-width: 74px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-time { font-size: 9.5px; color: var(--muted); }
-.st-viewer { position: fixed; inset: 0; background: rgba(2,6,23,.82); z-index: 95; display: flex; align-items: center; justify-content: center; padding: 18px; }
-.st-viewer-in { background: #fff; border-radius: 18px; padding: 14px; width: 100%; max-width: 420px; max-height: 86vh; overflow-y: auto; }
-.st-bigtext { font-size: 19px; font-weight: 800; text-align: center; padding: 26px 8px; }
+/* 📖 lecteur STORY plein écran : barre de progression + zones tap gauche/droite */
+.st-viewer { position: fixed; inset: 0; background: #020617; z-index: 95; display: flex; flex-direction: column; }
+.st-segs { display: flex; gap: 4px; padding: calc(8px + max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px))) 10px 4px; }
+.st-seg { flex: 1; height: 3px; border-radius: 99px; background: rgba(255,255,255,.25); overflow: hidden; }
+.st-seg span { display: block; height: 100%; background: #fff; transition: width .1s linear; }
+.st-head { padding: 4px 10px; }
+.st-media { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; min-height: 0; padding: 6px; }
+.st-media img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 10px; }
+.st-media video { max-width: 100%; max-height: 100%; border-radius: 10px; }
+.st-tap { position: absolute; top: 90px; bottom: 90px; width: 30%; z-index: 2; }
+.st-tap.left { left: 0; }
+.st-tap.right { right: 0; width: 70%; }
+.st-caption { color: #fff; font-weight: 700; text-align: center; padding: 10px 16px calc(14px + max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px))); }
+.st-play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 20px; text-shadow: 0 1px 6px rgba(0,0,0,.6); }
 /* 📏 v2026.09.30.1 : sur l'accueil, la section finale couvre l'écran jusqu'à la nav basse */
 .app-client.home-pad { padding-bottom: 58px; }
+/* 🔧 v2026.09.30.2 : le badge ▶ ne bloque pas le clic sur la bulle + fluidité du panneau */
+.st-play { pointer-events: none; }
+.end-panel { will-change: transform; }

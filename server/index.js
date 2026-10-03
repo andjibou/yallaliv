@@ -156,6 +156,17 @@ app.get(/^\/api\/photos\/(\d+)(?:\/(thumb|full))?$/, h(async (req, res) => {
      .end(req.params[1] === 'thumb' ? row.thumb : row.display);
 }));
 
+// 📹 v2026.09.30.2 — vidéos des statuts (stockées en base comme les photos, servies avec leur type)
+app.get(/^\/api\/videos\/(\d+)$/, h(async (req, res) => {
+  const row = await get('SELECT mime, data FROM videos WHERE id=?', [parseInt(req.params[0], 10)]);
+  if (!row) return res.status(404).json({ error: 'Video introuvable' });
+  res.set('Content-Type', row.mime).set('Cache-Control', 'public, max-age=86400, immutable').end(row.data);
+}));
+async function dropVideo(url) {
+  const id = parseInt(String(url || '').split('/').pop(), 10);
+  if (Number.isInteger(id)) await run('DELETE FROM videos WHERE id=?', [id]).catch(() => {});
+}
+
 // ---------- Push (VAPID) ----------
 let VAPID = null, VAPID_INIT = null;
 // 🛡️ Idempotent + retentable : les requêtes « froides » attendent ici au lieu de crasher
@@ -463,31 +474,55 @@ const listingPhotos = (l) => {   // compat : photos JSON (Phase 1) ou photo uniq
 };
 const cleanPhotos = (arr) => (Array.isArray(arr) ? arr : []).filter((p) => typeof p === 'string' && p.startsWith('data:image/') && p.length < 2200000).slice(0, 5);
 
-// ================= 📸 Statuts façon WhatsApp — v2026.09.30.1 =================
-// Tout utilisateur connecté (client, magasin, livreur, superadmin) peut publier.
-// Les statuts expirent au bout de 24 h (comme WhatsApp). Lecture ouverte à tous.
+// ================= 📸 Statuts façon WhatsApp — v2026.09.30.2 (photos + VIDÉOS) =================
+// Tout utilisateur connecté peut publier. Médias : via les tables photos/videos (jamais en texte
+// dans statuses). PURGE AUTOMATIQUE : au bout de 24 h le statut ET ses médias sont supprimés.
 app.get('/api/statuses', h(async (req, res) => {
-  const rows = await all(`SELECT s.id, s.category, s.text, s.photo, s.photo_thumb, s.created_at, u.id AS user_id, u.name AS user_name
+  const olds = await all(`SELECT id, photo, video FROM statuses WHERE created_at < now() - interval '24 hours'`);
+  for (const o of olds) {
+    if (o.photo && o.photo.startsWith('/api/photos/')) await dropPhoto(o.photo);
+    if (o.video && o.video.startsWith('/api/videos/')) await dropVideo(o.video);
+  }
+  if (olds.length) await run(`DELETE FROM statuses WHERE created_at < now() - interval '24 hours'`).catch(() => {});
+  const rows = await all(`SELECT s.id, s.category, s.text, s.photo, s.photo_thumb, s.kind, s.video, s.created_at, u.id AS user_id, u.name AS user_name
     FROM statuses s JOIN users u ON u.id = s.user_id
     WHERE s.created_at > now() - interval '24 hours' ORDER BY s.created_at DESC LIMIT 300`);
   res.json({ statuses: rows });
 }));
 
 app.post('/api/statuses', auth, h(async (req, res) => {
-  const { category, text, photo, photo_thumb } = req.body || {};
+  const { category, text, kind, thumb, display, video_data, video_mime } = req.body || {};
   if (!STATUS_CATS.includes(category)) return res.status(400).json({ error: 'INVALID_CATEGORY' });
   const txt = String(text || '').trim().slice(0, 600);
-  if (!txt && !photo) return res.status(400).json({ error: 'EMPTY_STATUS' });
-  if (photo && String(photo).length > 3 * 1024 * 1024) return res.status(400).json({ error: 'PHOTO_TOO_BIG' });
-  const r = await run('INSERT INTO statuses (user_id, category, text, photo, photo_thumb) VALUES (?, ?, ?, ?, ?)',
-    [req.user.id, category, txt || null, photo || null, photo_thumb || photo || null]);
+  let photo = null, photoThumb = null, video = null, vkind = null;
+  if (kind === 'video') {
+    vkind = 'video';
+    const mime = String(video_mime || '');
+    if (!/^video\/(mp4|webm|quicktime|3gpp)$/.test(mime)) return res.status(400).json({ error: 'INVALID_VIDEO' });
+    const m = String(video_data || '').match(/^data:[a-z]+\/[a-z0-9]+;base64,(.+)$/);
+    if (!m) return res.status(400).json({ error: 'INVALID_VIDEO' });
+    const buf = Buffer.from(m[1], 'base64');
+    if (!buf.length || buf.length > 3.5 * 1024 * 1024) return res.status(400).json({ error: 'VIDEO_TOO_BIG' });   // limite Vercel ~4.5 Mo/requête
+    const r = await get('INSERT INTO videos(mime,data,created_at) VALUES(?,?,?) RETURNING id', [mime, buf, Date.now()]);
+    video = '/api/videos/' + r.id;
+  } else if (kind === 'photo' || (thumb && display)) {
+    vkind = 'photo';
+    photo = await savePhoto({ thumb, display });
+    if (!photo) return res.status(400).json({ error: 'INVALID_PHOTO' });
+    photoThumb = photo + '/thumb';
+  }
+  if (!txt && !photo && !video) return res.status(400).json({ error: 'EMPTY_STATUS' });
+  const r = await run('INSERT INTO statuses (user_id, category, text, photo, photo_thumb, kind, video) VALUES (?,?,?,?,?,?,?)',
+    [req.user.id, category, txt || null, photo, photoThumb, vkind, video]);
   res.json({ id: r.lastInsertRowid !== undefined ? r.lastInsertRowid : r.id, ok: true });
 }));
 
 app.delete('/api/statuses/:id', auth, h(async (req, res) => {
-  const row = await get('SELECT user_id FROM statuses WHERE id = ?', [req.params.id]);
+  const row = await get('SELECT user_id, photo, video FROM statuses WHERE id = ?', [req.params.id]);
   if (!row) return res.status(404).json({ error: 'NOT_FOUND' });
   if (row.user_id !== req.user.id && req.user.role !== 'superadmin') return res.status(403).json({ error: 'FORBIDDEN' });
+  if (row.photo && row.photo.startsWith('/api/photos/')) await dropPhoto(row.photo);
+  if (row.video && row.video.startsWith('/api/videos/')) await dropVideo(row.video);
   await run('DELETE FROM statuses WHERE id = ?', [req.params.id]);
   res.json({ ok: true });
 }));
