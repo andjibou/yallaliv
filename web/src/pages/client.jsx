@@ -282,18 +282,14 @@ export function ClientHome() {
     measure(); paint();
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onResize);
-    const tryArm = () => {          // 🐛 v2026.09.30.3 : armé seulement quand la page est VRAIMENT chargée
-      if (armed || frozen) return;
-      if (document.readyState !== 'complete') return;
-      const imgs = Array.from(document.images);
-      if (imgs.length && imgs.some((im) => !im.complete)) return;   // une image charge encore -> attendre
-      armed = true;
-      if (!inlineMode) measure();
-      paint();
-    };
-    const armPoll = setInterval(tryArm, 300);
-    const armTm = setTimeout(() => { armed = true; if (!frozen && !inlineMode) measure(); paint(); }, 4000);   // garde-fou 4 s
-    return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onResize); clearInterval(armPoll); clearTimeout(armTm); unfreeze(); };
+    // 🐛 v2026.09.30.4 : l'armement attendait que TOUTES les images soient chargées — or celles
+    // du bas de page sont en chargement différé (elles ne chargent qu'une fois scrolées !) :
+    // si l'utilisateur atteignait le fond avant le garde-fou de 4 s, la section ne sortait pas.
+    // → armement rapide (900 ms) + re-mesure périodique : la mesure FRAÎCHE au moment du gel
+    //   reste la vraie sécurité, peu importe ce qui charge encore.
+    const armTm = setTimeout(() => { armed = true; if (!frozen && !inlineMode) measure(); paint(); }, 900);
+    const measIt = setInterval(() => { if (!frozen && !inlineMode) { measure(); paint(); } }, 800);   // suit le chargement des images
+    return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onResize); clearInterval(measIt); clearTimeout(armTm); unfreeze(); };
   }, [immo]);
   // Ouvre la FICHE PRODUIT (pas le magasin) : charge le produit complet + sa boutique
   const openProduct = async (p) => {
@@ -1292,7 +1288,7 @@ export function ClientProfile() {
       </div>
       <div className="card mt12">
         <div style={{ fontWeight: 700 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.3</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.4</div>
       </div>
 
       {user.role === 'client' && (
@@ -2506,6 +2502,7 @@ function loadSeen() { try { return JSON.parse(localStorage.getItem(ST_SEEN_KEY) 
 
 export function StatusPage() {
   const t = useT();
+  const { user } = useAuth();
   const [items, setItems] = useState(null);
   const [pub, setPub] = useState(false);
   const [form, setForm] = useState({ category: 'property', text: '', photo: null, thumb: null, video: null, videoMime: '' });
@@ -2553,9 +2550,29 @@ export function StatusPage() {
   };
   const prev = () => { setView((v) => (v && v.idx > 0 ? { ...v, idx: v.idx - 1 } : v)); };
 
-  const openStory = (s) => {
-    const list = (items || []).filter((x) => x.category === s.category);   // file = même catégorie
-    setView({ list, idx: Math.max(0, list.findIndex((x) => x.id === s.id)) });
+  // 🧲 v2026.09.30.4 — groupement par UTILISATEUR (comme WhatsApp) : les statuts d'un même
+  // utilisateur dans une même catégorie sont COMPILÉS en une seule bulle (compteur), et le
+  // lecteur enchaîne SES statuts à lui. Suppression possible à tout moment par l'auteur.
+  const groupsOf = (cat) => {
+    const m = new Map();
+    for (const s of (items || []).filter((x) => x.category === cat)) {
+      if (!m.has(s.user_id)) m.set(s.user_id, { user_id: s.user_id, user_name: s.user_name, list: [] });
+      m.get(s.user_id).list.push(s);   // items déjà triés du plus récent au plus ancien
+    }
+    return [...m.values()];
+  };
+  const openGroup = (g) => setView({ list: g.list, idx: 0 });
+  const groupSeen = (g) => g.list.every((s) => seen[s.id]);
+  const del = async () => {   // 🗑️ supprimer SON statut (avant même les 24 h)
+    if (!cur || !window.confirm(t('confirm_delete'))) return;
+    try {
+      await api('/statuses/' + cur.id, { method: 'DELETE' });
+      setItems((l) => (l || []).filter((x) => x.id !== cur.id));
+      const rest = view.list.filter((x) => x.id !== cur.id);
+      if (rest.length) setView({ ...view, list: rest, idx: Math.min(view.idx, rest.length - 1) });
+      else setView(null);
+      toast('🗑️');
+    } catch (ex) { toast(ex.message, 'err'); }
   };
 
   const pick = async (e) => {
@@ -2604,22 +2621,23 @@ export function StatusPage() {
         </div>
       ) : (
         STATUS_CATS.map((c) => {
-          const list = items.filter((s) => s.category === c.id);
-          if (!list.length) return null;
+          const groups = groupsOf(c.id);
+          if (!groups.length) return null;
           return (
             <div key={c.id} className="mt12">
               <div className="h2 mb8">{c.emoji} {label(c.id)}</div>
               <div className="st-row">
-                {list.map((s) => (
-                  <button key={s.id} type="button" className="st-bubble" onClick={() => openStory(s)}>
-                    <span className={'st-ring' + (seen[s.id] ? ' seen' : '')}>
+                {groups.map((g) => (
+                  <button key={g.user_id} type="button" className="st-bubble" onClick={() => openGroup(g)}>
+                    <span className={'st-ring' + (groupSeen(g) ? ' seen' : '')}>
                       <span className="st-thumb">
-                        {s.photo_thumb ? <img src={s.photo_thumb} alt="" /> : (s.text || '💬').slice(0, 2)}
-                        {s.video && <span className="st-play">▶</span>}
+                        {g.list[0].photo_thumb ? <img src={g.list[0].photo_thumb} alt="" /> : (g.list[0].text || '💬').slice(0, 2)}
+                        {g.list[0].video && <span className="st-play">▶</span>}
                       </span>
                     </span>
-                    <span className="st-name">{s.user_name}</span>
-                    <span className="st-time">{new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    {g.list.length > 1 && <span className="st-count">{g.list.length}</span>}
+                    <span className="st-name">{g.user_name}</span>
+                    <span className="st-time">{new Date(g.list[0].created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                   </button>
                 ))}
               </div>
@@ -2640,6 +2658,7 @@ export function StatusPage() {
             <div style={{ fontWeight: 800, color: '#fff' }}>✨ {cur.user_name}</div>
             <div className="row" style={{ gap: 8 }}>
               <span className="muted xsmall" style={{ color: '#cbd5e1' }}>{new Date(cur.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              {cur.user_id === user?.id && <button className="btn ghost sm" onClick={del} title={t('delete')}>🗑️</button>}
               <button className="btn ghost sm" onClick={() => setView(null)}>✕</button>
             </div>
           </div>
@@ -2715,7 +2734,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.3</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.4</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
