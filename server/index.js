@@ -474,6 +474,32 @@ const listingPhotos = (l) => {   // compat : photos JSON (Phase 1) ou photo uniq
 };
 const cleanPhotos = (arr) => (Array.isArray(arr) ? arr : []).filter((p) => typeof p === 'string' && p.startsWith('data:image/') && p.length < 2200000).slice(0, 5);
 
+// ================= 🏬 Cartes « Magasins par catégorie » — v2026.09.30.5 =================
+app.get('/api/store-types', h(async (req, res) => {
+  const rows = await all('SELECT id, type, label_fr, label_ar, label_en, icon FROM store_types ORDER BY id');
+  res.json({ types: rows });
+}));
+app.post('/api/store-types', auth, requireRole('superadmin'), h(async (req, res) => {
+  const { type, label_fr, label_ar, label_en, thumb, display } = req.body || {};
+  const ty = String(type || '').trim().toLowerCase().replace(/[^a-z_]/g, '');
+  if (!ty) return res.status(400).json({ error: 'TYPE_REQUIS' });
+  const icon = await savePhoto({ thumb, display });
+  if (!icon) return res.status(400).json({ error: 'ICONE_INVALIDE' });
+  const old = await get('SELECT icon FROM store_types WHERE type=?', [ty]);
+  if (old?.icon?.startsWith('/api/photos/')) await dropPhoto(old.icon);
+  const r = await get(`INSERT INTO store_types (type, label_fr, label_ar, label_en, icon) VALUES (?,?,?,?,?)
+    ON CONFLICT (type) DO UPDATE SET label_fr=EXCLUDED.label_fr, label_ar=EXCLUDED.label_ar, label_en=EXCLUDED.label_en, icon=EXCLUDED.icon
+    RETURNING id`, [ty, String(label_fr || ty).trim().slice(0, 40), String(label_ar || ty).trim().slice(0, 40), String(label_en || ty).trim().slice(0, 40), icon]);
+  res.json({ id: r.id, ok: true });
+}));
+app.delete('/api/store-types/:id', auth, requireRole('superadmin'), h(async (req, res) => {
+  const row = await get('SELECT id, icon FROM store_types WHERE id=?', [req.params.id]);
+  if (!row) return res.status(404).json({ error: 'NOT_FOUND' });
+  if (row.icon?.startsWith('/api/photos/')) await dropPhoto(row.icon);
+  await run('DELETE FROM store_types WHERE id=?', [row.id]);
+  res.json({ ok: true });
+}));
+
 // ================= 📸 Statuts façon WhatsApp — v2026.09.30.2 (photos + VIDÉOS) =================
 // Tout utilisateur connecté peut publier. Médias : via les tables photos/videos (jamais en texte
 // dans statuses). PURGE AUTOMATIQUE : au bout de 24 h le statut ET ses médias sont supprimés.

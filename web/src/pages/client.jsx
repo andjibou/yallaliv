@@ -178,6 +178,7 @@ function AutoScroll({ children, delay = 3500, className = '' }) {
 
 export function ClientHome() {
   const t = useT();
+  const { lang } = useLang();   // 🏬 v2026.09.30.5 : libellé de la carte selon la langue
   const nav = useNavigate();
   const { user } = useAuth();
   const { add, items, setQty } = useCart();
@@ -185,6 +186,7 @@ export function ClientHome() {
   const [stores, setStores] = useState(null);
   const [products, setProducts] = useState(null);
   const [ads, setAds] = useState(null);
+  const [stypes, setStypes] = useState(null);   // 🏬 v2026.09.30.5 : cartes magasins (superadmin)
   const [immo, setImmo] = useState(null);      // 🏢🚗 immobilier + automotive
   const [gDetail, setGDetail] = useState(null);   // fiche produit ouverte depuis la recherche
   const [gQty, setGQty] = useState(1);
@@ -196,6 +198,7 @@ export function ClientHome() {
     api('/stores').then((d) => setStores(d.stores)).catch(() => setStores([]));
     api('/products').then((d) => setProducts(d.products)).catch(() => setProducts([]));
     api('/ads').then((d) => setAds(d.ads)).catch(() => setAds([]));   // 📣 pubs du superadmin
+    api('/store-types').then((d) => setStypes(d.types)).catch(() => setStypes(null));   // 🏬 cartes gérées par le superadmin
     Promise.all([api('/listings?cat=property'), api('/listings?cat=auto')])
       .then(([p, a2]) => setImmo([...p.listings, ...a2.listings]))
       .catch(() => setImmo([]));
@@ -377,16 +380,28 @@ export function ClientHome() {
         </AutoScroll>
       )}
 
-      {/* 🏪 Magasins par catégorie — cartes horizontales réalistes auto-défilantes */}
+      {/* 🏪 Magasins par catégorie — v2026.09.30.5 : cartes CARRÉES à icônes, gérées depuis
+          l'espace superadmin (ajout / remplacement / suppression). Repli : cartes intégrées. */}
       <div className="h2 mb8 mt12">🏪 {t('stores_by_type')}</div>
-      <AutoScroll className="stc-row" delay={4000}>
-        {STORE_CARDS.map((c) => (
-          <button key={c.type} type="button" className="stc-card" onClick={() => nav('/app/stores/' + c.type)}>
-            <img src={c.img} alt="" loading="lazy" />
-            <span>{t('stc_' + c.key)}</span>
-          </button>
-        ))}
-      </AutoScroll>
+      {stypes && stypes.length > 0 ? (
+        <AutoScroll className="stc-row" delay={4000}>
+          {stypes.map((c) => (
+            <button key={c.type} type="button" className="sty-card" onClick={() => nav('/app/stores/' + c.type)} title={lang === 'ar' ? c.label_ar : lang === 'en' ? c.label_en : c.label_fr}>
+              <span className="sty-icon"><img src={c.icon} alt="" loading="lazy" /></span>
+              <span className="sty-label">{lang === 'ar' ? c.label_ar : lang === 'en' ? c.label_en : c.label_fr}</span>
+            </button>
+          ))}
+        </AutoScroll>
+      ) : (
+        <AutoScroll className="stc-row" delay={4000}>
+          {STORE_CARDS.map((c) => (
+            <button key={c.type} type="button" className="sty-card" onClick={() => nav('/app/stores/' + c.type)}>
+              <span className="sty-icon"><img src={c.img} alt="" loading="lazy" /></span>
+              <span className="sty-label">{t('stc_' + c.key)}</span>
+            </button>
+          ))}
+        </AutoScroll>
+      )}
 
       {/* 🛍️ Ligne de produits (v2026.09.27.2) */}
       <div className="h2 mb8 mt12">🛍️ {t('products_row')}</div>
@@ -1288,7 +1303,7 @@ export function ClientProfile() {
       </div>
       <div className="card mt12">
         <div style={{ fontWeight: 700 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.4</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.5</div>
       </div>
 
       {user.role === 'client' && (
@@ -2734,7 +2749,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.4</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.5</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>

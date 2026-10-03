@@ -20,6 +20,7 @@ export default function AdminApp() {
     { id: 'promos', label: '🎁 ' + t('promos') },
     { id: 'reports', label: '🚨 ' + t('reports_tab') },   // 🚨 v2026.09.26.2 — modération Marché
     { id: 'ads', label: '📣 ' + t('ads_tab') },   // 📣 v2026.09.27.1 — pubs de l'accueil
+    { id: 'stypes', label: '🏬 ' + t('sa_stypes') },   // 🏬 v2026.09.30.5 — cartes magasins de l'accueil
     { id: 'settings', label: '⚙️ ' + t('sa_settings') }
   ];
   return (
@@ -59,13 +60,99 @@ export default function AdminApp() {
         {tab === 'promos' && <Promos />}
         {tab === 'reports' && <Reports />}
         {tab === 'ads' && <Ads />}
+        {tab === 'stypes' && <StoreTypes />}
         {tab === 'settings' && <Settings />}
       </ErrorBoundary>
     </div>
   );
 }
 
+/* ---------- 🏬 Cartes « Magasins par catégorie » (v2026.09.30.5) ---------- */
+const STYPE_OPTIONS = [
+  ['restaurant', '🍽️'], ['market', '🛒'], ['pharmacy', '💊'], ['home', '🛋️'], ['clothes', '👕'], ['electronics', '📱'], ['appliance', '🧺'],
+];
+function StoreTypes() {
+  const t = useT();
+  const [rows, setRows] = useState(null);
+  const [form, setForm] = useState({ type: 'restaurant', fr: '', ar: '', en: '' });
+  const [busy, setBusy] = useState(false);
+  const load = () => api('/store-types').then((d) => setRows(d.types)).catch(() => setRows([]));
+  useEffect(() => { load(); }, []);
+
+  // 📐 l'icône est RECADRÉE en carré centré 512×512 côté navigateur : elle remplit
+  // totalement le cadre carré de l'accueil, quel que soit le fichier d'origine.
+  const pick = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const S = 512; const side = Math.min(img.width, img.height);
+        const cv = document.createElement('canvas'); cv.width = S; cv.height = S;
+        cv.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, S, S);
+        const full = cv.toDataURL('image/jpeg', 0.85);
+        const cv2 = document.createElement('canvas'); cv2.width = 160; cv2.height = 160;
+        cv2.getContext('2d').drawImage(cv, 0, 0, 160, 160);
+        const thumb = cv2.toDataURL('image/jpeg', 0.75);
+        setBusy(true);
+        api('/store-types', { method: 'POST', body: { type: form.type, label_fr: form.fr, label_ar: form.ar, label_en: form.en, thumb, display: full } })
+          .then(() => { toast(t('sa_stype_added'), 'ok'); load(); })
+          .catch((ex) => toast(ex.message, 'err'))
+          .finally(() => setBusy(false));
+      };
+      img.src = rd.result;
+    };
+    rd.readAsDataURL(file);
+  };
+  const del = async (r) => {
+    if (!window.confirm(t('delete') + ' : ' + r.label_fr + ' ?')) return;
+    try { await api('/store-types/' + r.id, { method: 'DELETE' }); load(); } catch (ex) { toast(ex.message, 'err'); }
+  };
+
+  return (
+    <div>
+      <div className="card mb12" style={{ padding: 14 }}>
+        <div className="small mb8" style={{ fontWeight: 800 }}>➕ {t('sa_stype_add')}</div>
+        <div className="muted xsmall mb8" style={{ marginTop: -4 }}>{t('sa_stypes_hint')}</div>
+        <div className="field">
+          <label className="label">{t('store_type')}</label>
+          <select className="select" value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}>
+            {STYPE_OPTIONS.map(([v2, em]) => <option key={v2} value={v2}>{em} {v2}</option>)}
+          </select>
+        </div>
+        <div className="row" style={{ gap: 8 }}>
+          <div className="field grow"><label className="label">🇫🇷 FR</label>
+            <input className="input" value={form.fr} onChange={(e) => setForm((f) => ({ ...f, fr: e.target.value }))} placeholder="Restaurants" /></div>
+          <div className="field grow"><label className="label">🇪🇬 AR</label>
+            <input className="input" dir="rtl" value={form.ar} onChange={(e) => setForm((f) => ({ ...f, ar: e.target.value }))} placeholder="مطاعم" /></div>
+          <div className="field grow"><label className="label">🇬🇧 EN</label>
+            <input className="input" value={form.en} onChange={(e) => setForm((f) => ({ ...f, en: e.target.value }))} placeholder="Restaurants" /></div>
+        </div>
+        <div className="muted xsmall mt8 mb8">📐 {t('sa_stype_icon')}</div>
+        <label className="btn primary block" style={{ cursor: 'pointer' }}>
+          {busy ? '…' : '📷 ' + t('sa_stype_add')}
+          <input type="file" accept="image/*" onChange={pick} style={{ display: 'none' }} />
+        </label>
+      </div>
+      {!rows ? <Spinner /> : rows.length === 0 ? <Empty e="🏬" text={t('sa_stype_empty')} /> : (
+        <div className="row wrap" style={{ gap: 10 }}>
+          {rows.map((r) => (
+            <div key={r.id} className="card" style={{ padding: 8, width: 108 }}>
+              <img src={r.icon.startsWith('/api/photos/') ? r.icon + '/thumb' : r.icon} alt="" style={{ width: 92, height: 92, borderRadius: 12, objectFit: 'cover', display: 'block' }} />
+              <div className="small ellipsis" style={{ fontWeight: 800, marginTop: 6 }}>{r.label_fr}</div>
+              <div className="muted xsmall ellipsis">{r.type}</div>
+              <button className="btn danger block mt8" style={{ fontSize: 12, padding: '4px 0' }} onClick={() => del(r)}>🗑️ {t('delete')}</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------- Dashboard ---------- */
+
 function Dash() {
   const t = useT();
   const { lang } = useLang();

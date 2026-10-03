@@ -233,6 +233,15 @@ CREATE TABLE IF NOT EXISTS videos (
   data BYTEA NOT NULL,
   created_at BIGINT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS store_types (
+  id SERIAL PRIMARY KEY,
+  type TEXT NOT NULL UNIQUE,
+  label_fr TEXT NOT NULL,
+  label_ar TEXT NOT NULL,
+  label_en TEXT NOT NULL,
+  icon TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS statuses (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL,
@@ -349,6 +358,14 @@ export async function initDb() {
   // des migrations individuelles tolérantes, comme toutes les autres.
   await run('ALTER TABLE statuses ADD COLUMN kind TEXT').catch(() => {});
   await run('ALTER TABLE statuses ADD COLUMN video TEXT').catch(() => {});
+  // 🏬 v2026.09.30.5 : cartes « Magasins par catégorie » de l'accueil (icônes gérées par le superadmin)
+  await run(`INSERT INTO store_types (type, label_fr, label_ar, label_en, icon) VALUES
+    ('restaurant','Restaurants','مطاعم','Restaurants','/stores/restaurant.jpg'),
+    ('market','Supermarchés','سوبر ماركت','Supermarkets','/stores/supermarket.jpg'),
+    ('pharmacy','Pharmacies','صيدليات','Pharmacies','/stores/pharmacy.jpg'),
+    ('electronics','Électronique','إلكترونيات','Electronics','/stores/electronics.jpg'),
+    ('appliance','Électroménager','أجهزة منزلية','Home appliances','/stores/appliance.jpg')
+    ON CONFLICT (type) DO NOTHING`).catch(() => {});
   // Migrations sûres (bases existantes) — ex. store_id pour les livreurs boutique
   await run('ALTER TABLE users ADD COLUMN store_id INTEGER').catch(() => {});
   await run("ALTER TABLE orders ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'").catch(() => {});
