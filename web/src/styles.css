@@ -574,3 +574,23 @@ button { font-family: inherit; }
    - APK (Capacitor 8, SystemBars insetsHandling:"css") : injecte --safe-area-inset-* → valeurs réelles
    - PWA / navigateurs à encoche : env(safe-area-inset-*) → valeurs réelles
    - Navigateur classique : les deux valent 0 → aucun changement (barre verte via theme-color) */
+
+/* ============ 📸 v2026.09.30.1 — Statuts façon WhatsApp + tailles + section finale ============ */
+.ad-card img { height: 142px; }     /* 📣 pubs un peu plus hautes */
+.stc-card img { height: 70px; }     /* 🏪 cartes magasins un peu plus hautes */
+.hp-photo, .hp-photo img { height: 86px; }   /* 🛍️ photos produits un peu plus hautes */
+/* 🏢🚗 section finale de l'accueil : scrolle naturellement, couvre l'écran jusqu'à l'en-tête en fin de page */
+.end-section { min-height: calc(100dvh - 112px - max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px))); }
+/* 📸 statuts : lignes horizontales par catégorie, bulles rondes façon WhatsApp */
+.st-row { display: flex; gap: 12px; overflow-x: auto; padding: 2px 0 8px; }
+.st-bubble { flex: 0 0 74px; display: flex; flex-direction: column; align-items: center; gap: 3px; background: none; border: none; padding: 0; cursor: pointer; }
+.st-ring { width: 62px; height: 62px; border-radius: 50%; padding: 2.5px; background: linear-gradient(135deg, #0e9f6e, #0ea5e9); display: block; }
+.st-thumb { width: 100%; height: 100%; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; overflow: hidden; font-size: 18px; font-weight: 800; color: #475569; }
+.st-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.st-name { font-size: 10.5px; font-weight: 700; max-width: 74px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-time { font-size: 9.5px; color: var(--muted); }
+.st-viewer { position: fixed; inset: 0; background: rgba(2,6,23,.82); z-index: 95; display: flex; align-items: center; justify-content: center; padding: 18px; }
+.st-viewer-in { background: #fff; border-radius: 18px; padding: 14px; width: 100%; max-width: 420px; max-height: 86vh; overflow-y: auto; }
+.st-bigtext { font-size: 19px; font-weight: 800; text-align: center; padding: 26px 8px; }
+/* 📏 v2026.09.30.1 : sur l'accueil, la section finale couvre l'écran jusqu'à la nav basse */
+.app-client.home-pad { padding-bottom: 58px; }

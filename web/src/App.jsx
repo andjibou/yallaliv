@@ -5,7 +5,7 @@ import { ErrorBoundary } from './ui.jsx';
 import { SwapModal, Spinner } from './ui.jsx';
 import { Login, Register } from './pages/auth.jsx';
 import Legal from './pages/legal.jsx';
-import { ClientLayout, ClientHome, StorePage, CartPage, ClientOrders, ClientProfile, MarketPage, ListingDetailPage, ChatsPage, ChatPage, SellerProfilePage, SalesPage, ServiceRequestPage, StoresByTypePage, DepartmentPage, PublishPage, NotificationsPage, SettingsPage } from './pages/client.jsx';
+import { ClientLayout, ClientHome, StorePage, CartPage, ClientOrders, ClientProfile, MarketPage, ListingDetailPage, ChatsPage, ChatPage, SellerProfilePage, SalesPage, ServiceRequestPage, StoresByTypePage, DepartmentPage, PublishPage, NotificationsPage, SettingsPage, StatusPage } from './pages/client.jsx';
 import MerchantApp from './pages/merchant.jsx';
 import DriverApp from './pages/driver.jsx';
 import AdminApp from './pages/superadmin.jsx';
@@ -72,7 +72,7 @@ export default function App() {
               <SwapModal />
               {/* Version du front — sert à VÉRIFIER que l'app charge bien la dernière version
                   (badge discret en bas à droite de chaque écran). À incrémenter à chaque déploiement. */}
-              <div style={{ position: 'fixed', bottom: 3, right: 8, fontSize: 10, opacity: 0.45, zIndex: 9999, pointerEvents: 'none' }}>YallaLiv v2026.09.29.1</div>
+              <div style={{ position: 'fixed', bottom: 3, right: 8, fontSize: 10, opacity: 0.45, zIndex: 9999, pointerEvents: 'none' }}>YallaLiv v2026.09.30.1</div>
               <Routes>
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
@@ -82,6 +82,7 @@ export default function App() {
                   <Route path="store/:id" element={<StorePage />} />
                   <Route path="cart" element={<CartPage />} />
                   <Route path="orders" element={<ClientOrders />} />
+                  <Route path="status" element={<StatusPage />} />   {/* 📸 v2026.09.30.1 */}
                   <Route path="market" element={<MarketPage />} />
                   <Route path="market/:id" element={<ListingDetailPage />} />
                   <Route path="chats" element={<ChatsPage />} />
@@ -93,7 +94,7 @@ export default function App() {
                   <Route path="dept/:id" element={<DepartmentPage />} />
                   <Route path="publish" element={<PublishPage />} />
                   <Route path="notifications" element={<NotificationsPage />} />
-                  <Route path="settings" element={<SettingsPage />} />
+                  <Route path="settings" element={<Navigate to="/app/profile" replace />} />   {/* ⚙️ v2026.09.30.1 : réglages fusionnés dans le profil */}
                   <Route path="profile" element={<ClientProfile />} />
                 </Route>
                 <Route path="/merchant" element={<Require roles={['merchant']}><MerchantApp /></Require>} />

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useNavigate, useParams, useLocation, Outlet, useSearchParams } from 'react-router-dom';
 import TrackMap from '../TrackMap.jsx';
-import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner } from '../lib.jsx';
+import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage } from '../lib.jsx';
 import { BottomNav, CartBar, StatusBadge, PayBadge, Stepper, Empty, Spinner, BackBtn, LangSwitch, Modal, Stars, SuggestBox, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import PickMap, { reverseGeocode, geocodeSearch } from '../PickMap.jsx';
@@ -69,7 +69,7 @@ function ClientNav() {
   return (
     <nav className="cnav">
       {it('/app', '🏠', t('home'), true)}
-      {it('/app/orders', '🧾', t('orders_nav'))}
+      {it('/app/status', '📸', t('status'))}   {/* 📸 v2026.09.30.1 : Statuts façon WhatsApp */}
       <div className="cnav-fab-wrap">
         <NavLink to="/app/publish" className="cnav-fab" title={t('publish')} aria-label={t('publish')}>
             <span style={{ fontSize: 32, lineHeight: 1 }}>＋</span>
@@ -79,7 +79,7 @@ function ClientNav() {
       <NavLink to="/app/chats" className={({ isActive }) => 'cnav-item' + (isActive ? ' on' : '')}>
         <span className="ci">💬{unread > 0 && <span className="cnav-badge">{unread > 99 ? '99+' : unread}</span>}</span>{t('messages')}
       </NavLink>
-      {it('/app/settings', '⚙️', t('settings'))}
+      {it('/app/orders', '🧾', t('orders_nav'))}   {/* 🧾 v2026.09.30.1 : Commandes remplace Paramètres */}
     </nav>
   );
 }
@@ -111,15 +111,18 @@ function ClientMiniHeader() {
 }
 
 export function ClientLayout() {
+  const loc = useLocation();
+  const home = loc.pathname === '/app' || loc.pathname === '/app/';
   return (
-    <div className="app-client">
+    <div className={'app-client' + (home ? ' home-pad' : '')}>
       <ClientMiniHeader />
       <ApkUpdateBanner />   {/* 🔄 v2026.09.29.1 : mise à jour de l'APK visible aussi côté client */}
       <Outlet />
-      {/* 📌 v2026.09.27.3 : bannières d'info déplacées SOUS le contenu (elles ne poussent plus
-          les sections de l'accueil hors du premier écran) */}
-      <UpdatesBanner role="client" />
-      <NotifNag role="client" />
+      {/* 📌 v2026.09.30.1 : sur l'ACCUEIL, les bannières d'info sont retirées pour que la section
+          finale couvre tout l'écran jusqu'à l'en-tête en bas de page (elles restent sur toutes
+          les autres pages). */}
+      {!home && <UpdatesBanner role="client" />}
+      {!home && <NotifNag role="client" />}
       <CartBar />
       <ClientNav />
     </div>
@@ -173,8 +176,6 @@ function AutoScroll({ children, delay = 3500, className = '' }) {
   );
 }
 
-const SHEET_PEEK = 88;   // 🎬 v2026.09.28.1 : hauteur visible de la languette du panneau (px) — doit matcher .sheet.peek en CSS
-
 export function ClientHome() {
   const t = useT();
   const nav = useNavigate();
@@ -185,14 +186,6 @@ export function ClientHome() {
   const [products, setProducts] = useState(null);
   const [ads, setAds] = useState(null);
   const [immo, setImmo] = useState(null);      // 🏢🚗 immobilier + automotive
-  // 🎬 v2026.09.28.1 : panneau Immobilier & Automotive — 3 états :
-  //   'closed' (caché) · 'peek' (languette en bas de l'accueil) · 'open' (déroulé par l'utilisateur)
-  // Il ne saute plus : il suit le doigt (déroulé à la vitesse du geste, jusqu'à l'en-tête).
-  const [sheet, setSheet] = useState('closed');
-  const sheetRef = useRef(null);
-  const backdropRef = useRef(null);
-  const dragRef = useRef({ y0: 0, base: 0, H: 0, ty: 0, v: 0, lastY: 0, lastT: 0 });
-  const movedRef = useRef(0);
   const [gDetail, setGDetail] = useState(null);   // fiche produit ouverte depuis la recherche
   const [gQty, setGQty] = useState(1);
   const [gBig, setGBig] = useState(null);
@@ -207,24 +200,6 @@ export function ClientHome() {
       .then(([p, a2]) => setImmo([...p.listings, ...a2.listings]))
       .catch(() => setImmo([]));
   }, []);
-  // 🎬 v2026.09.28.2 — dès que l'utilisateur atteint la FIN de la page d'accueil, le panneau se
-  // DÉROULE automatiquement (transition douce .38s, pas de sortie brusque). S'il le referme, il ne
-  // revient qu'après être remonté puis redescendu. Le doigt garde le contrôle à tout moment.
-  useEffect(() => {
-    const atBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 48;
-    let armed = true;
-    const onScroll = () => {
-      if (atBottom()) {
-        if (armed && immo !== null) { setSheet((s) => (s === 'open' ? s : 'open')); armed = false; }   // 🎬 v2026.09.28.2 : DÉROULEMENT AUTOMATIQUE (animation douce)
-      } else {
-        setSheet((s) => (s === 'open' ? s : 'closed'));
-        if (window.innerHeight + window.scrollY < document.documentElement.scrollHeight - 160) armed = true;
-      }
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    if (immo !== null && atBottom()) setSheet((s) => (s === 'open' ? s : 'open'));   // déjà en bas au chargement des annonces
-    return () => window.removeEventListener('scroll', onScroll);
-  }, [immo]);
   // 🟩 v2026.09.28.2 : le vert couvre UNIQUEMENT la partie supérieure restante de l'en-tête —
   // la barre d'état / barre d'adresse du téléphone (theme-color) + la zone d'étirement du navigateur.
   // Le reste de la page reste clair.
@@ -239,49 +214,6 @@ export function ClientHome() {
       if (before === null) meta.remove(); else meta.setAttribute('content', before);
     };
   }, []);
-  // 👆 v2026.09.28.1 — le panneau suit EXACTEMENT le doigt (montée comme descente) ; au relâchement,
-  // il s'ancre sur l'état le plus proche — la vitesse du geste départage les ex æquo (flick = intention).
-  const onDragStart = (e) => {
-    if (!e.touches || !e.touches[0] || !sheetRef.current) return;
-    const H = sheetRef.current.offsetHeight;
-    const base = sheet === 'open' ? 0 : sheet === 'peek' ? H - SHEET_PEEK : H;
-    dragRef.current = { y0: e.touches[0].clientY, base, H, ty: base, v: 0, lastY: e.touches[0].clientY, lastT: performance.now() };
-    movedRef.current = 0;
-    sheetRef.current.style.transition = 'none';
-  };
-  const onDragMove = (e) => {
-    const d = dragRef.current;
-    if (!d.H || !sheetRef.current || !e.touches || !e.touches[0]) return;
-    const y = e.touches[0].clientY;
-    const now = performance.now();
-    if (now > d.lastT) d.v = (y - d.lastY) / (now - d.lastT);   // px/ms — positif = vers le bas
-    d.lastY = y; d.lastT = now;
-    const dy = y - d.y0;
-    movedRef.current = Math.max(movedRef.current, Math.abs(dy));
-    d.ty = Math.min(d.H, Math.max(0, d.base + dy));
-    sheetRef.current.style.transform = 'translateY(' + d.ty + 'px)';
-    if (backdropRef.current) {
-      const p = Math.min(1, Math.max(0, (d.H - SHEET_PEEK - d.ty) / (d.H - SHEET_PEEK)));
-      backdropRef.current.style.opacity = String(0.48 * p);   // le fond s'assombrit au fil du déroulé
-    }
-  };
-  const onDragEnd = () => {
-    const d = dragRef.current;
-    if (!d.H || !sheetRef.current) return;
-    sheetRef.current.style.transition = '';
-    sheetRef.current.style.transform = '';
-    if (backdropRef.current) backdropRef.current.style.opacity = '';
-    setTimeout(() => { movedRef.current = 0; }, 120);   // laisse passer le click généré juste après le geste
-    let target = 'open', best = Infinity;
-    for (const [k, p] of Object.entries({ open: 0, peek: d.H - SHEET_PEEK, closed: d.H })) {
-      const dd = Math.abs(d.ty - p);
-      if (dd < best) { best = dd; target = k; }
-    }
-    if (d.v <= -0.35) target = 'open';                                                          // flick vers le haut -> ouvert
-    else if (d.v >= 0.35 && target === 'open') target = d.ty > d.H * 0.55 ? 'closed' : 'peek';  // flick vers le bas -> replié
-    setSheet(target);
-  };
-
   // Ouvre la FICHE PRODUIT (pas le magasin) : charge le produit complet + sa boutique
   const openProduct = async (p) => {
     setGDetail({ loading: true });
@@ -410,46 +342,31 @@ export function ClientHome() {
         ))}
       </div>
 
-      {/* 🏢🚗 v2026.09.28.1 — PANNEAU Immobilier & Automotive : en bas de l'accueil une languette apparaît
-          doucement (peek) ; l'utilisateur la DÉROULE avec son doigt — elle suit exactement le geste, jusqu'à
-          l'en-tête. Fermeture : ✕, fond, ou glisser vers le bas. Liste défilante à l'intérieur. */}
-      <div className={'sheet-backdrop' + (sheet === 'open' ? ' on' : '')} ref={backdropRef} onClick={() => setSheet('closed')} />
-      <div className={'sheet ' + sheet} ref={sheetRef}>
-        <div
-          className="sheet-grab"
-          onTouchStart={onDragStart}
-          onTouchMove={onDragMove}
-          onTouchEnd={onDragEnd}
-          onClick={() => { if (movedRef.current < 8) setSheet(sheet === 'open' ? 'peek' : 'open'); }}
-        >
-          <span className="sheet-handle" />
-        </div>
-        <div className="row spread mb8" style={{ alignItems: 'center' }}>
-          <div className="h2" onClick={() => { if (movedRef.current < 8) setSheet(sheet === 'open' ? 'peek' : 'open'); }}>🏢🚗 {t('immo_auto')}</div>
-          <button className="btn ghost sm" onClick={() => setSheet('closed')}>✕</button>
-        </div>
-            <div className="sheet-body">
-              {immo === null ? <Spinner /> : immo.length === 0 ? (
-                <div className="card" style={{ padding: 18, textAlign: 'center' }}>
-                  <div className="small" style={{ fontWeight: 800 }}>🏢🚗 {t('immo_auto_empty')}</div>
-                  <button className="btn primary mt8" onClick={() => nav('/app/publish?cat=property')}>＋ {t('publish')}</button>
+      {/* 🏢🚗 v2026.09.30.1 — SECTION FINALE de l'accueil (sous 🧱 Départements) : elle scrolle
+          NATURELLEMENT avec la page (plus de panneau style téléphone) et, quand l'utilisateur
+          atteint la fin de la page, elle occupe tout l'écran jusqu'à l'en-tête. */}
+      <div className="end-section">
+        <div className="h2 mb8 mt12">🏢🚗 {t('immo_auto')}</div>
+        {immo === null ? <Spinner /> : immo.length === 0 ? (
+          <div className="card" style={{ padding: 18, textAlign: 'center' }}>
+            <div className="small" style={{ fontWeight: 800 }}>🏢🚗 {t('immo_auto_empty')}</div>
+            <button className="btn primary mt8" onClick={() => nav('/app/publish?cat=property')}>＋ {t('publish')}</button>
+          </div>
+        ) : (
+          <div className="store-grid">
+            {immo.map((l) => (
+              <div key={l.id} className="card mkt-lcard" onClick={() => nav('/app/market/' + l.id)}>
+                <div className="mkt-lphoto">
+                  {l.photos && l.photos[0] ? <img src={l.photos[0]} alt="" /> : <div className="mkt-nophoto">{CAT_EMOJI[l.category] || '📦'}</div>}
                 </div>
-              ) : (
-                <div className="store-grid">
-                  {immo.map((l) => (
-                    <div key={l.id} className="card mkt-lcard" onClick={() => nav('/app/market/' + l.id)}>
-                      <div className="mkt-lphoto">
-                        {l.photos && l.photos[0] ? <img src={l.photos[0]} alt="" /> : <div className="mkt-nophoto">{CAT_EMOJI[l.category] || '📦'}</div>}
-                      </div>
-                      <div className="mkt-lbody">
-                        <div className="small ellipsis" style={{ fontWeight: 800 }}>{l.name}</div>
-                        <div style={{ fontWeight: 900, color: 'var(--brand-dark)' }}>{fmtMoney(l.price)}</div>
-                      </div>
-                    </div>
-                  ))}
+                <div className="mkt-lbody">
+                  <div className="small ellipsis" style={{ fontWeight: 800 }}>{l.name}</div>
+                  <div style={{ fontWeight: 900, color: 'var(--brand-dark)' }}>{fmtMoney(l.price)}</div>
                 </div>
-              )}
-            </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* fiche produit rapide (depuis la recherche) */}
@@ -1263,6 +1180,19 @@ export function ClientProfile() {
           <div style={{ fontWeight: 700 }}>🌐 {t('language')}</div>
           <LangSwitch />
         </div>
+      </div>
+
+      {/* ⚙️ v2026.09.30.1 : les réglages (ancienne page Paramètres) sont fusionnés dans le profil */}
+      <div className="card mt12">
+        <div className="row spread">
+          <div style={{ fontWeight: 700 }}>🔔 {t('push_notifs')}</div>
+          <BellButton />
+        </div>
+        <div className="muted small">{t('notif_toggle_hint')}</div>
+      </div>
+      <div className="card mt12">
+        <div style={{ fontWeight: 700 }}>ℹ️ {t('about')}</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.1</div>
       </div>
 
       {user.role === 'client' && (
@@ -2460,6 +2390,120 @@ export function NotificationsPage() {
 }
 
 // ================= ⚙️ Paramètres =================
+// 📸 v2026.09.30.1 — STATUTS façon WhatsApp : tout utilisateur connecté publie des statuts
+// (photo et/ou texte), affichés en LIGNES horizontales, une par catégorie :
+// 1re ligne Immobilier, 2de Produits supermarché, et ainsi de suite. Expirent après 24 h.
+export const STATUS_CATS = [
+  { id: 'property', emoji: '🏢' }, { id: 'market', emoji: '🛒' }, { id: 'phones', emoji: '📱' },
+  { id: 'electronics', emoji: '🔌' }, { id: 'home', emoji: '🏠' }, { id: 'fashion', emoji: '👕' },
+  { id: 'kids', emoji: '🧸' }, { id: 'sports', emoji: '⚽' }, { id: 'beauty', emoji: '💄' },
+  { id: 'auto', emoji: '🚗' }, { id: 'other', emoji: '📦' },
+];
+
+export function StatusPage() {
+  const t = useT();
+  const nav = useNavigate();
+  const [items, setItems] = useState(null);
+  const [pub, setPub] = useState(false);
+  const [form, setForm] = useState({ category: 'property', text: '', photo: null, thumb: null });
+  const [busy, setBusy] = useState(false);
+  const [view, setView] = useState(null);   // statut affiché en grand (lecteur)
+  const load = () => api('/statuses').then((d) => setItems(d.statuses)).catch(() => setItems([]));
+  useEffect(() => { load(); }, []);
+  const pick = async (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    const r = await processImage(f);
+    if (r.error) { toast('Photo invalide', 'err'); return; }
+    setForm((s) => ({ ...s, photo: r.display, thumb: r.thumb }));
+  };
+  const post = async () => {
+    setBusy(true);
+    try {
+      await api('/statuses', { method: 'POST', body: { category: form.category, text: form.text, photo: form.photo, photo_thumb: form.thumb } });
+      toast(t('status_posted'));
+      setPub(false); setForm({ category: 'property', text: '', photo: null, thumb: null });
+      load();
+    } catch (ex) { toast(ex.message, 'err'); }
+    finally { setBusy(false); }
+  };
+  const label = (id) => t(id === 'market' ? 'cat_market' : 'cat_' + id);
+  return (
+    <div>
+      <div className="topbar">
+        <BackBtn />
+        <div className="grow"><div className="brand-name">📸 {t('status')}</div></div>
+        <button className="btn primary sm" onClick={() => setPub(true)}>＋ {t('status_publish')}</button>
+      </div>
+
+      {items === null ? <Spinner /> : items.length === 0 ? (
+        <div className="card" style={{ padding: 22, textAlign: 'center' }}>
+          <div style={{ fontSize: 34 }}>📸</div>
+          <div className="small" style={{ fontWeight: 800 }}>{t('status_none')}</div>
+          <button className="btn primary mt8" onClick={() => setPub(true)}>＋ {t('status_publish')}</button>
+        </div>
+      ) : (
+        STATUS_CATS.map((c) => {
+          const list = items.filter((s) => s.category === c.id);
+          if (!list.length) return null;   // ligne masquée si la catégorie n'a pas de statut
+          return (
+            <div key={c.id} className="mt12">
+              <div className="h2 mb8">{c.emoji} {label(c.id)}</div>
+              <div className="st-row">
+                {list.map((s) => (
+                  <button key={s.id} type="button" className="st-bubble" onClick={() => setView(s)}>
+                    <span className="st-ring">
+                      <span className="st-thumb">{s.photo_thumb ? <img src={s.photo_thumb} alt="" /> : (s.text || '💬').slice(0, 2)}</span>
+                    </span>
+                    <span className="st-name">{s.user_name}</span>
+                    <span className="st-time">{new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })
+      )}
+
+      {/* lecteur plein écran (comme WhatsApp) */}
+      {view && (
+        <div className="st-viewer" onClick={() => setView(null)}>
+          <div className="st-viewer-in" onClick={(e) => e.stopPropagation()}>
+            <div className="row spread mb8">
+              <div style={{ fontWeight: 800 }}>📸 {view.user_name}</div>
+              <button className="btn ghost sm" onClick={() => setView(null)}>✕</button>
+            </div>
+            {view.photo
+              ? <img src={view.photo} alt="" style={{ width: '100%', borderRadius: 14 }} />
+              : <div className="st-bigtext">{view.text}</div>}
+            {view.photo && view.text ? <div className="mt8" style={{ fontWeight: 600 }}>{view.text}</div> : null}
+            <div className="muted xsmall mt8">{label(view.category)} · {fmtDate(view.created_at)}</div>
+          </div>
+        </div>
+      )}
+
+      {/* publication d'un statut */}
+      <Modal open={pub} onClose={() => setPub(false)} title={'📸 ' + t('status_publish')}>
+        <div className="label mb4">{t('category')}</div>
+        <div className="row wrap" style={{ gap: 6, marginBottom: 10 }}>
+          {STATUS_CATS.map((c) => (
+            <button key={c.id} type="button" className={'chip' + (form.category === c.id ? ' on' : '')} onClick={() => setForm((s) => ({ ...s, category: c.id }))}>{c.emoji} {label(c.id)}</button>
+          ))}
+        </div>
+        <textarea className="input" rows={3} placeholder={t('status_ph')} value={form.text} onChange={(e) => setForm((s) => ({ ...s, text: e.target.value }))} />
+        <div className="row mt8" style={{ gap: 8, alignItems: 'center' }}>
+          <label className="btn soft" style={{ cursor: 'pointer' }}>
+            🖼️ {t('add_photo')}
+            <input type="file" accept="image/*" style={{ display: 'none' }} onChange={pick} />
+          </label>
+          {form.thumb && <img src={form.thumb} alt="" style={{ width: 44, height: 44, borderRadius: 10, objectFit: 'cover' }} />}
+        </div>
+        <button className="btn primary block mt12" disabled={busy || (!form.text.trim() && !form.photo)} onClick={post}>{busy ? '…' : '✅ ' + t('status_publish')}</button>
+      </Modal>
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const t = useT();
   const nav = useNavigate();
@@ -2494,7 +2538,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.29.1</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.1</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>

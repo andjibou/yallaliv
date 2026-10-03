@@ -227,6 +227,17 @@ CREATE INDEX IF NOT EXISTS idx_products_store ON products(store_id);
 CREATE INDEX IF NOT EXISTS idx_messages_order ON messages(order_id);
 
 -- 🛍️ v2026.09.24.1 — MARCHÉ (style OLX) : articles publiés par tout utilisateur connecté
+CREATE TABLE IF NOT EXISTS statuses (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  category TEXT NOT NULL,
+  text TEXT,
+  photo TEXT,
+  photo_thumb TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_statuses_created ON statuses (created_at DESC);
+
 CREATE TABLE IF NOT EXISTS listings (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL,

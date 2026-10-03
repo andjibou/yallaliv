@@ -448,6 +448,7 @@ app.post('/api/notifications/read', auth, h(async (req, res) => {
 // 🛍️ v2026.09.24.1 — MARCHÉ (style OLX) : tout utilisateur connecté publie des articles,
 // visibles par tous. Contact direct acheteur → vendeur (appel/WhatsApp), comme OLX.
 const LISTING_CATS = ['phones', 'electronics', 'home', 'fashion', 'kids', 'sports', 'beauty', 'auto', 'property', 'other'];   // 🏢 v2026.09.27.2 : immobilier
+const STATUS_CATS = ['property', 'market', 'phones', 'electronics', 'home', 'fashion', 'kids', 'sports', 'beauty', 'auto', 'other'];   // 📸 v2026.09.30.1 : statuts façon WhatsApp (1re ligne immobilier, 2de supermarché…)
 // ================= 🛍️ Marché — v2026.09.26.1 Phase 1 : sous-cats, tri, favoris, vues, renouvellement =================
 const LISTING_CONDS = ['new', 'like_new', 'used'];
 const LISTING_SORTS = {
@@ -461,6 +462,35 @@ const listingPhotos = (l) => {   // compat : photos JSON (Phase 1) ou photo uniq
   return l.photo ? [l.photo] : [];
 };
 const cleanPhotos = (arr) => (Array.isArray(arr) ? arr : []).filter((p) => typeof p === 'string' && p.startsWith('data:image/') && p.length < 2200000).slice(0, 5);
+
+// ================= 📸 Statuts façon WhatsApp — v2026.09.30.1 =================
+// Tout utilisateur connecté (client, magasin, livreur, superadmin) peut publier.
+// Les statuts expirent au bout de 24 h (comme WhatsApp). Lecture ouverte à tous.
+app.get('/api/statuses', h(async (req, res) => {
+  const rows = await all(`SELECT s.id, s.category, s.text, s.photo, s.photo_thumb, s.created_at, u.id AS user_id, u.name AS user_name
+    FROM statuses s JOIN users u ON u.id = s.user_id
+    WHERE s.created_at > now() - interval '24 hours' ORDER BY s.created_at DESC LIMIT 300`);
+  res.json({ statuses: rows });
+}));
+
+app.post('/api/statuses', auth, h(async (req, res) => {
+  const { category, text, photo, photo_thumb } = req.body || {};
+  if (!STATUS_CATS.includes(category)) return res.status(400).json({ error: 'INVALID_CATEGORY' });
+  const txt = String(text || '').trim().slice(0, 600);
+  if (!txt && !photo) return res.status(400).json({ error: 'EMPTY_STATUS' });
+  if (photo && String(photo).length > 3 * 1024 * 1024) return res.status(400).json({ error: 'PHOTO_TOO_BIG' });
+  const r = await run('INSERT INTO statuses (user_id, category, text, photo, photo_thumb) VALUES (?, ?, ?, ?, ?)',
+    [req.user.id, category, txt || null, photo || null, photo_thumb || photo || null]);
+  res.json({ id: r.lastInsertRowid !== undefined ? r.lastInsertRowid : r.id, ok: true });
+}));
+
+app.delete('/api/statuses/:id', auth, h(async (req, res) => {
+  const row = await get('SELECT user_id FROM statuses WHERE id = ?', [req.params.id]);
+  if (!row) return res.status(404).json({ error: 'NOT_FOUND' });
+  if (row.user_id !== req.user.id && req.user.role !== 'superadmin') return res.status(403).json({ error: 'FORBIDDEN' });
+  await run('DELETE FROM statuses WHERE id = ?', [req.params.id]);
+  res.json({ ok: true });
+}));
 
 app.get('/api/listings', h(async (req, res) => {
   const { q, cat, sub, sort, page } = req.query;
