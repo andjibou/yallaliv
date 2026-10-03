@@ -611,3 +611,5 @@ button { font-family: inherit; }
 /* 🔧 v2026.09.30.2 : le badge ▶ ne bloque pas le clic sur la bulle + fluidité du panneau */
 .st-play { pointer-events: none; }
 .end-panel { will-change: transform; }
+/* 🐛 v2026.09.30.3 — page plus courte qu'un écran : la section redevient normale (rien de caché) */
+.end-panel.inline { position: static; transform: none !important; height: auto !important; box-shadow: none; border-radius: 14px; margin-top: 12px; }

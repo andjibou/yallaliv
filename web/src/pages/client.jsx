@@ -214,20 +214,30 @@ export function ClientHome() {
       if (before === null) meta.remove(); else meta.setAttribute('content', before);
     };
   }, []);
-  // 🎬 v2026.09.30.2 — arrivé en BAS de l'accueil : la page se FIGE (gel en position fixe) et la
+  // 🎬 v2026.09.30.3 — arrivé en BAS de l'accueil : la page se FIGE (gel en position fixe) et la
   // section Immobilier & Automotive monte PAR-DESSUS, pilotée par le scroll, jusqu'à l'en-tête.
+  // 🐛 correctifs .3 : (1) le gel ne peut plus se déclencher pendant le chargement (armement 700 ms),
+  // (2) mesure FRAÎCHE juste avant le gel, (3) page plus courte que l'écran → la section redevient
+  // une section normale (aucun gel, rien de caché).
   const endSpacerRef = useRef(null);
   const endPanelRef = useRef(null);
   useEffect(() => {
     const panel = endPanelRef.current, spacer = endSpacerRef.current;
     const app = document.querySelector('.app-client');
     if (!panel || !spacer || !app) return;
-    let raf = 0, frozen = false, ghost = null, saved = null;
+    let raf = 0, frozen = false, ghost = null, saved = null, armed = false, inlineMode = false;
+    const headH = () => { const h = document.querySelector('.home-head'); return h ? h.offsetHeight : 110; };
     const measure = () => {
-      const head = document.querySelector('.home-head');
-      const H = Math.max(240, window.innerHeight - (head ? head.offsetHeight : 110));
+      const H = Math.max(240, window.innerHeight - headH());
       spacer.style.height = H + 'px';
       panel.style.height = H + 'px';
+    };
+    const setInline = (on) => {   // page trop courte : section normale, pas d'overlay ni de gel
+      if (on === inlineMode) return;
+      inlineMode = on;
+      panel.classList.toggle('inline', on);
+      if (on) { spacer.style.height = '0px'; panel.style.height = 'auto'; panel.style.transform = ''; panel.classList.remove('lift'); }
+      else measure();
     };
     const freeze = (startY) => {          // 🧊 la page reste affichée TELLE QUELLE pendant la montée
       frozen = true;
@@ -247,22 +257,43 @@ export function ClientHome() {
     };
     const paint = () => {
       raf = 0;
+      if (inlineMode) {
+        // la page a pu grandir (images/annonces chargées) → reprendre le mode overlay
+        if (armed && !frozen && spacer.getBoundingClientRect().top + window.scrollY - window.innerHeight > 10) setInline(false);
+        else return;
+      }
       const contentEnd = frozen ? -parseFloat(app.style.top) + window.innerHeight : spacer.getBoundingClientRect().top + window.scrollY;
-      const startY = contentEnd - window.innerHeight;
+      let startY = contentEnd - window.innerHeight;
       const H = panel.offsetHeight || 1;
-      const p = Math.min(1, Math.max(0, (window.scrollY - startY) / H));
-      if (p > 0 && !frozen) freeze(startY);
+      let p = Math.min(1, Math.max(0, (window.scrollY - startY) / H));
+      if (p > 0.04 && !frozen) {   // 🐛 seuil anti-rafales : gel seulement après ~25px passés la fin naturelle
+        if (!armed) { panel.style.transform = 'translateY(100%)'; panel.classList.remove('lift'); return; }   // chargement en cours : JAMAIS de gel
+        startY = spacer.getBoundingClientRect().top + window.scrollY - window.innerHeight;   // 🐛 mesure FRAÎCHE avant gel
+        if (startY <= 10) { setInline(true); unfreeze(); return; }   // page ≤ 1 écran → section normale
+        freeze(startY);
+        p = Math.min(1, Math.max(0, (window.scrollY - startY) / H));
+      }
       if (p <= 0 && frozen) unfreeze();
       panel.style.transform = 'translateY(' + ((1 - p) * 100) + '%)';
       panel.classList.toggle('lift', p > 0.02);
     };
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(paint); };
-    const onResize = () => { if (!frozen) measure(); paint(); };
+    const onResize = () => { if (!frozen && !inlineMode) measure(); paint(); };
     measure(); paint();
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onResize);
-    const tm = setTimeout(() => { if (!frozen) measure(); paint(); }, 900);   // après chargement des annonces
-    return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onResize); clearTimeout(tm); unfreeze(); };
+    const tryArm = () => {          // 🐛 v2026.09.30.3 : armé seulement quand la page est VRAIMENT chargée
+      if (armed || frozen) return;
+      if (document.readyState !== 'complete') return;
+      const imgs = Array.from(document.images);
+      if (imgs.length && imgs.some((im) => !im.complete)) return;   // une image charge encore -> attendre
+      armed = true;
+      if (!inlineMode) measure();
+      paint();
+    };
+    const armPoll = setInterval(tryArm, 300);
+    const armTm = setTimeout(() => { armed = true; if (!frozen && !inlineMode) measure(); paint(); }, 4000);   // garde-fou 4 s
+    return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onResize); clearInterval(armPoll); clearTimeout(armTm); unfreeze(); };
   }, [immo]);
   // Ouvre la FICHE PRODUIT (pas le magasin) : charge le produit complet + sa boutique
   const openProduct = async (p) => {
@@ -1261,7 +1292,7 @@ export function ClientProfile() {
       </div>
       <div className="card mt12">
         <div style={{ fontWeight: 700 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.2</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.3</div>
       </div>
 
       {user.role === 'client' && (
@@ -2684,7 +2715,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.2</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.3</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
