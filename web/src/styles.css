@@ -641,6 +641,9 @@ button { font-family: inherit; }
 
 
 /* ============ 🛍️ v2026.10.04.3 — GRILLE PRODUITS 2 colonnes (cartes compactes) ============ */
+.pg-scroll { display: flex; gap: 10px; overflow-x: auto; padding: 2px 2px 8px; -webkit-overflow-scrolling: touch; scrollbar-width: none; }   /* ↔️ v2026.10.04.5 : ligne horizontale déroulante (accueil, catégories, magasins) */
+.pg-scroll::-webkit-scrollbar { display: none; }
+.pg-scroll .pg-card { flex: 0 0 124px; }   /* largeur fixe : la carte garde sa forme, la ligne défile */
 .pg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .pg-card { position: relative; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 7px; box-shadow: 0 2px 8px rgba(15,23,42,.05); min-width: 0; }   /* min-width:0 = les noms longs se raccourcissent (…) au lieu d'élargir la colonne */
 .pg-imgwrap { position: relative; border-radius: 9px; overflow: hidden; background: #f1f5f9; cursor: pointer; }

@@ -207,12 +207,14 @@ function PgCard({ p, rating, fav, onFav, onOpen, onAdd }) {
   );
 }
 
+/* ↔️ v2026.10.04.5 : les produits s'affichent en LIGNES HORORALES DÉROULANTES
+   (accueil = une seule ligne · catégories/magasins = une ligne par section) */
 function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd }) {
   if (!prods || !prods.length) return null;
   return (
     <>
       {title && <div className="h2 mb8 mt12">{title}</div>}
-      <div className="pg-grid">
+      <div className="pg-scroll">
         {prods.map((p) => (
           <PgCard key={p.id} p={p} rating={rating} fav={!!favs[p.id]} onFav={onFav} onOpen={onOpen} onAdd={onAdd} />
         ))}
@@ -1472,7 +1474,7 @@ export function ClientProfile() {
       </div>
       <div className="card mt12">
         <div style={{ fontWeight: 700 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.4</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.5</div>
       </div>
 
       {user.role === 'client' && (
@@ -3051,7 +3053,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.4</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.5</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
