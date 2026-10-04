@@ -21,7 +21,7 @@ export function NoPhoto({ w = 46, h = 46, radius = 12, full = false, style }) {
  * Barre de recherche avec suggestions automatiques pendant la frappe.
  * getSugs() -> [{key, icon, label, sub?, ...data}] ; onPick(suggestion).
  */
-export function SuggestBox({ value, onChange, placeholder, getSugs, onPick, clearTitle }) {
+export function SuggestBox({ value, onChange, placeholder, getSugs, onPick, onEnter, clearTitle }) {
   const [open, setOpen] = useState(false);
   const box = useRef(null);
   const sugs = (value || '').trim() ? (getSugs() || []).slice(0, 6) : [];
@@ -36,7 +36,7 @@ export function SuggestBox({ value, onChange, placeholder, getSugs, onPick, clea
         <input className="input grow" placeholder={placeholder} value={value}
           onChange={(e) => { onChange(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
-          onKeyDown={(e) => { if (e.key === 'Escape' || e.key === 'Enter') setOpen(false); }} />
+          onKeyDown={(e) => { if (e.key === 'Escape' || e.key === 'Enter') { setOpen(false); if (e.key === 'Enter') onEnter?.(value); } }} />
         {(value || '').trim() !== '' && (
           <button type="button" className="btn ghost sm" onClick={() => { onChange(''); setOpen(false); }} title={clearTitle || '✕'}>✕</button>
         )}

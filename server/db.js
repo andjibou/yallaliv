@@ -242,6 +242,16 @@ CREATE TABLE IF NOT EXISTS store_types (
   icon TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- 🔎 v2026.10.04.2 — recherches produits (pages catégorie/magasin) : alimente les
+-- lignes « Suggestions pour vous » (recommandations personnalisées par utilisateur)
+CREATE TABLE IF NOT EXISTS product_searches (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  q TEXT NOT NULL,
+  type TEXT,
+  store_id INTEGER,
+  created_at BIGINT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS statuses (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL,

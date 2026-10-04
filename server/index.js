@@ -1013,6 +1013,69 @@ app.get('/api/products', h(async (req, res) => {
   res.json({ products: await all(sql, args) });
 }));
 
+// 🔎 v2026.10.04.2 — journal des recherches produits (page catégorie / page magasin) :
+// alimente les lignes « Suggestions pour vous » (recommandations personnalisées).
+app.post('/api/product-searches', auth, h(async (req, res) => {
+  const q = String(req.body?.q || '').trim().toLowerCase().slice(0, 80);
+  if (q.length < 2) return res.json({ ok: true });
+  const type = req.body?.type ? String(req.body.type).slice(0, 40) : null;
+  const storeId = parseInt(req.body?.store_id) || null;
+  const dup = await get(`SELECT id FROM product_searches WHERE user_id=? AND q=? AND COALESCE(type,'')=COALESCE(?,'') AND COALESCE(store_id,0)=COALESCE(?,0) AND created_at>? LIMIT 1`,
+    [req.user.id, q, type, storeId, Date.now() - 5 * 60000]).catch(() => null);
+  if (!dup) await run('INSERT INTO product_searches (user_id, q, type, store_id, created_at) VALUES (?,?,?,?,?)', [req.user.id, q, type, storeId, Date.now()]);
+  res.json({ ok: true });
+}));
+
+// 🏆 v2026.10.04.2 — produits les plus commandés d'un type de magasin (?type=) ou d'un
+// magasin (?store_id=). Les commandes annulées / refusées / rejetées ne comptent pas.
+app.get('/api/products/top', h(async (req, res) => {
+  const { type, store_id } = req.query;
+  const args = [];
+  let where = " WHERE p.available=1 AND s.status='approved' AND s.is_open=1";
+  if (store_id) { where += ' AND p.store_id=?'; args.push(parseInt(store_id) || 0); }
+  else if (type && type !== 'all') { where += ' AND s.type=?'; args.push(String(type)); }
+  const rows = await all(`SELECT p.id, p.name, p.emoji, p.photo, p.price, p.category, p.store_id,
+      s.name AS store_name, s.emoji AS store_emoji, s.color AS store_color, s.photo AS store_photo, s.type AS store_type, s.rating,
+      (SELECT COALESCE(SUM(oi.qty),0) FROM order_items oi JOIN orders o ON o.id=oi.order_id
+        WHERE oi.product_id=p.id AND o.status NOT IN ('cancelled','rejected','refused')) AS ordered
+    FROM products p JOIN stores s ON s.id=p.store_id${where}
+    ORDER BY ordered DESC, s.rating DESC, p.id DESC LIMIT 40`, args);
+  res.json({ products: rows.filter((r) => r.ordered > 0) });
+}));
+
+// ✨ v2026.10.04.2 — suggestions personnalisées : produits du contexte (?type= ou ?store_id=)
+// correspondant aux recherches du client (fréquence + récence). matched=false → le client
+// n'a encore rien recherché → il affiche simplement les produits disponibles.
+app.get('/api/products/suggested', auth, h(async (req, res) => {
+  const { type, store_id } = req.query;
+  const args = [];
+  let where = " WHERE p.available=1 AND s.status='approved' AND s.is_open=1";
+  if (store_id) { where += ' AND p.store_id=?'; args.push(parseInt(store_id) || 0); }
+  else if (type && type !== 'all') { where += ' AND s.type=?'; args.push(String(type)); }
+  const prods = await all(`SELECT p.id, p.name, p.emoji, p.photo, p.price, p.category, p.store_id,
+      s.name AS store_name, s.emoji AS store_emoji, s.color AS store_color, s.photo AS store_photo, s.type AS store_type, s.rating
+    FROM products p JOIN stores s ON s.id=p.store_id${where}
+    ORDER BY s.rating DESC, p.id DESC LIMIT 300`, args);
+  const searches = await all('SELECT q FROM product_searches WHERE user_id=? ORDER BY created_at DESC LIMIT 60', [req.user.id]).catch(() => []);
+  if (!searches.length) return res.json({ products: [], matched: false });
+  const score = new Map();   // fréquence + bonus de récence (les 20 dernières recherches)
+  searches.forEach((r, i) => {
+    const q = String(r.q || '').trim();
+    if (q.length < 2) return;
+    score.set(q, (score.get(q) || 0) + 1 + Math.max(0, 1 - i / 20));
+  });
+  const terms = [...score.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+  const matched = [];
+  for (const p of prods) {
+    const hay = ((p.name || '') + ' ' + (p.category || '')).toLowerCase();
+    let best = 0;
+    for (const [term, sc] of terms) if (hay.includes(term)) best = Math.max(best, sc);
+    if (best > 0) matched.push([best, p]);
+  }
+  matched.sort((a, b) => b[0] - a[0] || b[1].rating - a[1].rating);
+  res.json({ products: matched.slice(0, 24).map((m) => m[1]), matched: matched.length > 0 });
+}));
+
 app.get('/api/stores/:id', h(async (req, res) => {
   const store = await get('SELECT * FROM stores WHERE id=? AND status=?', [req.params.id, 'approved']);
   if (!store) return res.status(404).json({ error: 'Magasin introuvable' });

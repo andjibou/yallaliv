@@ -153,6 +153,42 @@ function LangSelect() {
 }
 
 // 🔄 carrousel auto-défilant (pubs, cartes magasins) : avance tout seul, pause quand l'utilisateur touche
+/* ═══ 🏪 v2026.10.04.2 — outils des pages « catégorie de magasins » & magasin ═══ */
+const PER_STORE_ROW = 4;   // 📏 lignes proportionnelles : max 4 produits par magasin et par ligne
+const capPerStore = (list, k = PER_STORE_ROW) => {
+  const l = list || [];
+  if (new Set(l.map((p) => p.store_id)).size <= 1) return l;   // 1 seul magasin : rien à équilibrer → tout afficher
+  const c = new Map();
+  return l.filter((p) => { const n = c.get(p.store_id) || 0; if (n >= k) return false; c.set(p.store_id, n + 1); return true; });
+};
+// 🏥 pharmacie : les produits se divisent uniquement en 💊 Médicaments / 💄 Cosmétiques (mots-clés)
+const COSM_KEYS = ['cosm', 'beaut', 'makeup', 'maquill', 'parfum', 'shampoo', 'shampoing', 'creme', 'crème', 'soin', 'huile', 'savon', 'lotion', 'hygiene', 'hygiène'];
+const pharmaGroup = (p) => (COSM_KEYS.some((k) => ((p.category || '') + ' ' + (p.name || '')).toLowerCase().includes(k)) ? 'cosm' : 'meds');
+// ligne horizontale de produits (photo + nom + prix) — clic = fiche produit
+function ProdRow({ title, prods, onOpen }) {
+  if (!prods || !prods.length) return null;
+  return (
+    <>
+      <div className="h2 mb8 mt12">{title}</div>
+      <div className="hp-row">
+        {prods.map((p) => (
+          <button key={p.id} type="button" className="hp-card" onClick={() => onOpen(p)} title={p.name}>
+            <span className="hp-photo">
+              {p.photo
+                ? <img src={photoUrl(p.photo, 'thumb')} alt="" loading="lazy" />
+                : <NoPhoto full h={96} radius={0} />}
+            </span>
+            <span className="hp-meta">
+              <span className="ellipsis hp-name">{p.name}</span>
+              <span className="hp-price">{fmtMoney(p.price)}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
 function AutoScroll({ children, delay = 3500, className = '' }) {
   const ref = useRef(null);
   const pause = useRef(0);
@@ -610,9 +646,15 @@ export function StorePage() {
   const [bigPhoto, setBigPhoto] = useState(null);
   const [showMap, setShowMap] = useState(false);
   const [pq, setPq] = useState('');   // recherche de produits DANS la boutique
+  const [topP, setTopP] = useState(null);        // 🏆 v2026.10.04.2 : plus commandés du magasin
+  const [suggP, setSuggP] = useState(undefined); // ✨ v2026.10.04.2 : suggestions (undefined = chargement, null = aucune recherche)
+  const [selCat, setSelCat] = useState(null);    // 🗂️ v2026.10.04.2 : catégorie de produits sélectionnée
 
   useEffect(() => {
+    setTopP(null); setSuggP(undefined); setSelCat(null);
     api('/stores/' + id).then(setData).catch((e) => setErr(e.message));
+    api('/products/top?store_id=' + id).then((d) => setTopP(d.products)).catch(() => setTopP(null));          // 🏆 2.3
+    api('/products/suggested?store_id=' + id).then((d) => setSuggP(d.matched ? d.products : null)).catch(() => setSuggP(null));   // ✨ 2.4
   }, [id]);
 
   const openDetail = (p) => { setDetail(p); setBigPhoto(p.photo || null); setDQty(qtyOf(p.id) || 1); };
@@ -636,9 +678,38 @@ export function StorePage() {
   const fProds = s ? products.filter((p) =>
     (p.name || '').toLowerCase().includes(s) || (p.description || '').toLowerCase().includes(s) || (p.category || '').toLowerCase().includes(s)
   ) : products;
-  const byCat = groupByCat(fProds);
+  // 🗂️ v2026.10.04.2 — catégories de produits (pharmacie : uniquement 💊 Médicaments / 💄 Cosmétiques)
+  const isPharmaStore = store.type === 'pharmacy';
+  const cats = [];
+  {
+    const src = products || [];
+    if (isPharmaStore) {
+      for (const g of ['meds', 'cosm']) {
+        const list = src.filter((p) => pharmaGroup(p) === g);
+        if (list.length) cats.push({ label: t(g === 'meds' ? 'pharma_meds' : 'pharma_cosm'), emoji: g === 'meds' ? '💊' : '💄', photo: list.find((x) => x.photo)?.photo || null, prods: list });
+      }
+    } else {
+      const m = new Map();
+      for (const p of src) { const k = p.category || '•'; if (!m.has(k)) m.set(k, []); m.get(k).push(p); }
+      for (const [c, list] of [...m.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))) cats.push({ label: c, emoji: list[0]?.emoji || '📦', photo: list.find((x) => x.photo)?.photo || null, prods: list });
+    }
+  }
+  // sections : par catégorie (pharmacie : 2 groupes) — recherche + filtre par catégorie appliqués
+  let byCat = {};
+  if (isPharmaStore) {
+    for (const g of ['meds', 'cosm']) {
+      const list = fProds.filter((p) => pharmaGroup(p) === g);
+      if (list.length) byCat[g === 'meds' ? t('pharma_meds') : t('pharma_cosm')] = list;
+    }
+  } else byCat = groupByCat(fProds);
+  if (selCat && byCat[selCat]) byCat = { [selCat]: byCat[selCat] };   // 2.6 : clic sur une carte → SES produits
+  // 🏆 2.3 plus commandés (à défaut : produits dispo) · ✨ 2.4 suggestions (à défaut : produits dispo)
+  const topRow = topP === null || !products ? null : (topP.length ? topP : products);
+  const suggRow = suggP === undefined || !products ? null : (suggP || products);
   const qtyOf = (pid) => items.find((i) => i.product_id === pid && i.store_id === store.id)?.qty || 0;
   const closed = !store.is_open;
+  // 🔎 v2026.10.04.2 — journaliser la recherche dans CE magasin (suggestions personnalisées)
+  const logSearch = (term) => { const qq = String(term || pq || '').trim(); if (qq.length >= 2) api('/product-searches', { method: 'POST', body: { q: qq, store_id: store.id } }).catch(() => {}); };
 
   return (
     <>
@@ -690,10 +761,37 @@ export function StorePage() {
           placeholder={'🔍 ' + t('search_product_ph')}
           clearTitle={t('clear_search')}
           getSugs={() => fProds.map((p) => ({ key: p.id, icon: p.photo ? <img src={photoUrl(p.photo, 'thumb')} alt="" style={{ width: 24, height: 24, borderRadius: 7, objectFit: 'cover' }} /> : <NoPhoto w={24} h={24} radius={7} />, label: p.name, sub: fmtMoney(p.price), p }))}
-          onPick={(s) => openDetail(s.p)}                                // ouvre directement la fiche produit
+          onEnter={logSearch}
+          onPick={(x) => { logSearch(x.label); openDetail(x.p); }}       // ouvre directement la fiche produit
         />
       </div>
       {pq.trim() !== '' && Object.keys(byCat).length === 0 && <div className="mt12"><Empty e="🔎" text={t('no_data')} /></div>}
+
+      {/* 🗂️ 2.2 v2026.10.04.2 — produits par catégorie (cartes rondes ; pharmacie : 💊/💄) */}
+      {!s && cats.length > 0 && (<>
+        <div className="h2 mb8 mt12">🗂️ {t('products_by_cat')}</div>
+        <AutoScroll className="stc-row" delay={4500}>
+          {cats.map((c) => (
+            <button key={c.label} type="button" className={'sty-card' + (selCat === c.label ? ' on' : '')} onClick={() => setSelCat((v) => (v === c.label ? null : c.label))} title={c.label}>
+              <span className="sty-icon">{c.photo
+                ? <img src={photoUrl(c.photo, 'thumb')} alt="" loading="lazy" />
+                : <span className="sty-emoji">{c.emoji}</span>}</span>
+              <span className="sty-label">{c.label}</span>
+            </button>
+          ))}
+        </AutoScroll>
+      </>)}
+      {selCat && (
+        <div className="row mt8" style={{ alignItems: 'center', gap: 8 }}>
+          <span className="chip on">{selCat}</span>
+          <button className="btn ghost sm" onClick={() => setSelCat(null)} title={t('clear_search')}>✕</button>
+        </div>
+      )}
+      {/* 🏆 2.3 plus commandés · ✨ 2.4 suggestions — masquées pendant la recherche ou le filtre */}
+      {!s && !selCat && (<>
+        <ProdRow title={'🏆 ' + t('top_ordered')} prods={topRow} onOpen={openDetail} />
+        <ProdRow title={'✨ ' + t('suggested_for_you')} prods={suggRow} onOpen={openDetail} />
+      </>)}
 
       {Object.entries(byCat).map(([cat, prods]) => (
         <div key={cat}>
@@ -1376,7 +1474,7 @@ export function ClientProfile() {
       </div>
       <div className="card mt12">
         <div style={{ fontWeight: 700 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.1</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.2</div>
       </div>
 
       {user.role === 'client' && (
@@ -2469,45 +2567,165 @@ export function ServiceRequestPage() {
 }
 
 // ================= 🏪 Magasins par catégorie (v2026.09.27.1) =================
+/* ═══ 🏪 v2026.10.04.2 — PAGE « MAGASINS PAR CATÉGORIE » ═══
+   1️⃣ recherche (magasin OU produit de la catégorie) · 2️⃣ ligne des magasins (cartes rondes)
+   3️⃣ les plus commandés · 4️⃣ suggestions personnalisées (recherches du client)
+   5️⃣ lignes par nom de produit (pharmacie : 💊 Médicaments / 💄 Cosmétiques)
+   📏 lignes proportionnelles au nombre de magasins : max 4 produits par magasin */
 export function StoresByTypePage() {
   const t = useT(); const nav = useNavigate();
+  const { add, items, setQty } = useCart();
   const { type } = useParams();
   const [stores, setStores] = useState(null);
+  const [prods, setProds] = useState(null);      // tous les produits disponibles de la catégorie
+  const [top, setTop] = useState(null);          // 🏆 les plus commandés (API)
+  const [sugg, setSugg] = useState(undefined);   // ✨ suggestions (undefined = chargement, null = aucune recherche)
+  const [q, setQ] = useState('');
+  const [gDetail, setGDetail] = useState(null); const [gQty, setGQty] = useState(1); const [gBig, setGBig] = useState(null);
+  const isPharma = type === 'pharmacy';
+
   useEffect(() => {
-    setStores(null);
+    setStores(null); setProds(null); setTop(null); setSugg(undefined);
     api('/stores?type=' + type).then((d) => setStores(d.stores)).catch(() => setStores([]));
+    api('/products?type=' + type).then((d) => setProds(d.products)).catch(() => setProds([]));
+    api('/products/top?type=' + type).then((d) => setTop(d.products)).catch(() => setTop([]));
+    api('/products/suggested?type=' + type).then((d) => setSugg(d.matched ? d.products : null)).catch(() => setSugg(null));
   }, [type]);
   const key = { restaurant: 'restaurant', market: 'supermarket', pharmacy: 'pharmacy', electronics: 'electronics', appliance: 'appliance' }[type] || type;
+
+  // 🔎 journaliser la recherche (Entrée ou choix d'une suggestion) → suggestions personnalisées
+  const logSearch = (term) => { const s = String(term || q || '').trim(); if (s.length >= 2) api('/product-searches', { method: 'POST', body: { q: s, type } }).catch(() => {}); };
+
+  // fiche produit rapide (même modale que l'accueil)
+  const openProduct = async (p) => {
+    setGDetail({ loading: true });
+    try {
+      const d = await api('/stores/' + p.store_id);
+      const prod = d.products.find((x) => x.id === p.id);
+      if (!prod) throw new Error(trErr('Produit introuvable'));
+      setGDetail({ store: d.store, product: prod });
+      setGBig(prod.photo || null);
+      setGQty(1);
+    } catch (e) { setGDetail(null); toast(e.message, 'err'); }
+  };
+  const addFromGlobal = () => {
+    const { store, product } = gDetail;
+    const inCart = items.find((i) => i.product_id === product.id && i.store_id === store.id)?.qty || 0;
+    if (!items.length || items[0].store_id === store.id) {
+      if (inCart === 0) add(product, store);
+      setQty(product.id, gQty);
+    } else {
+      add(product, store); // autre magasin : propose de vider le panier
+    }
+    toast(t('added'));
+    setGDetail(null);
+  };
+
+  const s = q.trim().toLowerCase();
+  const sugStores = !s ? [] : (stores || []).filter((x) => (x.name || '').toLowerCase().includes(s)).slice(0, 6)
+    .map((st) => ({ key: 's' + st.id, icon: st.photo ? <img src={photoUrl(st.photo, 'thumb')} alt="" style={{ width: 24, height: 24, borderRadius: 7, objectFit: 'cover' }} /> : (st.emoji || '🏪'), label: st.name, sub: t('type_' + st.type), st }));
+  const sugProds = !s ? [] : (prods || []).filter((x) => (x.name || '').toLowerCase().includes(s)).slice(0, 6)
+    .map((p) => ({ key: 'p' + p.id, icon: p.photo ? <img src={photoUrl(p.photo, 'thumb')} alt="" style={{ width: 24, height: 24, borderRadius: 7, objectFit: 'cover' }} /> : '📦', label: p.name, sub: fmtMoney(p.price), p }));
+
+  // 📏 proportionnel au nombre de magasins : max 4 produits par magasin dans chaque ligne
+  const topRow = top === null || prods === null ? null : capPerStore(top.length ? top : prods);
+  const suggRow = sugg === undefined || prods === null ? null : capPerStore(sugg || prods);
+
+  // 5️⃣ lignes par nom de produit (pharmacie : 💊 Médicaments / 💄 Cosmétiques)
+  const rows = [];
+  if (prods) {
+    if (isPharma) {
+      for (const g of ['meds', 'cosm']) {
+        const list = prods.filter((p) => pharmaGroup(p) === g);
+        if (list.length) rows.push({ title: (g === 'meds' ? '💊 ' : '💄 ') + t(g === 'meds' ? 'pharma_meds' : 'pharma_cosm'), prods: list });
+      }
+    } else {
+      const m = new Map();
+      for (const p of prods) { const k = (p.name || '').trim(); if (!k) continue; if (!m.has(k)) m.set(k, []); m.get(k).push(p); }
+      for (const [name, list] of [...m.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))) rows.push({ title: name, prods: list });
+    }
+  }
+
   return (
     <div>
       <div className="topbar">
         <BackBtn />
         <div className="grow"><div className="brand-name">🏪 {t('stc_' + key)}</div></div>
       </div>
-      {!stores ? <Spinner /> : stores.length === 0 ? <Empty e="🏪" text={t('no_stores_type')} /> : (
-        <div className="store-grid">
-          {stores.map((s) => {
-            const meta = TYPE_META[s.type] || TYPE_META.market;
-            return (
-              <div key={s.id} className="card store-card" onClick={() => nav('/app/store/' + s.id)}>
-                {s.photo
-                  ? <img src={photoUrl(s.photo, 'thumb')} alt="" style={{ width: 52, height: 52, borderRadius: 14, objectFit: 'cover', flexShrink: 0, border: '1px solid var(--line)' }} />
-                  : <div className="store-emoji" style={{ background: s.color || meta.c }}>{s.emoji || meta.e}</div>}
-                <div className="grow">
-                  <div className="h2 ellipsis">{s.name}</div>
-                  <div className="muted small ellipsis">{t('type_' + s.type)} · ⭐ {Number(s.rating).toFixed(1)}</div>
-                  <div className="row mt4 wrap" style={{ gap: 6 }}>
-                    <span className="badge">{meta.e} {s.product_count} {t('products_count')}</span>
-                    <span className="badge">{t('delivery_fee')} {fmtMoney(s.delivery_fee)}</span>
-                    <span className="badge">⏱ {etaRange(s.type, null).join('-')} min</span>
-                  </div>
-                </div>
-                {!s.is_open && <span className="badge st-cancelled">{t('closed')}</span>}
+
+      {/* 1️⃣ recherche : un magasin OU un produit de cette catégorie */}
+      <div className="row">
+        <SuggestBox value={q} onChange={setQ} onEnter={logSearch} placeholder={'🔍 ' + t('search_store_prod_ph')} clearTitle={t('clear_search')}
+          getSugs={() => [...sugStores, ...sugProds]}
+          onPick={(x) => { logSearch(x.label); if (x.st) nav('/app/store/' + x.st.id); else openProduct(x.p); }} />
+      </div>
+
+      {stores === null ? <Spinner /> : stores.length === 0 ? <Empty e="🏪" text={t('no_stores_type')} /> : (<>
+        {/* 2️⃣ tous les magasins de la catégorie — cartes RONDES comme l'accueil */}
+        <div className="h2 mb8 mt12">🏪 {t('stores_row')}</div>
+        <AutoScroll className="stc-row" delay={4000}>
+          {stores.map((st) => (
+            <button key={st.id} type="button" className="sty-card" onClick={() => nav('/app/store/' + st.id)} title={st.name}>
+              <span className="sty-icon">{st.photo
+                ? <img src={photoUrl(st.photo, 'thumb')} alt="" loading="lazy" />
+                : <span className="sty-emoji">{st.emoji || '🏪'}</span>}</span>
+              <span className="sty-label">{st.name}</span>
+            </button>
+          ))}
+        </AutoScroll>
+
+        {/* 3️⃣ les plus commandés de la catégorie (à défaut : produits disponibles) */}
+        <ProdRow title={'🏆 ' + t('top_ordered')} prods={topRow} onOpen={openProduct} />
+        {/* 4️⃣ suggestions personnalisées (à défaut : produits disponibles) */}
+        <ProdRow title={'✨ ' + t('suggested_for_you')} prods={suggRow} onOpen={openProduct} />
+        {/* 5️⃣ une ligne par nom de produit (pharmacie : 💊 / 💄) */}
+        {prods !== null && prods.length === 0 && <div className="mt12"><Empty e="🛍️" text={t('no_products_type')} /></div>}
+        {rows.map((r) => <ProdRow key={r.title} title={r.title} prods={capPerStore(r.prods)} onOpen={openProduct} />)}
+      </>)}
+
+      {/* fiche produit rapide (depuis la recherche) */}
+      <Modal open={!!gDetail} onClose={() => setGDetail(null)} title={t('product_details')}>
+        {gDetail?.loading ? <Spinner /> : gDetail?.store && gDetail?.product ? (
+          <div style={{ textAlign: 'center' }}>
+            <div className="row wrap" style={{ justifyContent: 'center', gap: 8, alignItems: 'center' }}>
+              <div className="store-emoji" style={{ width: 26, height: 26, fontSize: 14, background: gDetail.store.color || '#0e9f6e' }}>{gDetail.store.emoji || '🏪'}</div>
+              <b className="small ellipsis">{gDetail.store.name}</b>
+              <button className="btn ghost sm" onClick={() => { const sid = gDetail.store.id; setGDetail(null); nav('/app/store/' + sid); }}>🏪 {t('open_store')}</button>
+            </div>
+            {gBig
+              ? <img src={photoUrl(gBig)} alt="" className="detail-photo" />
+              : <NoPhoto w={140} h={140} radius={18} style={{ margin: '0 auto' }} />}
+            {(gDetail.product.photos || []).length > 0 && (
+              <div className="row wrap mt8" style={{ gap: 8, justifyContent: 'center' }}>
+                {gDetail.product.photo && (
+                  <img src={photoUrl(gDetail.product.photo, 'thumb')} alt="" className={'p-photo gal-thumb' + (gBig === gDetail.product.photo ? ' on' : '')} onClick={() => setGBig(gDetail.product.photo)} />
+                )}
+                {gDetail.product.photos.map((ph) => (
+                  <img key={ph.id} src={photoUrl(ph.photo, 'thumb')} alt="" className={'p-photo gal-thumb' + (gBig === ph.photo ? ' on' : '')} onClick={() => setGBig(ph.photo)} />
+                ))}
               </div>
-            );
-          })}
-        </div>
-      )}
+            )}
+            <div className="h2 mt8">{gDetail.product.name}</div>
+            <div className="mt4"><span className="badge">{gDetail.product.category}</span></div>
+            {gDetail.product.description && <p className="muted mt12" style={{ fontSize: 14.5 }}>{gDetail.product.description}</p>}
+            <div className="big mt8" style={{ color: 'var(--brand-dark)' }}>{fmtMoney(gDetail.product.price)}</div>
+            {!gDetail.store.is_open ? (
+              <div className="banner warn mt12">{t('store_closed')}</div>
+            ) : (
+              <div className="row mt16" style={{ gap: 12 }}>
+                <div className="qty-stepper" style={{ padding: '9px 11px' }}>
+                  <button className="qs-btn" onClick={() => setGQty((n) => Math.max(1, n - 1))}>−</button>
+                  <span style={{ minWidth: 22, textAlign: 'center' }}>{gQty}</span>
+                  <button className="qs-btn" onClick={() => setGQty((n) => Math.min(99, n + 1))}>+</button>
+                </div>
+                <button className="btn primary grow" onClick={addFromGlobal}>
+                  🛒 {t('add_to_cart')} · {fmtMoney(gDetail.product.price * gQty)}
+                </button>
+              </div>
+            )}
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }
@@ -2827,7 +3045,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.1</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.2</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>

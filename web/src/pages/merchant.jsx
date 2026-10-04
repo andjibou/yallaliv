@@ -610,7 +610,14 @@ function Products() {
             <div className="row">
               <div className="field grow">
                 <label className="label">{t('category')}</label>
-                <input className="input" value={edit.category} onChange={(e) => setEdit({ ...edit, category: e.target.value })} placeholder="Plats, Boissons..." />
+                {data?.store?.type === 'pharmacy' ? (   // 🏥 v2026.10.04.2 : pharmacie → uniquement 💊/💄
+                  <select className="input" value={edit.category || 'Médicaments'} onChange={(e) => setEdit({ ...edit, category: e.target.value })}>
+                    <option value="Médicaments">💊 {t('pharma_meds')}</option>
+                    <option value="Cosmétiques">💄 {t('pharma_cosm')}</option>
+                  </select>
+                ) : (
+                  <input className="input" value={edit.category} onChange={(e) => setEdit({ ...edit, category: e.target.value })} placeholder="Plats, Boissons..." />
+                )}
               </div>
               <div className="field" style={{ width: 130 }}>
                 <label className="label">{t('price')}</label>
