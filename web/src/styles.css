@@ -623,3 +623,13 @@ button { font-family: inherit; }
 .sty-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .sty-label { font-size: 11px; font-weight: 800; text-align: center; padding: 5px 4px 6px; color: #334155; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .end-teaser { margin-top: 26px; }   /* 📏 petit espace entre la fin des Départements et le déroulement Immobilier */
+
+/* ============ 🔄 v2026.10.04.1 — cartes RONDES + espace 40px + tirer-pour-actualiser (APK) ============ */
+.sty-card { background: none; border: none; border-radius: 0; box-shadow: none; overflow: visible; align-items: center; }
+.sty-icon { border-radius: 50%; box-shadow: 0 3px 10px rgba(15,23,42,.09); overflow: hidden; }
+.sty-label { max-width: 90px; padding: 6px 2px 0; }
+.end-teaser { margin-top: 40px; }   /* 📏 espace accru entre la fin des Départements et le déroulement Immobilier & Automotive */
+/* indicateur tirer-pour-actualiser (APK uniquement, piloté en JS dans client.jsx) */
+.ptr-ind { position: fixed; top: calc(max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px)) + 52px); left: 50%; transform: translate(-50%, -48px); opacity: 0; z-index: 82; width: 36px; height: 36px; border-radius: 50%; background: #fff; border: 1px solid var(--line); box-shadow: 0 5px 16px rgba(15,23,42,.18); display: flex; align-items: center; justify-content: center; pointer-events: none; transition: opacity .16s; }
+.ptr-ind.spin svg { animation: ptr-spin .7s linear infinite; }
+@keyframes ptr-spin { to { transform: rotate(360deg); } }

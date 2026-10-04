@@ -176,6 +176,73 @@ function AutoScroll({ children, delay = 3500, className = '' }) {
   );
 }
 
+/* ═══ 🔄 v2026.10.04.1 — TIRER POUR ACTUALISER (application Android) ═══
+   Dans l'APK : depuis le HAUT de l'accueil (ou de la page Statuts), tirer la page vers le bas
+   → actualisation SANS fermer/rouvrir l'application.
+   Sur le site web : aucun changement (le navigateur a déjà sa propre actualisation).
+   - accueil : rechargement complet (comme rouvrir l'app → tout est frais)
+   - statuts : simple re-chargement de la liste (on reste sur la page) */
+function usePullToRefresh(onRefresh) {
+  const indRef = useRef(null);
+  const cb = useRef(onRefresh);
+  cb.current = onRefresh;
+  useEffect(() => {
+    const cap = typeof window !== 'undefined' && window.Capacitor;
+    if (!cap || !cap.isNativePlatform || !cap.isNativePlatform()) return;   // 📱 APK uniquement
+    const ind = indRef.current;
+    const TH = 70;                                  // tirage nécessaire pour déclencher
+    let active = false, engaged = false, busy = false, y0 = 0, x0 = 0, dist = 0;
+    const paint = (d, spin) => {
+      if (!ind) return;
+      const p = Math.max(0, Math.min(1, d / TH));
+      ind.style.opacity = spin ? '1' : String(Math.min(1, p * 1.6));
+      ind.style.transform = 'translate(-50%, ' + (spin ? 30 : Math.round(Math.min(d, 100) * 0.55)) + 'px)' + (spin ? '' : ' rotate(' + Math.round(p * 300) + 'deg)');
+      ind.classList.toggle('spin', !!spin);
+    };
+    const atTop = () => (window.scrollY || document.documentElement.scrollTop || 0) <= 2;
+    const overlayOpen = () => !!document.querySelector('.modal-backdrop, .sheet-backdrop, .st-viewer, .alarm-overlay');
+    const ts = (e) => {
+      if (busy || e.touches.length > 1 || !atTop() || overlayOpen()) { active = false; return; }
+      active = true; engaged = false; dist = 0;
+      y0 = e.touches[0].clientY; x0 = e.touches[0].clientX;
+    };
+    const tm = (e) => {
+      if (!active || busy) return;
+      const dy = e.touches[0].clientY - y0, dx = e.touches[0].clientX - x0;
+      if (!engaged) {
+        if (!atTop()) { active = false; return; }
+        if (dy > 16 && dy > Math.abs(dx) * 1.3) engaged = true;   // geste bien vertical vers le bas
+        else return;
+      }
+      if (e.cancelable) e.preventDefault();       // la page ne défile pas : seul l'indicateur descend
+      dist = Math.max(0, (dy - 16) * 0.5);
+      paint(dist, false);
+    };
+    const end = () => {
+      if (!active) return;
+      active = false;
+      if (engaged && dist >= TH && !busy) {
+        busy = true; paint(TH, true);
+        const done = () => { busy = false; paint(0, false); };
+        if (cb.current) Promise.resolve(cb.current()).catch(() => {}).then(done);   // statuts : rechargement doux
+        else setTimeout(() => window.location.reload(), 420);                        // accueil : tout recharger
+      } else paint(0, false);
+      engaged = false; dist = 0;
+    };
+    document.addEventListener('touchstart', ts, { passive: true });
+    document.addEventListener('touchmove', tm, { passive: false });
+    document.addEventListener('touchend', end);
+    document.addEventListener('touchcancel', end);
+    return () => {
+      document.removeEventListener('touchstart', ts);
+      document.removeEventListener('touchmove', tm);
+      document.removeEventListener('touchend', end);
+      document.removeEventListener('touchcancel', end);
+    };
+  }, []);
+  return indRef;
+}
+
 export function ClientHome() {
   const t = useT();
   const { lang } = useLang();   // 🏬 v2026.09.30.5 : libellé de la carte selon la langue
@@ -194,6 +261,7 @@ export function ClientHome() {
   const [unread, setUnread] = useState(0);        // 🔔 cloche de l'en-tête
   usePoll(() => api('/notifications').then((d) => setUnread(d.unread || 0)).catch(() => {}), 15000);
 
+  const ptrInd = usePullToRefresh(null);   // 🔄 v2026.10.04.1 : tirer vers le bas = actualiser (APK)
   useEffect(() => {
     api('/stores').then((d) => setStores(d.stores)).catch(() => setStores([]));
     api('/products').then((d) => setProducts(d.products)).catch(() => setProducts([]));
@@ -324,6 +392,11 @@ export function ClientHome() {
 
   return (
     <div>
+      {/* 🔄 v2026.10.04.1 — indicateur tirer-pour-actualiser (APK) : visible seulement pendant le geste */}
+      <div ref={ptrInd} className="ptr-ind" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" fill="#334155" /></svg>
+      </div>
+
       {/* 🟩 En-tête dégradé vert : logo + sélecteur langue + 🔔 notifications + 👤 profil */}
       <div className="home-head">
         <div className="row spread mb8">
@@ -1303,7 +1376,7 @@ export function ClientProfile() {
       </div>
       <div className="card mt12">
         <div style={{ fontWeight: 700 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.5</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.1</div>
       </div>
 
       {user.role === 'client' && (
@@ -2528,6 +2601,7 @@ export function StatusPage() {
   const videoRef = useRef(null);
   const load = () => api('/statuses').then((d) => setItems(d.statuses)).catch(() => setItems([]));
   useEffect(() => { load(); }, []);
+  const ptrInd = usePullToRefresh(load);   // 🔄 v2026.10.04.1 : tirer vers le bas = recharger la liste (APK)
 
   const markSeen = (id) => {
     setSeen((s) => {
@@ -2622,6 +2696,10 @@ export function StatusPage() {
 
   return (
     <div>
+      {/* 🔄 v2026.10.04.1 — indicateur tirer-pour-actualiser (APK) : visible seulement pendant le geste */}
+      <div ref={ptrInd} className="ptr-ind" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" fill="#334155" /></svg>
+      </div>
       <div className="topbar">
         <BackBtn />
         <div className="grow"><div className="brand-name">✨ {t('status')}</div></div>
@@ -2749,7 +2827,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.09.30.5</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.1</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
