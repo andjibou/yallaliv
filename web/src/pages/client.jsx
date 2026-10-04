@@ -430,6 +430,13 @@ export function ClientHome() {
     const measIt = setInterval(() => { if (!frozen && !inlineMode) { measure(); paint(); } }, 800);   // suit le chargement des images
     return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onResize); clearInterval(measIt); clearTimeout(armTm); unfreeze(); };
   }, [immo]);
+  const [favs, setFavs] = useState(() => loadPFavs());   // ❤️ v2026.10.04.4 : favoris produits (accueil)
+  const toggleFav = (pid) => { const n = { ...favs }; if (n[pid]) delete n[pid]; else n[pid] = 1; setFavs(n); try { localStorage.setItem(PFAV_KEY, JSON.stringify(n)); } catch {} };
+  const addFromGrid = (p) => {   // 🛒 v2026.10.04.4 : ajout direct depuis la grille de l'accueil
+    const stub = { id: p.store_id, name: p.store_name, delivery_fee: p.delivery_fee, min_order: p.min_order || 0 };
+    if (!items.length || items[0].store_id === stub.id) { add(p, stub); toast(t('added')); }
+    else add(p, stub);   // autre magasin : propose de vider le panier
+  };
   // Ouvre la FICHE PRODUIT (pas le magasin) : charge le produit complet + sa boutique
   const openProduct = async (p) => {
     setGDetail({ loading: true });
@@ -544,23 +551,9 @@ export function ClientHome() {
         </AutoScroll>
       )}
 
-      {/* 🛍️ Ligne de produits (v2026.09.27.2) */}
-      <div className="h2 mb8 mt12">🛍️ {t('products_row')}</div>
-      <div className="hp-row">
-        {(products || []).slice(0, 12).map((p) => (
-          <button key={p.id} type="button" className="hp-card" onClick={() => openProduct(p)} title={p.name}>
-            <span className="hp-photo">
-              {p.photo
-                ? <img src={photoUrl(p.photo, 'thumb')} alt="" loading="lazy" />
-                : <NoPhoto full h={96} radius={0} />}
-            </span>
-            <span className="hp-meta">
-              <span className="ellipsis hp-name">{p.name}</span>
-              <span className="hp-price">{fmtMoney(p.price)}</span>
-            </span>
-          </button>
-        ))}
-      </div>
+      {/* 🛍️ v2026.10.04.4 — produits de l'accueil : MÊME grille 2 colonnes que les magasins
+          (❤️ favori · ‹ › photos · prix gras · nom · ⭐ note · bouton ＋ vert) */}
+      <ProductGrid title={'🛍️ ' + t('products_row')} prods={(products || []).slice(0, 12)} favs={favs} onFav={toggleFav} onOpen={openProduct} onAdd={addFromGrid} />
 
       {/* 🧱 Départements */}
       <div className="h2 mb8 mt12">🧱 {t('departments')}</div>
@@ -751,45 +744,37 @@ export function StorePage() {
 
   return (
     <>
+      {/* 🏪 v2026.10.04.4 — la BANNIÈRE du magasin remplace le nom, juste à droite du bouton
+          retour : photo + nom + ⭐ + description + 🧾/📍 (frais de livraison retirés) et la
+          carte 🗺️ s'ouvre À L'INTÉRIEUR de la bannière */}
       <div className="topbar">
         <BackBtn />
-        <div className="grow h2 ellipsis">{store.name}</div>
-        {closed && <span className="badge st-cancelled">{t('closed')}</span>}
-      </div>
-
-      <div className="store-header" style={{ background: `linear-gradient(135deg, ${store.color || meta.c}, #0f172a)` }}>
-        <div className="row">
-          {store.photo
-            ? <img src={photoUrl(store.photo, 'thumb')} alt="" style={{ width: 62, height: 62, borderRadius: 16, objectFit: 'cover', border: '2px solid rgba(255,255,255,.5)' }} />
-            : <div className="store-emoji" style={{ background: 'rgba(255,255,255,.2)', width: 62, height: 62, fontSize: 33 }}>{store.emoji || meta.e}</div>}
-          <div className="grow">
-            <div className="big">{store.name}</div>
-            <div className="small" style={{ opacity: .9 }}>⭐ {Number(store.rating).toFixed(1)} · {t('type_' + store.type)}</div>
+        <div className="store-banner grow" style={{ background: `linear-gradient(135deg, ${store.color || meta.c}, #0f172a)` }}>
+          <div className="row">
+            {store.photo
+              ? <img src={photoUrl(store.photo, 'thumb')} alt="" style={{ width: 54, height: 54, borderRadius: 14, objectFit: 'cover', border: '2px solid rgba(255,255,255,.5)', flexShrink: 0 }} />
+              : <div className="store-emoji" style={{ background: 'rgba(255,255,255,.2)', width: 54, height: 54, fontSize: 28, flexShrink: 0 }}>{store.emoji || meta.e}</div>}
+            <div className="grow" style={{ minWidth: 0 }}>
+              <div className="big ellipsis">{store.name}</div>
+              <div className="small" style={{ opacity: .9 }}>⭐ {Number(store.rating).toFixed(1)} · {t('type_' + store.type)}</div>
+            </div>
+            {closed && <span className="badge st-cancelled">{t('closed')}</span>}
           </div>
-        </div>
-        <div className="small mt8" style={{ opacity: .92 }}>{store.description}</div>
-        <div className="row wrap mt8" style={{ gap: 6 }}>
-          <span className="badge" style={{ background: 'rgba(255,255,255,.22)', color: '#fff' }}>🛵 {t('delivery_fee')} {fmtMoney(store.delivery_fee)}</span>
-          {store.min_order > 0 && <span className="badge" style={{ background: 'rgba(255,255,255,.22)', color: '#fff' }}>🧾 {t('min_lbl')} {fmtMoney(store.min_order)}</span>}
-          <span className="badge" style={{ background: 'rgba(255,255,255,.22)', color: '#fff' }}>📍 {store.address}</span>
+          {store.description && <div className="small mt8" style={{ opacity: .92 }}>{store.description}</div>}
+          <div className="row wrap mt8" style={{ gap: 6 }}>
+            {store.min_order > 0 && <span className="badge" style={{ background: 'rgba(255,255,255,.22)', color: '#fff' }}>🧾 {t('min_lbl')} {fmtMoney(store.min_order)}</span>}
+            <span className="badge" style={{ background: 'rgba(255,255,255,.22)', color: '#fff' }}>📍 {store.address}</span>
+            {store.lat != null && (
+              <button type="button" className={'chip' + (showMap ? ' on' : '')} onClick={() => setShowMap((v) => !v)} style={{ fontWeight: 800 }}>
+                🗺️ {t('tab_map')}
+              </button>
+            )}
+          </div>
+          {showMap && store.lat != null && (
+            <div className="store-mapbox"><StoresMap stores={[store]} height={200} /></div>
+          )}
         </div>
       </div>
-      {store.lat != null && (
-        <div className="mt12">
-          <button className={'chip' + (showMap ? ' on' : '')} onClick={() => setShowMap((v) => !v)} style={{ fontWeight: 800 }}>
-            🗺️ {t('tab_map')}
-          </button>
-        </div>
-      )}
-      {showMap && store.lat != null && (
-        <div className="card mt12" style={{ padding: 8 }}>
-          <div className="row spread" style={{ padding: '2px 6px 8px' }}>
-            <div className="small" style={{ fontWeight: 800 }}>📍 {t('store_position')}</div>
-            <span className="badge">{store.address}</span>
-          </div>
-          <StoresMap stores={[store]} height={220} />
-        </div>
-      )}
       {closed && <div className="banner warn">{t('store_closed')}</div>}
 
       <div className="row mt12">
@@ -1487,7 +1472,7 @@ export function ClientProfile() {
       </div>
       <div className="card mt12">
         <div style={{ fontWeight: 700 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.3</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.4</div>
       </div>
 
       {user.role === 'client' && (
@@ -3066,7 +3051,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.3</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.4</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
