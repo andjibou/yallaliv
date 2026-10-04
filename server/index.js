@@ -1003,7 +1003,9 @@ app.get('/api/products', h(async (req, res) => {
   const { q, type } = req.query;
   let sql = `SELECT p.id, p.name, p.emoji, p.photo, p.price, p.category, p.store_id,
     s.name AS store_name, s.emoji AS store_emoji, s.color AS store_color, s.photo AS store_photo, s.type AS store_type,
-    s.address AS store_address, s.lat AS store_lat, s.lng AS store_lng, s.is_open
+    s.address AS store_address, s.lat AS store_lat, s.lng AS store_lng, s.is_open,
+    s.rating AS store_rating, s.delivery_fee, s.min_order,
+    (SELECT json_agg(pp.photo) FROM product_photos pp WHERE pp.product_id=p.id) AS gallery
     FROM products p JOIN stores s ON s.id = p.store_id
     WHERE p.available = 1 AND s.status = 'approved' AND s.is_open = 1`;
   const args = [];
@@ -1036,6 +1038,7 @@ app.get('/api/products/top', h(async (req, res) => {
   else if (type && type !== 'all') { where += ' AND s.type=?'; args.push(String(type)); }
   const rows = await all(`SELECT p.id, p.name, p.emoji, p.photo, p.price, p.category, p.store_id,
       s.name AS store_name, s.emoji AS store_emoji, s.color AS store_color, s.photo AS store_photo, s.type AS store_type, s.rating,
+      s.delivery_fee, s.min_order, (SELECT json_agg(pp.photo) FROM product_photos pp WHERE pp.product_id=p.id) AS gallery,
       (SELECT COALESCE(SUM(oi.qty),0) FROM order_items oi JOIN orders o ON o.id=oi.order_id
         WHERE oi.product_id=p.id AND o.status NOT IN ('cancelled','rejected','refused')) AS ordered
     FROM products p JOIN stores s ON s.id=p.store_id${where}
@@ -1053,7 +1056,8 @@ app.get('/api/products/suggested', auth, h(async (req, res) => {
   if (store_id) { where += ' AND p.store_id=?'; args.push(parseInt(store_id) || 0); }
   else if (type && type !== 'all') { where += ' AND s.type=?'; args.push(String(type)); }
   const prods = await all(`SELECT p.id, p.name, p.emoji, p.photo, p.price, p.category, p.store_id,
-      s.name AS store_name, s.emoji AS store_emoji, s.color AS store_color, s.photo AS store_photo, s.type AS store_type, s.rating
+      s.name AS store_name, s.emoji AS store_emoji, s.color AS store_color, s.photo AS store_photo, s.type AS store_type, s.rating,
+      s.delivery_fee, s.min_order, (SELECT json_agg(pp.photo) FROM product_photos pp WHERE pp.product_id=p.id) AS gallery
     FROM products p JOIN stores s ON s.id=p.store_id${where}
     ORDER BY s.rating DESC, p.id DESC LIMIT 300`, args);
   const searches = await all('SELECT q FROM product_searches WHERE user_id=? ORDER BY created_at DESC LIMIT 60', [req.user.id]).catch(() => []);

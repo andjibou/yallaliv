@@ -164,25 +164,57 @@ const capPerStore = (list, k = PER_STORE_ROW) => {
 // 🏥 pharmacie : les produits se divisent uniquement en 💊 Médicaments / 💄 Cosmétiques (mots-clés)
 const COSM_KEYS = ['cosm', 'beaut', 'makeup', 'maquill', 'parfum', 'shampoo', 'shampoing', 'creme', 'crème', 'soin', 'huile', 'savon', 'lotion', 'hygiene', 'hygiène'];
 const pharmaGroup = (p) => (COSM_KEYS.some((k) => ((p.category || '') + ' ' + (p.name || '')).toLowerCase().includes(k)) ? 'cosm' : 'meds');
-// ligne horizontale de produits (photo + nom + prix) — clic = fiche produit
-function ProdRow({ title, prods, onOpen }) {
+/* ═══ 🛍️ v2026.10.04.3 — GRILLE PRODUITS 2 colonnes (pages catégorie & magasin) ═══
+   Carte compacte : ❤️ favori en haut à droite · grande image (‹ › pour faire défiler
+   les photos du produit sans l'ouvrir) · prix gras · nom · ⭐ note · bouton ＋ vert. */
+const PFAV_KEY = 'yl_pfavs';
+const loadPFavs = () => { try { return JSON.parse(localStorage.getItem(PFAV_KEY) || '{}'); } catch { return {}; } };
+const HEART_PATH = 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z';
+
+function PgCard({ p, rating, fav, onFav, onOpen, onAdd }) {
+  const [pi, setPi] = useState(0);   // photo affichée (navigation ‹ › sans ouvrir le produit)
+  const gal = (p.gallery || (p.photos || []).map((x) => x && x.photo) || []).filter(Boolean);
+  const pics = [p.photo, ...gal].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
+  const r = rating ?? p.store_rating ?? p.rating;
+  return (
+    <div className="pg-card">
+      <button type="button" className={'pg-heart' + (fav ? ' on' : '')} aria-label="favori"
+        onClick={(e) => { e.stopPropagation(); onFav(p.id); }}>
+        <svg viewBox="0 0 24 24"><path d={HEART_PATH} /></svg>
+      </button>
+      <div className="pg-imgwrap" onClick={() => onOpen(p)}>
+        {pics.length
+          ? <img src={photoUrl(pics[pi], 'thumb')} alt="" loading="lazy" />
+          : <NoPhoto full h={130} radius={9} />}
+        {pics.length > 1 && (<>
+          <button type="button" className="pg-arrow left" aria-label="photo précédente"
+            onClick={(e) => { e.stopPropagation(); setPi((i) => (i - 1 + pics.length) % pics.length); }}>‹</button>
+          <button type="button" className="pg-arrow right" aria-label="photo suivante"
+            onClick={(e) => { e.stopPropagation(); setPi((i) => (i + 1) % pics.length); }}>›</button>
+          <span className="pg-dots">{pics.map((_, i) => <i key={i} className={i === pi ? 'on' : ''} />)}</span>
+        </>)}
+      </div>
+      <div className="pg-foot" onClick={() => onOpen(p)}>
+        <div className="pg-info">
+          <div className="pg-price">{fmtMoney(p.price)}</div>
+          <div className="pg-name">{p.name}</div>
+          {r != null && <div className="pg-rate">⭐ {Number(r).toFixed(1)}</div>}
+        </div>
+        <button type="button" className="pg-add" aria-label="ajouter au panier"
+          onClick={(e) => { e.stopPropagation(); onAdd(p); }}>＋</button>
+      </div>
+    </div>
+  );
+}
+
+function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd }) {
   if (!prods || !prods.length) return null;
   return (
     <>
-      <div className="h2 mb8 mt12">{title}</div>
-      <div className="hp-row">
+      {title && <div className="h2 mb8 mt12">{title}</div>}
+      <div className="pg-grid">
         {prods.map((p) => (
-          <button key={p.id} type="button" className="hp-card" onClick={() => onOpen(p)} title={p.name}>
-            <span className="hp-photo">
-              {p.photo
-                ? <img src={photoUrl(p.photo, 'thumb')} alt="" loading="lazy" />
-                : <NoPhoto full h={96} radius={0} />}
-            </span>
-            <span className="hp-meta">
-              <span className="ellipsis hp-name">{p.name}</span>
-              <span className="hp-price">{fmtMoney(p.price)}</span>
-            </span>
-          </button>
+          <PgCard key={p.id} p={p} rating={rating} fav={!!favs[p.id]} onFav={onFav} onOpen={onOpen} onAdd={onAdd} />
         ))}
       </div>
     </>
@@ -649,6 +681,7 @@ export function StorePage() {
   const [topP, setTopP] = useState(null);        // 🏆 v2026.10.04.2 : plus commandés du magasin
   const [suggP, setSuggP] = useState(undefined); // ✨ v2026.10.04.2 : suggestions (undefined = chargement, null = aucune recherche)
   const [selCat, setSelCat] = useState(null);    // 🗂️ v2026.10.04.2 : catégorie de produits sélectionnée
+  const [favs, setFavs] = useState(() => loadPFavs());   // ❤️ v2026.10.04.3 : favoris produits (appareil)
 
   useEffect(() => {
     setTopP(null); setSuggP(undefined); setSelCat(null);
@@ -710,6 +743,11 @@ export function StorePage() {
   const closed = !store.is_open;
   // 🔎 v2026.10.04.2 — journaliser la recherche dans CE magasin (suggestions personnalisées)
   const logSearch = (term) => { const qq = String(term || pq || '').trim(); if (qq.length >= 2) api('/product-searches', { method: 'POST', body: { q: qq, store_id: store.id } }).catch(() => {}); };
+  const toggleFav = (pid) => { const n = { ...favs }; if (n[pid]) delete n[pid]; else n[pid] = 1; setFavs(n); try { localStorage.setItem(PFAV_KEY, JSON.stringify(n)); } catch {} };
+  const addFromGrid = (p) => {
+    if (!items.length || items[0].store_id === store.id) { add(p, store); toast(t('added')); }
+    else add(p, store);   // autre magasin : propose de vider le panier
+  };
 
   return (
     <>
@@ -789,39 +827,14 @@ export function StorePage() {
       )}
       {/* 🏆 2.3 plus commandés · ✨ 2.4 suggestions — masquées pendant la recherche ou le filtre */}
       {!s && !selCat && (<>
-        <ProdRow title={'🏆 ' + t('top_ordered')} prods={topRow} onOpen={openDetail} />
-        <ProdRow title={'✨ ' + t('suggested_for_you')} prods={suggRow} onOpen={openDetail} />
+        <ProductGrid title={'🏆 ' + t('top_ordered')} prods={topRow} rating={store.rating} favs={favs} onFav={toggleFav} onOpen={openDetail} onAdd={addFromGrid} />
+        <ProductGrid title={'✨ ' + t('suggested_for_you')} prods={suggRow} rating={store.rating} favs={favs} onFav={toggleFav} onOpen={openDetail} onAdd={addFromGrid} />
       </>)}
 
       {Object.entries(byCat).map(([cat, prods]) => (
         <div key={cat}>
           <div className="sec-title">{cat}</div>
-          <div className="card">
-            {prods.map((p) => {
-              const q = qtyOf(p.id);
-              return (
-                <div key={p.id} className="product-row">
-                  {p.photo
-                    ? <img className="p-photo" src={photoUrl(p.photo, 'thumb')} alt="" loading="lazy" onClick={() => openDetail(p)} style={{ cursor: 'pointer' }} />
-                    : <div style={{ cursor: 'pointer' }} onClick={() => openDetail(p)}><NoPhoto w={46} h={46} /></div>}
-                  <div className="grow" style={{ cursor: 'pointer' }} onClick={() => openDetail(p)}>
-                    <div style={{ fontWeight: 700 }}>{p.name} <span className="muted" style={{ fontWeight: 400 }}>ℹ️</span></div>
-                    {p.description && <div className="muted small ellipsis">{p.description}</div>}
-                    <div className="small" style={{ color: 'var(--brand-dark)', fontWeight: 800 }}>{fmtMoney(p.price)} {p.qty != null && <span className="muted" style={{ fontWeight: 400 }}>· 📦 {p.qty}</span>}</div>
-                  </div>
-                  {q > 0 ? (
-                    <div className="qty-stepper">
-                      <button className="qs-btn" onClick={() => setQty(p.id, q - 1)}>−</button>
-                      <span>{q}</span>
-                      <button className="qs-btn" onClick={() => setQty(p.id, q + 1)} disabled={closed}>+</button>
-                    </div>
-                  ) : (
-                    <button className="add-btn" disabled={closed} onClick={() => { add(p, store); toast(t('added')); }}>+</button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          <ProductGrid prods={prods} rating={store.rating} favs={favs} onFav={toggleFav} onOpen={openDetail} onAdd={addFromGrid} />
         </div>
       ))}
 
@@ -1474,7 +1487,7 @@ export function ClientProfile() {
       </div>
       <div className="card mt12">
         <div style={{ fontWeight: 700 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.2</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.3</div>
       </div>
 
       {user.role === 'client' && (
@@ -2582,6 +2595,7 @@ export function StoresByTypePage() {
   const [sugg, setSugg] = useState(undefined);   // ✨ suggestions (undefined = chargement, null = aucune recherche)
   const [q, setQ] = useState('');
   const [gDetail, setGDetail] = useState(null); const [gQty, setGQty] = useState(1); const [gBig, setGBig] = useState(null);
+  const [favs, setFavs] = useState(() => loadPFavs());   // ❤️ v2026.10.04.3 : favoris produits (appareil)
   const isPharma = type === 'pharmacy';
 
   useEffect(() => {
@@ -2595,6 +2609,13 @@ export function StoresByTypePage() {
 
   // 🔎 journaliser la recherche (Entrée ou choix d'une suggestion) → suggestions personnalisées
   const logSearch = (term) => { const s = String(term || q || '').trim(); if (s.length >= 2) api('/product-searches', { method: 'POST', body: { q: s, type } }).catch(() => {}); };
+  const toggleFav = (pid) => { const n = { ...favs }; if (n[pid]) delete n[pid]; else n[pid] = 1; setFavs(n); try { localStorage.setItem(PFAV_KEY, JSON.stringify(n)); } catch {} };
+  // 🛒 ajout direct depuis la grille (les totaux sont recalculés par le serveur à la commande)
+  const addFromGrid = (p) => {
+    const stub = { id: p.store_id, name: p.store_name, delivery_fee: p.delivery_fee, min_order: p.min_order || 0 };
+    if (!items.length || items[0].store_id === stub.id) { add(p, stub); toast(t('added')); }
+    else add(p, stub);   // autre magasin : propose de vider le panier
+  };
 
   // fiche produit rapide (même modale que l'accueil)
   const openProduct = async (p) => {
@@ -2675,12 +2696,12 @@ export function StoresByTypePage() {
         </AutoScroll>
 
         {/* 3️⃣ les plus commandés de la catégorie (à défaut : produits disponibles) */}
-        <ProdRow title={'🏆 ' + t('top_ordered')} prods={topRow} onOpen={openProduct} />
+        <ProductGrid title={'🏆 ' + t('top_ordered')} prods={topRow} favs={favs} onFav={toggleFav} onOpen={openProduct} onAdd={addFromGrid} />
         {/* 4️⃣ suggestions personnalisées (à défaut : produits disponibles) */}
-        <ProdRow title={'✨ ' + t('suggested_for_you')} prods={suggRow} onOpen={openProduct} />
-        {/* 5️⃣ une ligne par nom de produit (pharmacie : 💊 / 💄) */}
+        <ProductGrid title={'✨ ' + t('suggested_for_you')} prods={suggRow} favs={favs} onFav={toggleFav} onOpen={openProduct} onAdd={addFromGrid} />
+        {/* 5️⃣ une section par nom de produit (pharmacie : 💊 / 💄) — grille 2 colonnes */}
         {prods !== null && prods.length === 0 && <div className="mt12"><Empty e="🛍️" text={t('no_products_type')} /></div>}
-        {rows.map((r) => <ProdRow key={r.title} title={r.title} prods={capPerStore(r.prods)} onOpen={openProduct} />)}
+        {rows.map((r) => <ProductGrid key={r.title} title={r.title} prods={capPerStore(r.prods)} favs={favs} onFav={toggleFav} onOpen={openProduct} onAdd={addFromGrid} />)}
       </>)}
 
       {/* fiche produit rapide (depuis la recherche) */}
@@ -3045,7 +3066,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.2</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.3</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
