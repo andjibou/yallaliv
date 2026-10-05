@@ -223,18 +223,29 @@ function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd }) {
   );
 }
 
-/* ═══ ↔️ v2026.10.04.6 — DÉFILEMENT AUTOMATIQUE LENT, CONTINU, EN BOUCLE ═══
-   Les menus horizontaux (🏪 Magasins par catégorie, 🏪 Magasins, 🗂️ Produits par
-   catégorie, 📣 pubs) avancent LENTEMENT et de façon CONTINUE : jamais de retour
-   rapide ni de va-et-vient. Quand la fin arrive, la position recule de la largeur
-   d'un contenu (le contenu est dupliqué) → boucle parfaite, sans saut visible.
-   Toucher la ligne (ou cliquer dessus) met le mouvement en pause 7 s. */
-function AutoScroll({ children, className = '' }) {
+/* ═══ ↔️ v2026.10.04.7 — DÉFILEMENT AUTOMATIQUE ═══
+   • mode="loop" (défaut) : les menus horizontaux (🏪 Magasins par catégorie, 🏪 Magasins,
+     🗂️ Produits par catégorie) avancent LENTEMENT (~28 px/s) et de façon CONTINUE en
+     BOUCLE : jamais de retour rapide ni de va-et-vient (contenu dupliqué, boucle invisible).
+   • mode="page" (📣 pubs) : comme AVANT — chaque pub change D'UN SEUL COUP toutes les
+     delay millisecondes (avance d'un cran, puis revient au début). */
+function AutoScroll({ children, className = '', mode = 'loop', delay = 3500 }) {
   const ref = useRef(null);
   const pause = useRef(0);
   const acc = useRef(0);   // 🐌 les navigateurs ignorent les fractions de pixel : on accumule puis on avance d'1 px entier
   const [loop, setLoop] = useState(false);   // duplique le contenu seulement si la ligne déborde
   useEffect(() => {
+    if (mode === 'page') {   // 📣 pubs : changement d'un seul coup (comme avant)
+      const tm = setInterval(() => {
+        if (Date.now() < pause.current) return;
+        const el = ref.current;
+        if (!el || el.scrollWidth <= el.clientWidth) return;
+        const step = el.clientWidth * 0.8;
+        const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 8;
+        el.scrollTo({ left: atEnd ? 0 : el.scrollLeft + step, behavior: 'smooth' });
+      }, delay);
+      return () => clearInterval(tm);
+    }
     let raf = 0, last = 0;
     const tick = (ts) => {
       const el = ref.current;
@@ -265,7 +276,7 @@ function AutoScroll({ children, className = '' }) {
       onTouchStart={() => { pause.current = Date.now() + 7000; }}
       onMouseDown={() => { pause.current = Date.now() + 7000; }}>
       <span className="asc-copy">{children}</span>
-      {loop && <span className="asc-copy" aria-hidden="true">{children}</span>}
+      {mode === 'loop' && loop && <span className="asc-copy" aria-hidden="true">{children}</span>}
     </div>
   );
 }
@@ -545,7 +556,7 @@ export function ClientHome() {
 
       {/* 🧃 Publicités (publiées depuis l'espace superadmin) — défilement automatique + manuel */}
       {ads && ads.length > 0 && (
-        <AutoScroll className="ads-row">
+        <AutoScroll className="ads-row" mode="page">
           {ads.map((a) => (
             <a key={a.id} className="ad-card" href={a.link || '#'} target={a.link && a.link.startsWith('http') ? '_blank' : undefined} rel="noopener">
               <img src={a.image} alt="" />
@@ -696,6 +707,8 @@ export function StorePage() {
   const [dQty, setDQty] = useState(1);
   const [bigPhoto, setBigPhoto] = useState(null);
   const [showMap, setShowMap] = useState(false);
+  const [popInfo, setPopInfo] = useState(null);   // ℹ️ v2026.10.04.7 : info longue ouverte dans la bannière ('desc' | 'addr')
+  useStickyBelowHead();   // 📌 v2026.10.04.7 : bannière + recherche fixées SOUS l'en-tête vert
   const [pq, setPq] = useState('');   // recherche de produits DANS la boutique
   const [topP, setTopP] = useState(null);        // 🏆 v2026.10.04.2 : plus commandés du magasin
   const [suggP, setSuggP] = useState(undefined); // ✨ v2026.10.04.2 : suggestions (undefined = chargement, null = aucune recherche)
@@ -773,6 +786,9 @@ export function StorePage() {
       {/* 🏪 v2026.10.04.6 — bannière PLEINE LARGEUR : le bouton ← est À L'INTÉRIEUR (tout à
           gauche), TOUTES les infos du magasin d'un côté, et la PHOTO du magasin remplit
           l'espace restant. La carte 🗺️ s'ouvre à l'intérieur de la bannière. */}
+      {/* 📌 v2026.10.04.7 — bannière du magasin + barre de recherche FIXES en haut.
+          La bannière est COLLÉE à l'en-tête VERT (aucun espace au-dessus). */}
+      <div className="sticky-head glue">
       <div className="store-bar">
         <div className="store-banner" style={{ background: `linear-gradient(135deg, ${store.color || meta.c}, #0f172a)` }}>
           <div className="sb-top">
@@ -783,10 +799,14 @@ export function StorePage() {
                 {closed && <span className="badge st-cancelled">{t('closed')}</span>}
               </div>
               <div className="small" style={{ opacity: .9 }}>⭐ {Number(store.rating).toFixed(1)} · {t('type_' + store.type)}</div>
-              {store.description && <div className="small sb-desc" style={{ opacity: .92 }}>{store.description}</div>}
+              {/* ℹ️ v2026.10.04.7 — infos longues : texte raccourci, CLIC = texte complet
+                  dans la bannière (sans déplacer la photo, sans sortir de la bannière) */}
+              {store.description && (
+                <button type="button" className="small sb-desc" onClick={() => setPopInfo((v) => (v === 'desc' ? null : 'desc'))} title={store.description}>ℹ️ {store.description}</button>
+              )}
               <div className="row wrap" style={{ gap: 6 }}>
                 {store.min_order > 0 && <span className="badge sb-badge">🧾 {t('min_lbl')} {fmtMoney(store.min_order)}</span>}
-                <span className="badge sb-badge">📍 {store.address}</span>
+                <button type="button" className="badge sb-badge sb-more" onClick={() => setPopInfo((v) => (v === 'addr' ? null : 'addr'))} title={store.address}>📍 {store.address}</button>
                 {store.lat != null && (
                   <button type="button" className={'chip' + (showMap ? ' on' : '')} onClick={() => setShowMap((v) => !v)} style={{ fontWeight: 800 }}>
                     🗺️ {t('tab_map')}
@@ -800,14 +820,19 @@ export function StorePage() {
                 : <span className="store-emoji">{store.emoji || meta.e}</span>}
             </div>
           </div>
+          {popInfo && (
+            <div className="sb-infopop">
+              <span>{popInfo === 'desc' ? store.description : '📍 ' + store.address}</span>
+              <button type="button" onClick={() => setPopInfo(null)} aria-label="fermer">✕</button>
+            </div>
+          )}
           {showMap && store.lat != null && (
             <div className="store-mapbox"><StoresMap stores={[store]} height={200} /></div>
           )}
         </div>
       </div>
       {closed && <div className="banner warn">{t('store_closed')}</div>}
-
-      <div className="row mt12">
+      <div className="row sticky-pad store-search">
         <SuggestBox
           value={pq}
           onChange={setPq}
@@ -818,6 +843,7 @@ export function StorePage() {
           onPick={(x) => { logSearch(x.label); openDetail(x.p); }}       // ouvre directement la fiche produit
         />
       </div>
+      </div>{/* fin sticky-head */}
       {pq.trim() !== '' && Object.keys(byCat).length === 0 && <div className="mt12"><Empty e="🔎" text={t('no_data')} /></div>}
 
       {/* 🗂️ 2.2 v2026.10.04.2 — produits par catégorie (cartes rondes ; pharmacie : 💊/💄) */}
@@ -1502,7 +1528,7 @@ export function ClientProfile() {
       </div>
       <div className="card mt12">
         <div style={{ fontWeight: 700 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.6</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.7</div>
       </div>
 
       {user.role === 'client' && (
@@ -2595,6 +2621,21 @@ export function ServiceRequestPage() {
 }
 
 // ================= 🏪 Magasins par catégorie (v2026.09.27.1) =================
+/* 📌 v2026.10.04.7 — l'en-tête VERT (mini-head) est collé en haut de l'écran : les blocs
+   fixes (bannière + recherche) se collent JUSTE EN DESSOUS. Hauteur mesurée dynamiquement
+   (elle change avec la barre d'état Android / insets). */
+function useStickyBelowHead() {
+  useEffect(() => {
+    const set = () => {
+      const m = document.querySelector('.mini-head');
+      if (m) document.documentElement.style.setProperty('--mini-h', m.offsetHeight + 'px');
+    };
+    set();
+    window.addEventListener('resize', set);
+    return () => window.removeEventListener('resize', set);
+  }, []);
+}
+
 /* ═══ 🏪 v2026.10.04.2 — PAGE « MAGASINS PAR CATÉGORIE » ═══
    1️⃣ recherche (magasin OU produit de la catégorie) · 2️⃣ ligne des magasins (cartes rondes)
    3️⃣ les plus commandés · 4️⃣ suggestions personnalisées (recherches du client)
@@ -2613,6 +2654,7 @@ export function StoresByTypePage() {
   const [favs, setFavs] = useState(() => loadPFavs());   // ❤️ v2026.10.04.3 : favoris produits (appareil)
   const isPharma = type === 'pharmacy';
 
+  useStickyBelowHead();   // 📌 v2026.10.04.7 : bloc fixé SOUS l'en-tête vert
   useEffect(() => {
     setStores(null); setProds(null); setTop(null); setSugg(undefined);
     api('/stores?type=' + type).then((d) => setStores(d.stores)).catch(() => setStores([]));
@@ -2684,16 +2726,22 @@ export function StoresByTypePage() {
 
   return (
     <div>
-      <div className="topbar">
-        <BackBtn />
-        <div className="grow"><div className="brand-name">🏪 {t('stc_' + key)}</div></div>
-      </div>
+      {/* 📌 v2026.10.04.7 — la barre de recherche et tout ce qui est AU-DESSUS (← + titre
+          de la catégorie) restent FIXES en haut pendant le défilement */}
+      <div className="sticky-head">
+        <div className="sticky-pad">
+          <div className="topbar">
+            <BackBtn />
+            <div className="grow"><div className="brand-name">🏪 {t('stc_' + key)}</div></div>
+          </div>
 
-      {/* 1️⃣ recherche : un magasin OU un produit de cette catégorie */}
-      <div className="row">
-        <SuggestBox value={q} onChange={setQ} onEnter={logSearch} placeholder={'🔍 ' + t('search_store_prod_ph')} clearTitle={t('clear_search')}
-          getSugs={() => [...sugStores, ...sugProds]}
-          onPick={(x) => { logSearch(x.label); if (x.st) nav('/app/store/' + x.st.id); else openProduct(x.p); }} />
+          {/* 1️⃣ recherche : un magasin OU un produit de cette catégorie */}
+          <div className="row">
+            <SuggestBox value={q} onChange={setQ} onEnter={logSearch} placeholder={'🔍 ' + t('search_store_prod_ph')} clearTitle={t('clear_search')}
+              getSugs={() => [...sugStores, ...sugProds]}
+              onPick={(x) => { logSearch(x.label); if (x.st) nav('/app/store/' + x.st.id); else openProduct(x.p); }} />
+          </div>
+        </div>
       </div>
 
       {stores === null ? <Spinner /> : stores.length === 0 ? <Empty e="🏪" text={t('no_stores_type')} /> : (<>
@@ -3081,7 +3129,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.6</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.7</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
