@@ -1,4 +1,4 @@
-const CACHE = 'yallaliv-v4'; // v4: network-first — l'app se met à jour à chaque ouverture (réseau d'abord)
+const CACHE = 'yallaliv-v5'; // v5: v2026.10.05.1 — le SW ne touche PLUS aux requêtes tierces (géocodeurs, tuiles de carte) : il ne gère que l'app elle-même // v4: network-first — l'app se met à jour à chaque ouverture (réseau d'abord)
 const ASSETS = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon-512.png'];
 
 // Ne pas cacher les assets de dev Vite (HMR)
@@ -18,6 +18,11 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
+  // 🚀 v2026.10.05.1 — PRIORITÉ ABSOLUE : tout ce qui n'est PAS notre app (géocodeurs
+  // Esri/Photon/Nominatim, tuiles OpenStreetMap, itinéraires OSRM…) passe DIRECTEMENT
+  // au réseau sans interception ni cache — le SW faisait auparavant un détour + écriture
+  // cache qui ralentissait ces requêtes de plusieurs secondes.
+  if (url.origin !== self.location.origin) return;
   if (e.request.method !== 'GET' || url.pathname.startsWith('/api')) return;
   if (isDevAsset(url)) return; // dev : laisser passer le réseau
   // NETWORK-FIRST : on prend TOUJOURS la version du réseau quand il est là (donc chaque

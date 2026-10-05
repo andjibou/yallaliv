@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useNavigate, useParams, useLocation, Outlet, useSearchParams } from 'react-router-dom';
 import TrackMap from '../TrackMap.jsx';
-import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage } from '../lib.jsx';
+import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage, gmapsNavUrl, gmapsSearchUrl } from '../lib.jsx';
 import { BottomNav, CartBar, StatusBadge, PayBadge, Stepper, Empty, Spinner, BackBtn, LangSwitch, Modal, Stars, SuggestBox, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import PickMap, { reverseGeocode, geocodeSearch } from '../PickMap.jsx';
@@ -850,6 +850,7 @@ export function StorePage() {
           {popInfo && (
             <div className="sb-infopop">
               <span>{popInfo === 'desc' ? store.description : '📍 ' + store.address}</span>
+              <a className="btn blue sm" style={{ flex: 'none', padding: '4px 10px' }} href={store.lat != null ? gmapsNavUrl(store.lat, store.lng) : gmapsSearchUrl(store.address)} target="_blank" rel="noopener" title={t('gmaps_open')}>🧭</a>
               <button type="button" onClick={() => setPopInfo(null)} aria-label="fermer">✕</button>
             </div>
           )}
@@ -943,6 +944,7 @@ export function CartPage() {
   const [pickOpen, setPickOpen] = useState(false);
   const [sugg, setSugg] = useState(null);       // 📍 v2026.09.23.10 : propositions d'adresses (frappe)
   const suggTm = useRef(null);
+  const suggSeq = useRef(0);   // 🛡️ v2026.10.05.1 : une réponse tardive d'une frappe précédente ne peut plus écraser les résultats courants
   const [done, setDone] = useState(null); // 🔑 confirmation finale avec le code de remise
   const [coErr, setCoErr] = useState({});  // ⚠️ erreurs par champ du checkout
   const [card, setCard] = useState({ no: '', exp: '', cvc: '' });
@@ -978,10 +980,12 @@ export function CartPage() {
     const v = e.target.value;
     setAddress(v);
     clearTimeout(suggTm.current);
-    if (v.trim().length < 4) { setSugg(null); return; }
+    if (v.trim().length < 4) { suggSeq.current++; setSugg(null); return; }
     suggTm.current = setTimeout(async () => {
+      const seq = ++suggSeq.current;
       const near = gps || (store?.lat != null ? { lat: store.lat, lng: store.lng } : { lat: 31.2001, lng: 29.9187 });
-      try { setSugg((await geocodeSearch(v.trim(), lang, near)).slice(0, 5)); } catch { setSugg(null); }
+      try { const r = (await geocodeSearch(v.trim(), lang, near)).slice(0, 6); if (suggSeq.current === seq) setSugg(r); }
+      catch { if (suggSeq.current === seq) setSugg(null); }
     }, 500);
   };
   const pickSugg = (r) => {
@@ -1405,6 +1409,9 @@ export function ClientOrders() {
                 <span className="small">🛵 {track.order.driver_name} · <a href={'tel:' + track.order.driver_phone}>{track.order.driver_phone}</a></span>
               )}
             </div>
+            {track.order.client_lat != null && (
+              <a className="btn blue sm block mt8" href={gmapsNavUrl(track.order.client_lat, track.order.client_lng)} target="_blank" rel="noopener">🧭 {t('gmaps_open')}</a>
+            )}
             <Stepper status={track.order.status} />
             {(() => {
               const o = track.order, pos = track.driver_pos;
@@ -1523,7 +1530,7 @@ export function ClientProfile() {
       </div>
       <div className="card mt12">
         <div style={{ fontWeight: 700 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.8</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.05.1</div>
       </div>
 
       {user.role === 'client' && (
@@ -1837,6 +1844,7 @@ export function ListingDetailPage() {
   const [dSugg, setDSugg] = useState(null);
   const [dBusy, setDBusy] = useState(false);
   const dTm = useRef(null);
+  const dSeq = useRef(0);   // 🛡️ v2026.10.05.1 : anti-réponse-périmée
   const subLbl = (k) => (SUB_LBL[k] ? (SUB_LBL[k][lang] || SUB_LBL[k].fr) : k);
   const condLbl = (k) => (COND_LBL[k] ? (COND_LBL[k][lang] || COND_LBL[k].fr) : '');
 
@@ -1857,10 +1865,12 @@ export function ListingDetailPage() {
     const v = e.target.value;
     setDAddr(v);
     clearTimeout(dTm.current);
-    if (v.trim().length < 4) { setDSugg(null); return; }
+    if (v.trim().length < 4) { dSeq.current++; setDSugg(null); return; }
     dTm.current = setTimeout(async () => {
+      const seq = ++dSeq.current;
       const near = dGps || (l.lat != null ? { lat: l.lat, lng: l.lng } : { lat: 31.2001, lng: 29.9187 });
-      try { setDSugg((await geocodeSearch(v.trim(), lang, near)).slice(0, 5)); } catch { setDSugg(null); }
+      try { const r = (await geocodeSearch(v.trim(), lang, near)).slice(0, 6); if (dSeq.current === seq) setDSugg(r); }
+      catch { if (dSeq.current === seq) setDSugg(null); }
     }, 500);
   };
   const pickDSugg = (r) => { setDAddr(r.label.split(',').slice(0, 3).join(', ')); setDGps({ lat: r.lat, lng: r.lng }); setDSugg(null); };
@@ -1923,7 +1933,9 @@ export function ListingDetailPage() {
         <div className="row wrap mt4" style={{ gap: 6 }}>
           {l.condition && <span className="badge" style={{ background: '#dcfce7', color: '#166534' }}>{l.condition === 'new' ? '✨' : l.condition === 'like_new' ? '🌟' : '♻️'} {condLbl(l.condition)}</span>}
           <span className="badge">{CAT_EMOJI[l.category]} {t('cat_' + l.category)}{l.subcategory ? ' · ' + subLbl(l.subcategory) : ''}</span>
-          {l.area && <span className="badge">📍 {l.area}</span>}
+          {l.area && (l.lat != null
+            ? <a className="badge" style={{ color: 'inherit', textDecoration: 'none' }} href={gmapsNavUrl(l.lat, l.lng)} target="_blank" rel="noopener" title={t('gmaps_open')}>📍 {l.area} 🧭</a>
+            : <span className="badge">📍 {l.area}</span>)}
           {l.favs > 0 && <span className="badge">❤️ {l.favs}</span>}
         </div>
         {l.description && <p className="small mt8" style={{ whiteSpace: 'pre-wrap' }}>{l.description}</p>}
@@ -2520,15 +2532,18 @@ export function ServiceRequestPage() {
   const [busy, setBusy] = useState(false);
   const [pPick, setPPick] = useState(false); const [dPick, setDPick] = useState(false);
   const pTm = useRef(null); const dTm = useRef(null);
+  const pSeq = useRef(0); const dSeq = useRef(0);   // 🛡️ v2026.10.05.1 : anti-réponse-périmée
 
   const onAddr = (which) => (e) => {
     const v = e.target.value;
     if (which === 'p') setPAddr(v); else setDAddr(v);
     clearTimeout(which === 'p' ? pTm.current : dTm.current);
-    if (v.trim().length < 4) { if (which === 'p') setPSugg(null); else setDSugg(null); return; }
+    const seqObj = which === 'p' ? pSeq : dSeq;
+    if (v.trim().length < 4) { seqObj.current++; if (which === 'p') setPSugg(null); else setDSugg(null); return; }
     const tm = setTimeout(async () => {
-      try { const r = (await geocodeSearch(v.trim(), lang, { lat: 31.2001, lng: 29.9187 })).slice(0, 5); if (which === 'p') setPSugg(r); else setDSugg(r); }
-      catch { if (which === 'p') setPSugg(null); else setDSugg(null); }
+      const seq = ++seqObj.current;
+      try { const r = (await geocodeSearch(v.trim(), lang, { lat: 31.2001, lng: 29.9187 })).slice(0, 6); if (seqObj.current !== seq) return; if (which === 'p') setPSugg(r); else setDSugg(r); }
+      catch { if (seqObj.current === seq) { if (which === 'p') setPSugg(null); else setDSugg(null); } }
     }, 500);
     if (which === 'p') pTm.current = tm; else dTm.current = tm;
   };
@@ -3095,7 +3110,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.8</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.05.1</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>

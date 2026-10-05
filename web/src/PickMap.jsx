@@ -52,25 +52,57 @@ export async function reverseGeocode(lat, lng, lang = 'fr') {
 }
 
 /**
- * 🔎 Recherche par ADRESSE TAPÉE (texte → position) : Esri d'abord (biaisée vers la
- * zone indiquée : « Miami » trouve Miami d'Alexandrie, pas la Floride), Nominatim
- * en secours. Utilisée par l'AUTOCOMPLÉTION du champ « 📍 Adresse de livraison ».
+ * 🔎 v2026.10.05.1 — Recherche par ADRESSE TAPÉE (texte → position) : TROIS moteurs
+ * GRATUITS interrogés EN PARALLÈLE (le maximum de couverture sans clé API, qualité
+ * proche de Google) :
+ *  · Esri World Geocoder — couverture Égypte excellente, noms arabes locaux ;
+ *  · Photon (OpenStreetMap) — auto-complétion rapide, très bon sur les frappes
+ *    partielles (« smou » trouve déjà Smouha) ;
+ *  · Nominatim (OpenStreetMap) — complet sur les zones bien cartographiées.
+ * Fusion + dédoublonnage (≈15 m) + classement par source. Biais vers « near »
+ * (Alexandrie par défaut côté appelants) : « Miami » trouve Miami d'Alexandrie.
  * Retourne [{lat, lng, label}].
  */
 export async function geocodeSearch(q, lang = 'fr', near = null) {
   const l = LANG3(lang);
-  const esri = near ? `&location=${near.lng},${near.lat}&distance=15000` : '';
-  try {
-    const d = await (await fetchT(`https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?f=json&singleLine=${encodeURIComponent(q)}&maxLocations=5&langCode=${l}${esri}`)).json();
-    const out = (d?.candidates || []).filter((c) => c.location).map((c) => ({ lat: c.location.y, lng: c.location.x, label: c.address }));
-    if (out.length) return out;
-  } catch {}
-  try {
-    const vb = near ? `&viewbox=${near.lng - 0.4},${near.lat + 0.4},${near.lng + 0.4},${near.lat - 0.4}` : '';
-    const d = await (await fetchT(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&accept-language=${l}${vb}`)).json();
-    return (d || []).map((x) => ({ lat: +x.lat, lng: +x.lon, label: x.display_name }));
-  } catch {}
-  return [];
+  const s = String(q || '').trim();
+  if (s.length < 3) return [];
+  // 🥇 ordre de pertinence : frappe PARTIELLE (un seul mot) → Photon d'abord (auto-
+  // complétion façon Google : « smou » trouve Smouha) ; adresse complète → Esri d'abord.
+  const order = s.includes(' ') ? [0, 1, 2] : [1, 0, 2];
+  const acc = [];   // chaque moteur dépose ses résultats DÈS qu'il répond
+  const jobs = [
+    (async () => {   // ① Esri
+      const esri = near ? `&location=${near.lng},${near.lat}&distance=25000` : '';
+      const d = await (await fetchT(`https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?f=json&singleLine=${encodeURIComponent(s)}&maxLocations=6&langCode=${l}${esri}`, 4500)).json();
+      (d?.candidates || []).filter((c) => c.location).forEach((c) => acc.push({ lat: c.location.y, lng: c.location.x, label: c.address, src: 0 }));
+    })().catch(() => {}),
+    (async () => {   // ② Photon (auto-complétion façon Google)
+      const bias = near ? `&lat=${near.lat}&lon=${near.lng}` : '';
+      const d = await (await fetchT(`https://photon.komoot.io/api/?q=${encodeURIComponent(s)}&limit=6&lang=${l}${bias}`, 4500)).json();
+      (d?.features || []).filter((f) => f?.geometry?.coordinates).forEach((f) => {
+        const a = f.properties || {};
+        const bits = [...new Set([a.name, a.street && (a.housenumber ? a.housenumber + ' ' + a.street : a.street), a.district, a.city, a.state, a.country].filter(Boolean))].slice(0, 4);
+        if (bits.length) acc.push({ lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], label: bits.join(', '), src: 1 });
+      });
+    })().catch(() => {}),
+    (async () => {   // ③ Nominatim
+      const vb = near ? `&viewbox=${near.lng - 0.4},${near.lat + 0.4},${near.lng + 0.4},${near.lat - 0.4}` : '';
+      const d = await (await fetchT(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(s)}&format=json&limit=5&accept-language=${l}${vb}`, 4500)).json();
+      (d || []).forEach((x) => acc.push({ lat: +x.lat, lng: +x.lon, label: x.display_name, src: 2 }));
+    })().catch(() => {}),
+  ];
+  // ⏱️ 2,8 s GRAND MAX tout compris : un moteur lent ne retarde JAMAIS l'affichage —
+  // on fusionne ce qui est déjà arrivé, les traînards sont simplement ignorés.
+  await Promise.race([Promise.allSettled(jobs), new Promise((r) => setTimeout(r, 2800))]);
+  const all = acc.slice().sort((a, b) => order.indexOf(a.src) - order.indexOf(b.src));   // tri stable : pertinence conservée au sein de chaque source
+  const out = [], seen = [];
+  for (const r of all) {
+    if (out.length >= 7) break;
+    if (seen.some((p) => Math.abs(p.lat - r.lat) < 0.00015 && Math.abs(p.lng - r.lng) < 0.00015)) continue;   // doublon ≈ même position
+    seen.push(r); out.push(r);
+  }
+  return out;
 }
 
 /**

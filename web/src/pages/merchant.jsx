@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, alarm, pushSubscribe, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage, ph as photoUrl } from '../lib.jsx';
+import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, alarm, pushSubscribe, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage, ph as photoUrl, gmapsNavUrl, gmapsSearchUrl } from '../lib.jsx';
 import { StatusBadge, PayBadge, Empty, Spinner, Modal, LangSwitch, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import { BarsChart, compactMoney } from '../Chart.jsx';
@@ -223,7 +223,7 @@ function Dashboard() {
               <div className="row spread small mt4"><span className="muted">🛵 {t('delivery_fee')}</span><span className="muted">{fmtMoney(o.delivery_fee)}</span></div>
             </div>
             <div className="row spread mt8 small wrap" style={{ gap: 6 }}>
-              <span className="muted">📍 {o.address}</span>
+              <a className="muted" style={{ color: 'inherit', textDecoration: 'underline dotted' }} href={o.client_lat != null ? gmapsNavUrl(o.client_lat, o.client_lng) : gmapsSearchUrl(o.address)} target="_blank" rel="noopener" title={t('gmaps_open')}>📍 {o.address} 🧭</a>
               <span>📞 <a href={'tel:' + o.phone}>{o.phone}</a></span>
             </div>
             {o.note && <div className="banner warn mt8" style={{ marginBottom: 0 }}>📝 {o.note}</div>}
@@ -762,6 +762,7 @@ function Drivers() {
             )}
             <div className="mt8" style={{ background: '#f8fafc', borderRadius: 12, padding: 10 }}>
               <div className="small">👤 {o.client_name} · 🏠 {o.address}</div>
+              <a className="btn ghost sm mt8" href={o.client_lat != null ? gmapsNavUrl(o.client_lat, o.client_lng) : gmapsSearchUrl(o.address)} target="_blank" rel="noopener">🧭 {t('gmaps_open')}</a>
             </div>
           </div>
         ))}

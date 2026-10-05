@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { api, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, pushSubscribe , UpdatesBanner, NotifNag, BellButton, APK_REQUIRED } from '../lib.jsx';
+import { api, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, pushSubscribe , UpdatesBanner, NotifNag, BellButton, APK_REQUIRED, gmapsNavUrl, gmapsSearchUrl } from '../lib.jsx';
 import { Empty, Spinner, LangSwitch, StatusBadge, PayBadge, Modal } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import RouteMap, { DualRouteMap, TourMap, buildTour } from '../RouteMap.jsx';
@@ -596,6 +596,14 @@ export default function DriverApp() {
               <div className="small mt4">👤 {routeView.client_name} · <a href={'tel:' + routeView.phone}>📞 {routeView.phone}</a></div>
               <div className="small mt4">💰 {t('fee_earned')} : <b>{fmtMoney(routeView.delivery_fee)}</b></div>
             </div>
+            <div className="row mt8" style={{ gap: 6 }}>
+              {routeView.store_lat != null && (
+                <a className="btn ghost sm grow" href={gmapsNavUrl(routeView.store_lat, routeView.store_lng)} target="_blank" rel="noopener">🧭 {t('nav_store')}</a>
+              )}
+              {routeView.client_lat != null && (
+                <a className="btn ghost sm grow" href={gmapsNavUrl(routeView.client_lat, routeView.client_lng)} target="_blank" rel="noopener">🧭 {t('nav_client')}</a>
+              )}
+            </div>
             {routeView.status === 'ready' && (
               <button className="btn primary block mt12" disabled={!online} onClick={() => accept(routeView)}>
                 {online ? '✅ ' + t('accept_d') : '🔌 ' + t('offline')}
@@ -668,13 +676,13 @@ const waLink = (ph) => {
   return 'https://wa.me/' + p;
 };
 const navLink = (o) => {
-  // Destination intelligente : avant récupération → le magasin ; après récupération → le client
+  // 🧭 v2026.10.05.1 — destination intelligente : avant récupération → le magasin ;
+  // après récupération → le client. Dans l'APK : ouverture DIRECTE de l'appli Google
+  // Maps en mode guidage (google.navigation:) ; sur le site : lien officiel gratuit.
   const dst = o.status === 'picked_up' && o.client_lat != null
-    ? o.client_lat + ',' + o.client_lng
-    : o.store_lat != null ? o.store_lat + ',' + o.store_lng : null;
-  return dst
-    ? 'https://www.google.com/maps/dir/?api=1&destination=' + dst + '&travelmode=driving'
-    : 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(o.address || o.store_address || '');
+    ? [o.client_lat, o.client_lng]
+    : o.store_lat != null ? [o.store_lat, o.store_lng] : null;
+  return dst ? gmapsNavUrl(dst[0], dst[1]) : gmapsSearchUrl(o.address || o.store_address || '');
 };
 
 // 📱 Guide anti-kill par marque de téléphone (ROMs chinoises surtout).
