@@ -223,25 +223,49 @@ function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd }) {
   );
 }
 
-function AutoScroll({ children, delay = 3500, className = '' }) {
+/* ═══ ↔️ v2026.10.04.6 — DÉFILEMENT AUTOMATIQUE LENT, CONTINU, EN BOUCLE ═══
+   Les menus horizontaux (🏪 Magasins par catégorie, 🏪 Magasins, 🗂️ Produits par
+   catégorie, 📣 pubs) avancent LENTEMENT et de façon CONTINUE : jamais de retour
+   rapide ni de va-et-vient. Quand la fin arrive, la position recule de la largeur
+   d'un contenu (le contenu est dupliqué) → boucle parfaite, sans saut visible.
+   Toucher la ligne (ou cliquer dessus) met le mouvement en pause 7 s. */
+function AutoScroll({ children, className = '' }) {
   const ref = useRef(null);
   const pause = useRef(0);
+  const acc = useRef(0);   // 🐌 les navigateurs ignorent les fractions de pixel : on accumule puis on avance d'1 px entier
+  const [loop, setLoop] = useState(false);   // duplique le contenu seulement si la ligne déborde
   useEffect(() => {
-    const tm = setInterval(() => {
-      if (Date.now() < pause.current) return;
+    let raf = 0, last = 0;
+    const tick = (ts) => {
       const el = ref.current;
-      if (!el || el.scrollWidth <= el.clientWidth) return;
-      const step = el.clientWidth * 0.8;
-      const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 8;
-      el.scrollTo({ left: atEnd ? 0 : el.scrollLeft + step, behavior: 'smooth' });
-    }, delay);
-    return () => clearInterval(tm);
-  }, [delay]);
+      if (el) {
+        if (!loop && el.scrollWidth > el.clientWidth + 4) setLoop(true);
+        if (loop && el.scrollWidth > el.clientWidth + 4 && Date.now() >= pause.current) {
+          if (last) {
+            const dt = Math.min(64, ts - last);
+            acc.current += (28 * dt) / 1000;   // 🐌 ~28 px/seconde : lent et régulier
+            const move = Math.floor(acc.current);
+            if (move >= 1) {
+              el.scrollLeft += move;
+              acc.current -= move;
+              const half = el.scrollWidth / 2;
+              if (el.scrollLeft >= half - 1) el.scrollLeft -= half;   // 🔄 boucle invisible (sans saut)
+            }
+          }
+          last = ts;
+        } else { last = 0; acc.current = 0; }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [loop]);
   return (
     <div ref={ref} className={className}
       onTouchStart={() => { pause.current = Date.now() + 7000; }}
       onMouseDown={() => { pause.current = Date.now() + 7000; }}>
-      {children}
+      <span className="asc-copy">{children}</span>
+      {loop && <span className="asc-copy" aria-hidden="true">{children}</span>}
     </div>
   );
 }
@@ -521,7 +545,7 @@ export function ClientHome() {
 
       {/* 🧃 Publicités (publiées depuis l'espace superadmin) — défilement automatique + manuel */}
       {ads && ads.length > 0 && (
-        <AutoScroll className="ads-row" delay={3500}>
+        <AutoScroll className="ads-row">
           {ads.map((a) => (
             <a key={a.id} className="ad-card" href={a.link || '#'} target={a.link && a.link.startsWith('http') ? '_blank' : undefined} rel="noopener">
               <img src={a.image} alt="" />
@@ -534,7 +558,7 @@ export function ClientHome() {
           l'espace superadmin (ajout / remplacement / suppression). Repli : cartes intégrées. */}
       <div className="h2 mb8 mt12">🏪 {t('stores_by_type')}</div>
       {stypes && stypes.length > 0 ? (
-        <AutoScroll className="stc-row" delay={4000}>
+        <AutoScroll className="stc-row">
           {stypes.map((c) => (
             <button key={c.type} type="button" className="sty-card" onClick={() => nav('/app/stores/' + c.type)} title={lang === 'ar' ? c.label_ar : lang === 'en' ? c.label_en : c.label_fr}>
               <span className="sty-icon"><img src={c.icon} alt="" loading="lazy" /></span>
@@ -543,7 +567,7 @@ export function ClientHome() {
           ))}
         </AutoScroll>
       ) : (
-        <AutoScroll className="stc-row" delay={4000}>
+        <AutoScroll className="stc-row">
           {STORE_CARDS.map((c) => (
             <button key={c.type} type="button" className="sty-card" onClick={() => nav('/app/stores/' + c.type)}>
               <span className="sty-icon"><img src={c.img} alt="" loading="lazy" /></span>
@@ -746,31 +770,35 @@ export function StorePage() {
 
   return (
     <>
-      {/* 🏪 v2026.10.04.4 — la BANNIÈRE du magasin remplace le nom, juste à droite du bouton
-          retour : photo + nom + ⭐ + description + 🧾/📍 (frais de livraison retirés) et la
-          carte 🗺️ s'ouvre À L'INTÉRIEUR de la bannière */}
-      <div className="topbar">
-        <BackBtn />
-        <div className="store-banner grow" style={{ background: `linear-gradient(135deg, ${store.color || meta.c}, #0f172a)` }}>
-          <div className="row">
-            {store.photo
-              ? <img src={photoUrl(store.photo, 'thumb')} alt="" style={{ width: 54, height: 54, borderRadius: 14, objectFit: 'cover', border: '2px solid rgba(255,255,255,.5)', flexShrink: 0 }} />
-              : <div className="store-emoji" style={{ background: 'rgba(255,255,255,.2)', width: 54, height: 54, fontSize: 28, flexShrink: 0 }}>{store.emoji || meta.e}</div>}
-            <div className="grow" style={{ minWidth: 0 }}>
-              <div className="big ellipsis">{store.name}</div>
+      {/* 🏪 v2026.10.04.6 — bannière PLEINE LARGEUR : le bouton ← est À L'INTÉRIEUR (tout à
+          gauche), TOUTES les infos du magasin d'un côté, et la PHOTO du magasin remplit
+          l'espace restant. La carte 🗺️ s'ouvre à l'intérieur de la bannière. */}
+      <div className="store-bar">
+        <div className="store-banner" style={{ background: `linear-gradient(135deg, ${store.color || meta.c}, #0f172a)` }}>
+          <div className="sb-top">
+            <BackBtn />
+            <div className="sb-info">
+              <div className="row" style={{ alignItems: 'center', gap: 6 }}>
+                <span className="big ellipsis">{store.name}</span>
+                {closed && <span className="badge st-cancelled">{t('closed')}</span>}
+              </div>
               <div className="small" style={{ opacity: .9 }}>⭐ {Number(store.rating).toFixed(1)} · {t('type_' + store.type)}</div>
+              {store.description && <div className="small sb-desc" style={{ opacity: .92 }}>{store.description}</div>}
+              <div className="row wrap" style={{ gap: 6 }}>
+                {store.min_order > 0 && <span className="badge sb-badge">🧾 {t('min_lbl')} {fmtMoney(store.min_order)}</span>}
+                <span className="badge sb-badge">📍 {store.address}</span>
+                {store.lat != null && (
+                  <button type="button" className={'chip' + (showMap ? ' on' : '')} onClick={() => setShowMap((v) => !v)} style={{ fontWeight: 800 }}>
+                    🗺️ {t('tab_map')}
+                  </button>
+                )}
+              </div>
             </div>
-            {closed && <span className="badge st-cancelled">{t('closed')}</span>}
-          </div>
-          {store.description && <div className="small mt8" style={{ opacity: .92 }}>{store.description}</div>}
-          <div className="row wrap mt8" style={{ gap: 6 }}>
-            {store.min_order > 0 && <span className="badge" style={{ background: 'rgba(255,255,255,.22)', color: '#fff' }}>🧾 {t('min_lbl')} {fmtMoney(store.min_order)}</span>}
-            <span className="badge" style={{ background: 'rgba(255,255,255,.22)', color: '#fff' }}>📍 {store.address}</span>
-            {store.lat != null && (
-              <button type="button" className={'chip' + (showMap ? ' on' : '')} onClick={() => setShowMap((v) => !v)} style={{ fontWeight: 800 }}>
-                🗺️ {t('tab_map')}
-              </button>
-            )}
+            <div className="sb-photo">
+              {store.photo
+                ? <img src={photoUrl(store.photo, 'thumb')} alt="" />
+                : <span className="store-emoji">{store.emoji || meta.e}</span>}
+            </div>
           </div>
           {showMap && store.lat != null && (
             <div className="store-mapbox"><StoresMap stores={[store]} height={200} /></div>
@@ -795,7 +823,7 @@ export function StorePage() {
       {/* 🗂️ 2.2 v2026.10.04.2 — produits par catégorie (cartes rondes ; pharmacie : 💊/💄) */}
       {!s && cats.length > 0 && (<>
         <div className="h2 mb8 mt12">🗂️ {t('products_by_cat')}</div>
-        <AutoScroll className="stc-row" delay={4500}>
+        <AutoScroll className="stc-row">
           {cats.map((c) => (
             <button key={c.label} type="button" className={'sty-card' + (selCat === c.label ? ' on' : '')} onClick={() => setSelCat((v) => (v === c.label ? null : c.label))} title={c.label}>
               <span className="sty-icon">{c.photo
@@ -1474,7 +1502,7 @@ export function ClientProfile() {
       </div>
       <div className="card mt12">
         <div style={{ fontWeight: 700 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.5</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.6</div>
       </div>
 
       {user.role === 'client' && (
@@ -2671,7 +2699,7 @@ export function StoresByTypePage() {
       {stores === null ? <Spinner /> : stores.length === 0 ? <Empty e="🏪" text={t('no_stores_type')} /> : (<>
         {/* 2️⃣ tous les magasins de la catégorie — cartes RONDES comme l'accueil */}
         <div className="h2 mb8 mt12">🏪 {t('stores_row')}</div>
-        <AutoScroll className="stc-row" delay={4000}>
+        <AutoScroll className="stc-row">
           {stores.map((st) => (
             <button key={st.id} type="button" className="sty-card" onClick={() => nav('/app/store/' + st.id)} title={st.name}>
               <span className="sty-icon">{st.photo
@@ -3053,7 +3081,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.5</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.6</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
