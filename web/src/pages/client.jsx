@@ -229,6 +229,62 @@ function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd }) {
      BOUCLE : jamais de retour rapide ni de va-et-vient (contenu dupliqué, boucle invisible).
    • mode="page" (📣 pubs) : comme AVANT — chaque pub change D'UN SEUL COUP toutes les
      delay millisecondes (avance d'un cran, puis revient au début). */
+/* ═══ 🖼️ v2026.10.04.8 — FICHE PRODUIT (partagée accueil / catégorie / magasin) ═══
+   • les photos défilent HORIZONTALEMENT — flèche au milieu qui indique le sens et se
+     retourne de l'autre côté quand toutes les photos ont été défilées
+   • SEULE la description défile verticalement — tout le reste est visible directement
+   • plus de miniatures ni de catégorie · le bouton panier ne déborde JAMAIS */
+function ProductDetail({ product, closed, qty, setQty, onAdd, header }) {
+  const t = useT();
+  const galRef = useRef(null);
+  const [atEnd, setAtEnd] = useState(false);
+  // les photos arrivent sous 2 formats : .gallery (tableau de chaînes — lignes 🏆/✨/grilles)
+  // ou .photos (tableaux d'objets — page magasin). On accepte les deux.
+  const pics = [product.photo,
+    ...((product.gallery || []).filter(Boolean)),
+    ...((product.photos || []).map((x) => x && x.photo).filter(Boolean)),
+  ].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
+  useEffect(() => { if (galRef.current) galRef.current.scrollLeft = 0; setAtEnd(false); }, [product.id]);
+  const onGal = () => { const el = galRef.current; if (el) setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 6); };
+  const gal = (dir) => galRef.current && galRef.current.scrollBy({ left: dir * galRef.current.clientWidth * 0.92, behavior: 'smooth' });
+  return (
+    <div>
+      {header}
+      <div className="pd-galwrap">
+        <div className="pd-gal" ref={galRef} onScroll={onGal}>
+          {pics.length
+            ? pics.map((src, i) => <img key={i} src={photoUrl(src)} alt="" />)
+            : <div className="pd-nophoto"><NoPhoto w={130} h={130} radius={16} /></div>}
+        </div>
+        {pics.length > 1 && (
+          <button type="button" className={'pd-nav ' + (atEnd ? 'left' : 'right')} onClick={() => gal(atEnd ? -1 : 1)} aria-label="photos">
+            {atEnd ? '‹' : '›'}
+          </button>
+        )}
+      </div>
+      <div className="pd-name">{product.name}</div>
+      {product.description
+        ? <div className="pd-desc">{product.description}</div>
+        : <div style={{ height: 8 }} />}
+      {closed ? (
+        <div className="banner warn mt8">{t('store_closed')}</div>
+      ) : (
+        <div className="row mt12" style={{ gap: 10 }}>
+          <div className="qty-stepper" style={{ padding: '8px 10px', flex: 'none' }}>
+            <button className="qs-btn" onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button>
+            <span style={{ minWidth: 20, textAlign: 'center' }}>{qty}</span>
+            <button className="qs-btn" onClick={() => setQty((q) => Math.min(99, q + 1))}>+</button>
+          </div>
+          <button className="btn primary grow pd-add" onClick={onAdd}>
+            <span className="pd-add-l1">🛒 {t('add_to_cart')}</span>
+            <span className="pd-add-l2">{fmtMoney(product.price * qty)}</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AutoScroll({ children, className = '', mode = 'loop', delay = 3500 }) {
   const ref = useRef(null);
   const pause = useRef(0);
@@ -240,7 +296,7 @@ function AutoScroll({ children, className = '', mode = 'loop', delay = 3500 }) {
         if (Date.now() < pause.current) return;
         const el = ref.current;
         if (!el || el.scrollWidth <= el.clientWidth) return;
-        const step = el.clientWidth * 0.8;
+        const step = el.clientWidth;   // v2026.10.04.8 : la pub change EN ENTIER (pas à moitié)
         const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 8;
         el.scrollTo({ left: atEnd ? 0 : el.scrollLeft + step, behavior: 'smooth' });
       }, delay);
@@ -652,44 +708,15 @@ export function ClientHome() {
       {/* fiche produit rapide (depuis la recherche) */}
       <Modal open={!!gDetail} onClose={() => setGDetail(null)} title={t('product_details')}>
         {gDetail?.loading ? <Spinner /> : gDetail?.store && gDetail?.product ? (
-          <div style={{ textAlign: 'center' }}>
-            <div className="row wrap" style={{ justifyContent: 'center', gap: 8, alignItems: 'center' }}>
-              <div className="store-emoji" style={{ width: 26, height: 26, fontSize: 14, background: gDetail.store.color || '#0e9f6e' }}>{gDetail.store.emoji || '🏪'}</div>
-              <b className="small ellipsis">{gDetail.store.name}</b>
-              <button className="btn ghost sm" onClick={() => { const sid = gDetail.store.id; setGDetail(null); nav(`/app/store/${sid}`); }}>🏪 {t('open_store')}</button>
-            </div>
-            {gBig
-              ? <img src={photoUrl(gBig)} alt="" className="detail-photo" />
-              : <NoPhoto w={140} h={140} radius={18} style={{ margin: '0 auto' }} />}
-            {(gDetail.product.photos || []).length > 0 && (
-              <div className="row wrap mt8" style={{ gap: 8, justifyContent: 'center' }}>
-                {gDetail.product.photo && (
-                  <img src={photoUrl(gDetail.product.photo, 'thumb')} alt="" className={'p-photo gal-thumb' + (gBig === gDetail.product.photo ? ' on' : '')} onClick={() => setGBig(gDetail.product.photo)} />
-                )}
-                {gDetail.product.photos.map((ph) => (
-                  <img key={ph.id} src={photoUrl(ph.photo, 'thumb')} alt="" className={'p-photo gal-thumb' + (gBig === ph.photo ? ' on' : '')} onClick={() => setGBig(ph.photo)} />
-                ))}
+          <ProductDetail
+            product={gDetail.product} closed={!gDetail.store.is_open} qty={gQty} setQty={setGQty} onAdd={addFromGlobal}
+            header={(
+              <div className="row wrap" style={{ justifyContent: 'center', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                <div className="store-emoji" style={{ width: 26, height: 26, fontSize: 14, background: gDetail.store.color || '#0e9f6e' }}>{gDetail.store.emoji || '🏪'}</div>
+                <b className="small ellipsis">{gDetail.store.name}</b>
+                <button className="btn ghost sm" onClick={() => { const sid = gDetail.store.id; setGDetail(null); nav('/app/store/' + sid); }}>🏪 {t('open_store')}</button>
               </div>
-            )}
-            <div className="h2 mt8">{gDetail.product.name}</div>
-            <div className="mt4"><span className="badge">{gDetail.product.category}</span></div>
-            {gDetail.product.description && <p className="muted mt12" style={{ fontSize: 14.5 }}>{gDetail.product.description}</p>}
-            <div className="big mt8" style={{ color: 'var(--brand-dark)' }}>{fmtMoney(gDetail.product.price)}</div>
-            {!gDetail.store.is_open ? (
-              <div className="banner warn mt12">{t('store_closed')}</div>
-            ) : (
-              <div className="row mt16" style={{ gap: 12 }}>
-                <div className="qty-stepper" style={{ padding: '9px 11px' }}>
-                  <button className="qs-btn" onClick={() => setGQty((n) => Math.max(1, n - 1))}>−</button>
-                  <span style={{ minWidth: 22, textAlign: 'center' }}>{gQty}</span>
-                  <button className="qs-btn" onClick={() => setGQty((n) => Math.min(99, n + 1))}>+</button>
-                </div>
-                <button className="btn primary grow" onClick={addFromGlobal}>
-                  🛒 {t('add_to_cart')} · {fmtMoney(gDetail.product.price * gQty)}
-                </button>
-              </div>
-            )}
-          </div>
+            )} />
         ) : null}
       </Modal>
     </div>
@@ -881,39 +908,7 @@ export function StorePage() {
 
       <Modal open={!!detail} onClose={() => setDetail(null)} title={t('product_details')}>
         {detail && (
-          <div style={{ textAlign: 'center' }}>
-            {bigPhoto
-              ? <img src={photoUrl(bigPhoto)} alt="" className="detail-photo" />
-              : <NoPhoto w={140} h={140} radius={18} style={{ margin: '0 auto' }} />}
-            {(detail.photos || []).length > 0 && (
-              <div className="row wrap mt8" style={{ gap: 8, justifyContent: 'center' }}>
-                {detail.photo && (
-                  <img src={photoUrl(detail.photo, 'thumb')} alt="" className={'p-photo gal-thumb' + (bigPhoto === detail.photo ? ' on' : '')} onClick={() => setBigPhoto(detail.photo)} />
-                )}
-                {detail.photos.map((ph) => (
-                  <img key={ph.id} src={photoUrl(ph.photo, 'thumb')} alt="" className={'p-photo gal-thumb' + (bigPhoto === ph.photo ? ' on' : '')} onClick={() => setBigPhoto(ph.photo)} />
-                ))}
-              </div>
-            )}
-            <div className="h2 mt8">{detail.name}</div>
-            <div className="mt4"><span className="badge">{detail.category}</span></div>
-            {detail.description && <p className="muted mt12" style={{ fontSize: 14.5 }}>{detail.description}</p>}
-            <div className="big mt8" style={{ color: 'var(--brand-dark)' }}>{fmtMoney(detail.price)}</div>
-            {!closed ? (
-              <div className="row mt16" style={{ gap: 12 }}>
-                <div className="qty-stepper" style={{ padding: '9px 11px' }}>
-                  <button className="qs-btn" onClick={() => setDQty((q) => Math.max(1, q - 1))}>−</button>
-                  <span style={{ minWidth: 22, textAlign: 'center' }}>{dQty}</span>
-                  <button className="qs-btn" onClick={() => setDQty((q) => Math.min(99, q + 1))}>+</button>
-                </div>
-                <button className="btn primary grow" onClick={addFromDetail}>
-                  🛒 {t('add_to_cart')} · {fmtMoney(detail.price * dQty)}
-                </button>
-              </div>
-            ) : (
-              <div className="banner warn mt12">{t('store_closed')}</div>
-            )}
-          </div>
+          <ProductDetail product={detail} closed={closed} qty={dQty} setQty={setDQty} onAdd={addFromDetail} />
         )}
       </Modal>
     </>
@@ -1528,7 +1523,7 @@ export function ClientProfile() {
       </div>
       <div className="card mt12">
         <div style={{ fontWeight: 700 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.7</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.8</div>
       </div>
 
       {user.role === 'client' && (
@@ -2770,44 +2765,15 @@ export function StoresByTypePage() {
       {/* fiche produit rapide (depuis la recherche) */}
       <Modal open={!!gDetail} onClose={() => setGDetail(null)} title={t('product_details')}>
         {gDetail?.loading ? <Spinner /> : gDetail?.store && gDetail?.product ? (
-          <div style={{ textAlign: 'center' }}>
-            <div className="row wrap" style={{ justifyContent: 'center', gap: 8, alignItems: 'center' }}>
-              <div className="store-emoji" style={{ width: 26, height: 26, fontSize: 14, background: gDetail.store.color || '#0e9f6e' }}>{gDetail.store.emoji || '🏪'}</div>
-              <b className="small ellipsis">{gDetail.store.name}</b>
-              <button className="btn ghost sm" onClick={() => { const sid = gDetail.store.id; setGDetail(null); nav('/app/store/' + sid); }}>🏪 {t('open_store')}</button>
-            </div>
-            {gBig
-              ? <img src={photoUrl(gBig)} alt="" className="detail-photo" />
-              : <NoPhoto w={140} h={140} radius={18} style={{ margin: '0 auto' }} />}
-            {(gDetail.product.photos || []).length > 0 && (
-              <div className="row wrap mt8" style={{ gap: 8, justifyContent: 'center' }}>
-                {gDetail.product.photo && (
-                  <img src={photoUrl(gDetail.product.photo, 'thumb')} alt="" className={'p-photo gal-thumb' + (gBig === gDetail.product.photo ? ' on' : '')} onClick={() => setGBig(gDetail.product.photo)} />
-                )}
-                {gDetail.product.photos.map((ph) => (
-                  <img key={ph.id} src={photoUrl(ph.photo, 'thumb')} alt="" className={'p-photo gal-thumb' + (gBig === ph.photo ? ' on' : '')} onClick={() => setGBig(ph.photo)} />
-                ))}
+          <ProductDetail
+            product={gDetail.product} closed={!gDetail.store.is_open} qty={gQty} setQty={setGQty} onAdd={addFromGlobal}
+            header={(
+              <div className="row wrap" style={{ justifyContent: 'center', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                <div className="store-emoji" style={{ width: 26, height: 26, fontSize: 14, background: gDetail.store.color || '#0e9f6e' }}>{gDetail.store.emoji || '🏪'}</div>
+                <b className="small ellipsis">{gDetail.store.name}</b>
+                <button className="btn ghost sm" onClick={() => { const sid = gDetail.store.id; setGDetail(null); nav('/app/store/' + sid); }}>🏪 {t('open_store')}</button>
               </div>
-            )}
-            <div className="h2 mt8">{gDetail.product.name}</div>
-            <div className="mt4"><span className="badge">{gDetail.product.category}</span></div>
-            {gDetail.product.description && <p className="muted mt12" style={{ fontSize: 14.5 }}>{gDetail.product.description}</p>}
-            <div className="big mt8" style={{ color: 'var(--brand-dark)' }}>{fmtMoney(gDetail.product.price)}</div>
-            {!gDetail.store.is_open ? (
-              <div className="banner warn mt12">{t('store_closed')}</div>
-            ) : (
-              <div className="row mt16" style={{ gap: 12 }}>
-                <div className="qty-stepper" style={{ padding: '9px 11px' }}>
-                  <button className="qs-btn" onClick={() => setGQty((n) => Math.max(1, n - 1))}>−</button>
-                  <span style={{ minWidth: 22, textAlign: 'center' }}>{gQty}</span>
-                  <button className="qs-btn" onClick={() => setGQty((n) => Math.min(99, n + 1))}>+</button>
-                </div>
-                <button className="btn primary grow" onClick={addFromGlobal}>
-                  🛒 {t('add_to_cart')} · {fmtMoney(gDetail.product.price * gQty)}
-                </button>
-              </div>
-            )}
-          </div>
+            )} />
         ) : null}
       </Modal>
     </div>
@@ -3129,7 +3095,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.7</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.04.8</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>

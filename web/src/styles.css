@@ -696,3 +696,19 @@ button { font-family: inherit; }
 .sb-infopop { background: #fff; color: #1e293b; display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; font-size: 12.5px; font-weight: 600; border-top: 1px solid rgba(255,255,255,.35); }
 .sb-infopop span { flex: 1; min-width: 0; word-break: break-word; }
 .sb-infopop button { flex: none; width: 24px; height: 24px; border-radius: 8px; border: none; background: #f1f5f9; color: #334155; font-weight: 900; cursor: pointer; }
+
+
+/* ============ 🖼️ v2026.10.04.8 — fiche produit : photos défilables + description seule défilable ============ */
+.pd-galwrap { position: relative; }
+.pd-gal { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; border-radius: 14px; background: #f1f5f9; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.pd-gal::-webkit-scrollbar { display: none; }
+.pd-gal img { flex: 0 0 100%; height: 225px; object-fit: contain; scroll-snap-align: center; }
+.pd-nophoto { flex: 0 0 100%; height: 225px; display: flex; align-items: center; justify-content: center; }
+.pd-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; border-radius: 50%; border: none; background: rgba(255,255,255,.95); color: #334155; font-size: 20px; font-weight: 900; line-height: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(15,23,42,.28); padding: 0; z-index: 2; }
+.pd-nav.right { right: 8px; }
+.pd-nav.left { left: 8px; }
+.pd-name { font-size: 16px; font-weight: 900; color: #1e293b; margin-top: 10px; text-align: center; }
+.pd-desc { max-height: 96px; overflow-y: auto; color: #64748b; font-size: 13.5px; margin-top: 6px; text-align: center; -webkit-overflow-scrolling: touch; }
+.pd-add { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; padding: 7px 10px; }
+.pd-add-l1 { font-size: 12.5px; font-weight: 800; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pd-add-l2 { font-size: 12.5px; font-weight: 900; }
