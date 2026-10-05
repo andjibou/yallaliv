@@ -1,70 +1,54 @@
 import React, { useEffect, useRef, useState } from 'react';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import './lr-global.js';      // ⚙️ expose window.L (le plugin ci-dessous patche le L global)
-import 'leaflet-rotate';
-import { addBaseLayers } from './mapTiles.js';      // 🧭 v2026.09.23.1 : rotation de carte (setBearing) + pincement 2 doigts
 import { useT } from './lib.jsx';
+import {
+  createMap, emojiMarker, arrowMarker, stopMarker, storeMarker,
+  arrowSetHeading, glideMarker, updateArrowStatus, addLine, rmLine, fitPts, bindPopup, gRoute, mbRoute,
+} from './MapGl.jsx';
 import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';
 
-// On gère nos propres boutons 📍/🧭 : pas du contrôle de rotation par défaut du plugin
-// (il s'ajouterait sinon à TOUTES les cartes de l'app, même celles sans rotation).
-L.Map.mergeOptions({ rotateControl: false });
-
-// 🛡️ v2026.09.23.4 — Correctif leaflet-rotate : son initialize lit `options.rotate`
-// SANS vérifier qu'un objet d'options existe -> tout L.map(élément) appelé SANS
-// options plantait (« Cannot read properties of undefined (reading 'rotate') ») :
-// carte des livreurs du marchand, carte des magasins côté client, carte tournée
-// livreur... On blinde ici une fois pour toutes : toutes les cartes de l'app
-// passent par ce module, les options manquantes deviennent un objet vide.
-const _lrMapInit = L.Map.prototype.initialize;
-L.Map.prototype.initialize = function(id, options) { return _lrMapInit.call(this, id, options || {}); };
-
-const mkIcon = (emoji) =>
-  L.divIcon({
-    html: `<div style="font-size:26px;line-height:26px;text-shadow:0 1px 4px rgba(0,0,0,.45)">${emoji}</div>`,
-    className: '',
-    iconSize: [26, 26],
-    iconAnchor: [13, 13]
-  });
-
-// ================= 🧭 v2026.09.23.1 — Suivi live style Uber (côté livreur) =================
-// Pastille 🛵 + bec directionnel qui pivote selon le cap (GPS > boussole > cap calculé).
-const ARROW_ICON = L.divIcon({
-  className: '',
-  html: `<div style="position:relative;width:40px;height:40px">
-    <div class="yl-rot" style="position:absolute;inset:0;transition:transform .2s ease-out;will-change:transform">
-      <svg width="40" height="40" viewBox="0 0 40 40" style="position:absolute;inset:0;overflow:visible">
-        <path d="M20 -3 L27.5 11.5 L20 8 L12.5 11.5 Z" fill="#0e9f6e" stroke="#fff" stroke-width="1.6"/>
-      </svg>
-    </div>
-    <div style="position:absolute;top:7px;left:7px;width:26px;height:26px;border-radius:50%;background:#fff;border:3px solid #0e9f6e;box-shadow:0 2px 10px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:13px">🛵</div>
-  </div>`,
-  iconSize: [40, 40], iconAnchor: [20, 20]
-});
-
-// Applique le cap (degrés 0-360, nord=0) au marqueur flèche — compense la rotation de la carte.
-export function arrowSetHeading(marker, hdg, mapBearing) {
-  try {
-    const el = marker?.getElement?.()?.querySelector?.('.yl-rot');
-    if (!el || typeof hdg !== 'number' || isNaN(hdg)) return;
-    const target = ((hdg + (mapBearing || 0)) % 360 + 360) % 360;
-    const prev = parseFloat(el.dataset.rot || '0') || 0;
-    const d = ((target - prev) % 360 + 540) % 360 - 180;   // pivotement par le plus court chemin
-    el.dataset.rot = String(prev + d);
-    el.style.transform = `rotate(${prev + d}deg)`;
-  } catch {}
-}
-
-// Déplacement fluide du marqueur livreur (glisse au lieu de sauter à chaque position).
-export function glideMarker(marker) {
-  try { const el = marker?.getElement?.(); if (el) el.style.transition = 'transform .55s linear'; } catch {}
-}
+// 🗺️ v2026.10.05.2 — TOUTES les cartes de ce fichier sont passées de Leaflet à
+// Mapbox GL JS (style Standard 3D, libellés dans la langue de l'app, rotation
+// NATIVE — plus besoin du plugin leaflet-rotate). Les exports et le comportement
+// (recalcul d'itinéraire à 75 m, mode Uber, tournées) restent IDENTIQUES.
+export { arrowSetHeading, glideMarker };   // compat : DriversMap les importe d'ici
 
 /**
- * 🧭 Navigation live : 
+ * Itinéraire routier réel — chaîne à 3 étages : Google Directions (trafic
+ * réel, 10k/mois gratuits) → Mapbox Directions (100k/mois) → OSRM public
+ * (gratuit, sans clé). Retourne {coords: [[lat,lng]…], distance: m, duration: s} ou null.
+ */
+export async function fetchRoute(from, to) {
+  const g = await gRoute(from, to).catch(() => null);   // 🥇 Google Directions
+  if (g) return g;
+  const mb = await mbRoute(from, to).catch(() => null); // 🥈 Mapbox Directions
+  if (mb) return mb;
+  try {   // 🛟 secours OSRM
+    const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.code === 'Ok' && data.routes && data.routes[0]) {
+      const r = data.routes[0];
+      return {
+        coords: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
+        distance: r.distance,
+        duration: r.duration
+      };
+    }
+  } catch {}
+  return null;
+}
+
+export const fmtKm = (m) => (m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m');
+export const fmtMin = (s) => {
+  const min = Math.max(1, Math.round(s / 60));
+  return min >= 60 ? Math.floor(min / 60) + ' h ' + (min % 60) + ' min' : min + ' min';
+};
+
+/**
+ * 🧭 Navigation live (côté livreur) — adapté à Mapbox GL :
  *  - pivote la flèche en continu (cap fourni par live.getHdg()),
- *  - fait pivoter la carte sur le cap du livreur (mode Uber) tant qu'il ne la tourne pas lui-même,
+ *  - fait pivoter la carte sur le cap du livreur (mode Uber, rotation native)
+ *    tant qu'il ne la tourne pas lui-même,
  *  - expose follow/rot pour les boutons 📍 (recentrer) et 🧭 (cap auto on/off).
  * live = { getHdg: () => degrés|null } — fourni par l'espace livreur (driver.jsx).
  */
@@ -79,7 +63,7 @@ function useLiveNav(mapRef, live, getMarker) {
     const onDrag = () => { if (s.follow) { s.follow = false; bump((x) => x + 1); } };
     const onRot = () => {
       const mm = m(); if (!mm || s.myBearing == null) return;
-      const b = typeof mm.getBearing === 'function' ? mm.getBearing() : 0;
+      const b = mm.getBearing() || 0;
       // rotation qui ne vient PAS de nous -> geste manuel -> on rend la main au livreur
       if (Math.abs(((b - s.myBearing) % 360 + 540) % 360 - 180) > 1.5 && s.rot) { s.rot = false; bump((x) => x + 1); }
     };
@@ -92,10 +76,9 @@ function useLiveNav(mapRef, live, getMarker) {
       const mm = m(); if (!mm) return;
       if (!s.bound) ready();
       const h = live.getHdg ? live.getHdg() : null;
-      const b = typeof mm.getBearing === 'function' ? (mm.getBearing() || 0) : 0;
+      const b = mm.getBearing() || 0;
       arrowSetHeading(getMarker ? getMarker() : null, h, b);
       if (typeof h !== 'number' || !s.follow || !s.rot || s.zooming) return;
-      if (typeof mm.setBearing !== 'function') return;
       const target = (360 - ((h % 360) + 360) % 360) % 360;        // cap du livreur pointé vers le HAUT
       const cur = mm.getBearing() || 0;
       const d = ((target - cur) % 360 + 540) % 360 - 180;
@@ -110,12 +93,12 @@ function useLiveNav(mapRef, live, getMarker) {
     recenter: (lat, lng) => {
       const s = nav.current; s.follow = true; s.rot = true; bump((x) => x + 1);
       const mm = mapRef.current;
-      if (mm && lat != null) { try { mm.stop(); mm.setView([lat, lng], Math.max(mm.getZoom() || 13, 15.5), { animate: true }); } catch {} }
+      if (mm && lat != null) { try { mm.stop(); mm.easeTo({ center: [lng, lat], zoom: Math.max(mm.getZoom() || 13, 15.5), duration: 600 }); } catch {} }
     },
     toggleRot: () => {
       const s = nav.current; s.rot = !s.rot; bump((x) => x + 1);
       const mm = mapRef.current;
-      if (!s.rot && mm && typeof mm.setBearing === 'function') { s.myBearing = 0; mm.setBearing(0); }   // retour nord en haut
+      if (!s.rot && mm) { s.myBearing = 0; mm.setBearing(0); }   // retour nord en haut
     }
   };
 }
@@ -141,35 +124,8 @@ function LiveBtns({ navApi, pos }) {
 }
 
 /**
- * Itinéraire routier réel via OSRM (gratuit, sans clé API).
- * Retourne {coords: [[lat,lng]...], distance: mètres, duration: secondes} ou null.
- */
-export async function fetchRoute(from, to) {
-  try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data.code === 'Ok' && data.routes && data.routes[0]) {
-      const r = data.routes[0];
-      return {
-        coords: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
-        distance: r.distance,
-        duration: r.duration
-      };
-    }
-  } catch {}
-  return null;
-}
-
-export const fmtKm = (m) => (m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m');
-export const fmtMin = (s) => {
-  const min = Math.max(1, Math.round(s / 60));
-  return min >= 60 ? Math.floor(min / 60) + ' h ' + (min % 60) + ' min' : min + ' min';
-};
-
-/**
- * Carte avec itinéraire routier de `from` à `to`.
- * Fallback : ligne droite pointillée si OSRM indisponible (hors ligne).
+ * Carte avec itinéraire routier de `from` à `to` (Mapbox Directions, repli OSRM).
+ * Fallback : ligne droite pointillée si aucune réponse (hors ligne).
  */
 export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠', height = 300, live = null }) {
   const el = useRef(null);
@@ -178,15 +134,15 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
   const markers = useRef({});
   const coordsRef = useRef(null);   // itineraire courant (pour detecter un ecart)
   const rerouteAt = useRef(0);      // anti-spam : 1 recalcul / 20 s max
+  const lineId = useRef(null);
   const [info, setInfo] = useState(null);
   const [flash, setFlash] = useState(false);
   const t = useT();
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    // 🧭 live (livreur) : carte orientable (2 doigts) + rotation auto sur son cap
-    map.current = L.map(el.current, live ? { rotate: true, touchRotate: true } : {}).setView([31.2001, 29.9187], 13);
-    addBaseLayers(map.current);   // 🗺️ v2026.09.23.5 : Plan/Satellite + mémoire du choix
+    // 🧭 live (livreur) : rotation auto sur son cap (native GL JS)
+    map.current = createMap(el.current, { zoom: 13 });
     return () => { map.current?.remove(); map.current = null; markers.current = {}; };
   }, []);
 
@@ -198,14 +154,13 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
     let cancelled = false;
 
     // marqueurs départ / arrivée
-    ['from', 'to', 'line'].forEach((k) => {
-      if (markers.current[k]) { markers.current[k].remove(); delete markers.current[k]; }
-    });
+    ['from', 'to'].forEach((k) => { if (markers.current[k]) { markers.current[k].remove(); markers.current[k] = null; } });
+    if (lineId.current) { rmLine(m, lineId.current); lineId.current = null; }
     // 🧭 live : le départ EST le livreur -> pastille + flèche de direction
-    markers.current.from = L.marker([from.lat, from.lng], { icon: live ? ARROW_ICON : mkIcon(fromEmoji) }).addTo(m);
-    if (live) { glideMarker(markers.current.from); m.setView([from.lat, from.lng], 16); }
-    markers.current.to = L.marker([to.lat, to.lng], { icon: mkIcon(toEmoji) }).addTo(m);
-    if (!live) m.fitBounds(L.latLngBounds([[from.lat, from.lng], [to.lat, to.lng]]).pad(0.3));
+    markers.current.from = (live ? arrowMarker('#0e9f6e') : emojiMarker(fromEmoji)).setLngLat([from.lng, from.lat]).addTo(m);
+    if (live) { glideMarker(markers.current.from); m.jumpTo({ center: [from.lng, from.lat], zoom: 16 }); }
+    markers.current.to = emojiMarker(toEmoji).setLngLat([to.lng, to.lat]).addTo(m);
+    if (!live) fitPts(m, [[from.lat, from.lng], [to.lat, to.lng]], 0.3);
 
     // itinéraire réel (ou ligne droite en secours)
     setInfo(null);
@@ -213,12 +168,13 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
     fetchRoute(from, to).then((r) => {
       if (cancelled || !map.current) return;
       if (r) {
-        markers.current.line = L.polyline(r.coords, { color: '#0e9f6e', weight: 5, opacity: 0.85 }).addTo(map.current);
+        lineId.current = addLine(map.current, r.coords, { color: '#0e9f6e', width: 5, opacity: 0.85 });
+        coordsRef.current = r.coords;
         setInfo({ distance: r.distance, duration: r.duration });
       } else {
-        markers.current.line = L.polyline([[from.lat, from.lng], [to.lat, to.lng]], { color: '#0e9f6e', dashArray: '6 8', weight: 3 }).addTo(map.current);
+        lineId.current = addLine(map.current, [[from.lat, from.lng], [to.lat, to.lng]], { color: '#0e9f6e', width: 3, dashed: true });
       }
-      setTimeout(() => map.current?.invalidateSize(), 60);
+      setTimeout(() => map.current?.resize(), 60);
     });
 
     return () => { cancelled = true; };
@@ -229,23 +185,23 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
   // sans jamais retourner en arriere.
   useEffect(() => {
     const m = map.current;
-    if (!m || !from || !to || !markers.current.line || !coordsRef.current) return;
-    markers.current.from?.setLatLng([from.lat, from.lng]);
+    if (!m || !from || !to || !lineId.current || !coordsRef.current) return;
+    markers.current.from?.setLngLat([from.lng, from.lat]);
     const d = distToRouteM(from.lat, from.lng, coordsRef.current);
     if (d <= 75 || Date.now() - rerouteAt.current < 20000) return;
     rerouteAt.current = Date.now();
     let cancelled = false;
     setFlash(true);
     setTimeout(() => setFlash(false), 4000);
-    markers.current.line.remove(); delete markers.current.line;
+    rmLine(m, lineId.current); lineId.current = null;
     fetchRoute(from, to).then((r) => {
       if (cancelled || !map.current) return;
       if (r) {
         coordsRef.current = r.coords;
-        markers.current.line = L.polyline(r.coords, { color: '#0e9f6e', weight: 5, opacity: 0.85 }).addTo(map.current);
+        lineId.current = addLine(map.current, r.coords, { color: '#0e9f6e', width: 5, opacity: 0.85 });
         setInfo({ distance: r.distance, duration: r.duration });
       } else {
-        markers.current.line = L.polyline([[from.lat, from.lng], [to.lat, to.lng]], { color: '#0e9f6e', dashArray: '6 8', weight: 3 }).addTo(map.current);
+        lineId.current = addLine(map.current, [[from.lat, from.lng], [to.lat, to.lng]], { color: '#0e9f6e', width: 3, dashed: true });
       }
     });
     return () => { cancelled = true; };
@@ -257,7 +213,7 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
     const m = map.current;
     const s = navApi.nav.current;
     if (!m || !live || !from || !s.follow || s.zooming) return;
-    try { m.panTo([from.lat, from.lng], { animate: true, duration: 0.5 }); } catch {}
+    try { m.panTo([from.lng, from.lat], { duration: 500 }); } catch {}
   }, [from?.lat, from?.lng]);
 
   return (
@@ -291,15 +247,14 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
   const marks = useRef({});
   const leg1Ref = useRef(null);    // itineraire livreur->magasin (ecart -> recalcul)
   const rerouteAt = useRef(0);
+  const l1 = useRef(null), l2 = useRef(null);
   const [legs, setLegs] = useState(null);
   const [flash, setFlash] = useState(false);
   const t = useT();
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    // 🧭 live (livreur) : carte orientable (2 doigts) + rotation auto sur son cap
-    map.current = L.map(el.current, live ? { rotate: true, touchRotate: true } : {}).setView([31.2001, 29.9187], 13);
-    addBaseLayers(map.current);   // 🗺️ v2026.09.23.5 : Plan/Satellite + mémoire du choix
+    map.current = createMap(el.current, { zoom: 13 });
     return () => { map.current?.remove(); map.current = null; marks.current = {}; };
   }, []);
 
@@ -309,31 +264,28 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
     const m = map.current;
     if (!m || !driverPos || !storePos || !clientPos) return;
     let cancelled = false;
-    ['d', 's', 'c', 'l1', 'l2'].forEach((k) => {
-      if (marks.current[k]) { marks.current[k].remove(); delete marks.current[k]; }
-    });
+    ['d', 's', 'c'].forEach((k) => { if (marks.current[k]) { marks.current[k].remove(); marks.current[k] = null; } });
+    [l1, l2].forEach((ref) => { if (ref.current) { rmLine(m, ref.current); ref.current = null; } });
     // 🧭 live : pastille + flèche de direction sur le livreur, ouverture zoomée sur lui
-    marks.current.d = L.marker([driverPos.lat, driverPos.lng], { icon: live ? ARROW_ICON : mkIcon('🛵') }).addTo(m);
-    if (live) { glideMarker(marks.current.d); m.setView([driverPos.lat, driverPos.lng], 16); }
-    marks.current.s = L.marker([storePos.lat, storePos.lng], { icon: mkIcon('🏪') }).addTo(m);
-    marks.current.c = L.marker([clientPos.lat, clientPos.lng], { icon: mkIcon('🏠') }).addTo(m);
+    marks.current.d = (live ? arrowMarker('#0e9f6e') : emojiMarker('🛵')).setLngLat([driverPos.lng, driverPos.lat]).addTo(m);
+    if (live) { glideMarker(marks.current.d); m.jumpTo({ center: [driverPos.lng, driverPos.lat], zoom: 16 }); }
+    marks.current.s = emojiMarker('🏪').setLngLat([storePos.lng, storePos.lat]).addTo(m);
+    marks.current.c = emojiMarker('🏠').setLngLat([clientPos.lng, clientPos.lat]).addTo(m);
     setLegs(null);
     leg1Ref.current = null;
 
     Promise.all([fetchRoute(driverPos, storePos), fetchRoute(storePos, clientPos)]).then(([r1, r2]) => {
       if (cancelled || !map.current) return;
       leg1Ref.current = r1 ? r1.coords : null;
-      marks.current.l1 = L.polyline(
+      l1.current = addLine(m,
         r1 ? r1.coords : [[driverPos.lat, driverPos.lng], [storePos.lat, storePos.lng]],
-        r1 ? { color: '#ef4444', weight: 5, opacity: 0.9 } : { color: '#ef4444', weight: 3, dashArray: '6 8' }
-      ).addTo(m);
-      marks.current.l2 = L.polyline(
+        r1 ? { color: '#ef4444', width: 5, opacity: 0.9 } : { color: '#ef4444', width: 3, dashed: true });
+      l2.current = addLine(m,
         r2 ? r2.coords : [[storePos.lat, storePos.lng], [clientPos.lat, clientPos.lng]],
-        r2 ? { color: '#0e9f6e', weight: 5, opacity: 0.9 } : { color: '#0e9f6e', weight: 3, dashArray: '6 8' }
-      ).addTo(m);
+        r2 ? { color: '#0e9f6e', width: 5, opacity: 0.9 } : { color: '#0e9f6e', width: 3, dashed: true });
       setLegs([r1, r2]);
-      if (!live) m.fitBounds(L.latLngBounds([[driverPos.lat, driverPos.lng], [storePos.lat, storePos.lng], [clientPos.lat, clientPos.lng]]).pad(0.25));
-      setTimeout(() => map.current?.invalidateSize(), 60);
+      if (!live) fitPts(m, [[driverPos.lat, driverPos.lng], [storePos.lat, storePos.lng], [clientPos.lat, clientPos.lng]], 0.25);
+      setTimeout(() => map.current?.resize(), 60);
     });
     return () => { cancelled = true; };
   }, [storePos?.lat, storePos?.lng, clientPos?.lat, clientPos?.lng]);
@@ -342,19 +294,19 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
   // Trajet depasse (> 75 m) -> le segment livreur->magasin est RECALCULE depuis sa position.
   useEffect(() => {
     const m = map.current;
-    if (!m || !driverPos || !storePos || !marks.current.l1 || !leg1Ref.current) return;
-    marks.current.d?.setLatLng([driverPos.lat, driverPos.lng]);
+    if (!m || !driverPos || !storePos || !l1.current || !leg1Ref.current) return;
+    marks.current.d?.setLngLat([driverPos.lng, driverPos.lat]);
     const d = distToRouteM(driverPos.lat, driverPos.lng, leg1Ref.current);
     if (d <= 75 || Date.now() - rerouteAt.current < 20000) return;
     rerouteAt.current = Date.now();
     let cancelled = false;
     setFlash(true);
     setTimeout(() => setFlash(false), 4000);
-      fetchRoute(driverPos, storePos).then((r) => {
+    fetchRoute(driverPos, storePos).then((r) => {
       if (cancelled || !map.current || !r) return;
       leg1Ref.current = r.coords;
-      marks.current.l1.remove(); delete marks.current.l1;
-      marks.current.l1 = L.polyline(r.coords, { color: '#ef4444', weight: 5, opacity: 0.9 }).addTo(map.current);
+      rmLine(map.current, l1.current);
+      l1.current = addLine(map.current, r.coords, { color: '#ef4444', width: 5, opacity: 0.9 });
       setLegs((pv) => [r, pv?.[1]]);
     });
     return () => { cancelled = true; };
@@ -365,7 +317,7 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
     const m = map.current;
     const s = navApi.nav.current;
     if (!m || !live || !driverPos || !s.follow || s.zooming) return;
-    try { m.panTo([driverPos.lat, driverPos.lng], { animate: true, duration: 0.5 }); } catch {}
+    try { m.panTo([driverPos.lng, driverPos.lat], { duration: 500 }); } catch {}
   }, [driverPos?.lat, driverPos?.lng]);
 
   return (
@@ -446,22 +398,16 @@ export function buildTour(pos, missions) {
   return stops;
 }
 
-const mkStopIcon = (emoji, n, kind) => L.divIcon({
-  className: '',
-  html: `<div style="position:relative;font-size:24px;text-align:center;line-height:1;filter:drop-shadow(0 2px 2px rgba(0,0,0,.35))">${emoji}
-    <div style="position:absolute;top:-7px;right:-13px;background:${kind === 'pickup' ? '#ef4444' : '#0e9f6e'};color:#fff;font-size:10px;font-weight:800;border-radius:999px;min-width:15px;padding:1px 3px;border:2px solid #fff">${n}</div></div>`,
-  iconSize: [28, 28], iconAnchor: [14, 14]
-});
-
 /**
- * Tournee multi-arrêts : legs rouges vers les magasins (recuperer), vertes vers les clients (livrer).
- * stops = sortie de buildTour(). Montre la position du livreur + la sequence 1,2,3...
+ * Tournee multi-arrêts : legs rouges vers les magasins (recuperer), vertes vers
+ * les clients (livrer). stops = sortie de buildTour(). Montre la position du
+ * livreur + la sequence 1,2,3...
  */
 export function TourMap({ driverPos, stops, height = 340, live = null }) {
   const el = useRef(null);
   const map = useRef(null);
   const { full, toggle } = useMapFullscreen(map);
-  const grp = useRef(null);
+  const grp = useRef(null);          // {markers: [], lines: []}
   const driverMk = useRef(null);
   const firstLegRef = useRef(null);  // segment en cours (ecart -> recalcul de la tournee)
   const rerouteAt = useRef(0);
@@ -471,15 +417,20 @@ export function TourMap({ driverPos, stops, height = 340, live = null }) {
   const t = useT();
   const stopsKey = stops.map((s) => s.o.id + s.kind).join('|');
 
+  const clearGrp = () => {
+    const g = grp.current; if (!g) return;
+    g.markers.forEach((mk) => mk.remove()); g.markers = [];
+    g.lines.forEach((id) => rmLine(map.current, id)); g.lines = [];
+  };
+
   useEffect(() => {
     if (!el.current || map.current) return;
-    map.current = L.map(el.current, {}).setView([31.2001, 29.9187], 13);
-    addBaseLayers(map.current);   // 🗺️ v2026.09.23.5 : Plan/Satellite + mémoire du choix
-    grp.current = L.layerGroup().addTo(map.current);
-    return () => { map.current?.remove(); map.current = null; grp.current = null; };
+    map.current = createMap(el.current, { zoom: 13 });
+    grp.current = { markers: [], lines: [] };
+    return () => { map.current?.remove(); map.current = null; grp.current = null; driverMk.current = null; };
   }, []);
 
-  // 🧭 v2026.09.23.2 : la flèche du livreur pivote en continu (vue d'ensemble nord en haut)
+  // 🧭 la flèche du livreur pivote en continu (vue d'ensemble nord en haut)
   useEffect(() => {
     if (!live) return undefined;
     const it = setInterval(() => arrowSetHeading(driverMk.current, live.getHdg ? live.getHdg() : null, 0), 150);
@@ -490,14 +441,14 @@ export function TourMap({ driverPos, stops, height = 340, live = null }) {
     const m = map.current, g = grp.current;
     if (!m || !g || !driverPos || !stops.length) return;
     let cancelled = false;
-    g.clearLayers();
+    clearGrp();
     setLegs(null);
     firstLegRef.current = null;
 
-    driverMk.current = L.marker([driverPos.lat, driverPos.lng], { icon: ARROW_ICON }).addTo(g);   // 🧭 pastille + flèche de cap
+    driverMk.current = arrowMarker('#0e9f6e').setLngLat([driverPos.lng, driverPos.lat]).addTo(m);   // 🧭 pastille + flèche de cap
     glideMarker(driverMk.current);
     stops.forEach((s, i) => {
-      L.marker([s.lat, s.lng], { icon: mkStopIcon(s.kind === 'pickup' ? '🏪' : '🏠', i + 1, s.kind) }).addTo(g);
+      g.markers.push(stopMarker(s.kind === 'pickup' ? '🏪' : '🏠', i + 1, s.kind).setLngLat([s.lng, s.lat]).addTo(m));
     });
 
     const pts = [{ lat: driverPos.lat, lng: driverPos.lng }, ...stops];
@@ -511,13 +462,13 @@ export function TourMap({ driverPos, stops, height = 340, live = null }) {
         if (cancelled || !map.current) return;
         firstLegRef.current = ls[0]?.coords || null;
         ls.forEach((l) => {
-          L.polyline(l.coords, l.dist != null && l.dur != null
-            ? { color: l.kind === 'pickup' ? '#ef4444' : '#0e9f6e', weight: 5, opacity: 0.9 }
-            : { color: l.kind === 'pickup' ? '#ef4444' : '#0e9f6e', weight: 3, dashArray: '6 8' }).addTo(g);
+          g.lines.push(addLine(map.current, l.coords, l.dist != null && l.dur != null
+            ? { color: l.kind === 'pickup' ? '#ef4444' : '#0e9f6e', width: 5, opacity: 0.9 }
+            : { color: l.kind === 'pickup' ? '#ef4444' : '#0e9f6e', width: 3, dashed: true }));
         });
         setLegs(ls);
-        m.fitBounds(L.latLngBounds(pts.map((p) => [p.lat, p.lng])).pad(0.25));
-        setTimeout(() => map.current?.invalidateSize(), 60);
+        fitPts(m, pts.map((p) => [p.lat, p.lng]), 0.25);
+        setTimeout(() => map.current?.resize(), 60);
       });
     return () => { cancelled = true; };
   }, [stopsKey, redrawToken]);
@@ -528,7 +479,7 @@ export function TourMap({ driverPos, stops, height = 340, live = null }) {
   useEffect(() => {
     const m = map.current;
     if (!m || !driverPos || !grp.current || !firstLegRef.current) return;
-    driverMk.current?.setLatLng([driverPos.lat, driverPos.lng]);
+    driverMk.current?.setLngLat([driverPos.lng, driverPos.lat]);
     const d = distToRouteM(driverPos.lat, driverPos.lng, firstLegRef.current);
     if (d <= 75 || Date.now() - rerouteAt.current < 20000) return;
     rerouteAt.current = Date.now();
@@ -562,7 +513,7 @@ export function TourMap({ driverPos, stops, height = 340, live = null }) {
 
 /**
  * Carte des boutiques : un marqueur emoji par magasin, clic -> onSelect(store).
- * Utilisee cote client (vue Carte + position dans la fiche boutique).
+ * Utilisee cote client (fiche boutique).
  */
 export function StoresMap({ stores, height = 380, onSelect }) {
   const el = useRef(null);
@@ -574,31 +525,24 @@ export function StoresMap({ stores, height = 380, onSelect }) {
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    map.current = L.map(el.current, {}).setView([31.2001, 29.9187], 12);
-    addBaseLayers(map.current);   // 🗺️ v2026.09.23.5 : Plan/Satellite + mémoire du choix
-    grp.current = L.layerGroup().addTo(map.current);
+    map.current = createMap(el.current, { zoom: 12 });
+    grp.current = [];
     return () => { map.current?.remove(); map.current = null; grp.current = null; };
   }, []);
 
   useEffect(() => {
-    const m = map.current, g = grp.current;
-    if (!m || !g || !stores) return;
-    g.clearLayers();
+    const m = map.current;
+    if (!m || !stores) return;
+    grp.current.forEach((mk) => mk.remove()); grp.current = [];
     const pts = stores.filter((s) => s.lat != null && s.lng != null);
     pts.forEach((s) => {
-      const inner = s.photo
-        ? `<img src="${s.photo}" style="width:28px;height:28px;border-radius:8px;object-fit:cover" />`
-        : (s.emoji || '🏪');
-      const ic = L.divIcon({
-        className: '',
-        html: `<div style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:12px;background:#fff;box-shadow:0 3px 10px rgba(0,0,0,.35);border:2.5px solid ${s.color || '#0e9f6e'};font-size:19px;overflow:hidden">${inner}</div>`,
-        iconSize: [34, 34], iconAnchor: [17, 17]
-      });
-      L.marker([s.lat, s.lng], { icon: ic }).addTo(g).on('click', () => selRef.current?.(s));
+      const mk = storeMarker(s).setLngLat([s.lng, s.lat]).addTo(m);
+      mk.getElement().addEventListener('click', (e) => { e.stopPropagation(); selRef.current?.(s); });
+      grp.current.push(mk);
     });
-    if (pts.length === 1) m.setView([pts[0].lat, pts[0].lng], 15);
-    else if (pts.length > 1) m.fitBounds(L.latLngBounds(pts.map((s) => [s.lat, s.lng])).pad(0.25));
-    setTimeout(() => map.current?.invalidateSize(), 80);
+    if (pts.length === 1) m.jumpTo({ center: [pts[0].lng, pts[0].lat], zoom: 15 });
+    else if (pts.length > 1) fitPts(m, pts.map((s) => [s.lat, s.lng]), 0.25);
+    setTimeout(() => map.current?.resize(), 80);
   }, [stores]);
 
   return (

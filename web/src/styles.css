@@ -618,22 +618,32 @@ button { font-family: inherit; }
 .st-count { position: absolute; top: 6px; right: 4px; background: #0e9f6e; color: #fff; font-size: 9.5px; font-weight: 900; border-radius: 99px; padding: 1px 5px; border: 1.5px solid #fff; }
 
 /* ============ 🏬 v2026.09.30.5 — cartes magasins CARRÉES à icônes + espace avant le déroulement ============ */
-.sty-card { flex: 0 0 90px; width: 90px; display: flex; flex-direction: column; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 0; cursor: pointer; overflow: hidden; box-shadow: 0 3px 10px rgba(15,23,42,.07); }
-.sty-icon { display: block; width: 90px; height: 90px; background: #f1f5f9; }
+/* 🏪 v2026.10.08.1 : boules PLUS PETITES (74 px au lieu de 90) mais noms BIEN LISIBLES :
+   police 11,5 px + JUSQU'À 2 LIGNES (les noms longs ne sont plus coupés en «… »). */
+.sty-card { flex: 0 0 78px; width: 78px; display: flex; flex-direction: column; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 0; cursor: pointer; overflow: hidden; box-shadow: 0 3px 10px rgba(15,23,42,.07); }
+.sty-icon { display: block; width: 74px; height: 74px; background: #f1f5f9; }
 .sty-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.sty-label { font-size: 11px; font-weight: 800; text-align: center; padding: 5px 4px 6px; color: #334155; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sty-label { font-size: 11.5px; font-weight: 800; text-align: center; padding: 4px 3px 5px; color: #334155; line-height: 1.18; min-height: 30px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .end-teaser { margin-top: 26px; }   /* 📏 petit espace entre la fin des Départements et le déroulement Immobilier */
 
 /* ============ 🔄 v2026.10.04.1 — cartes RONDES + espace 40px + tirer-pour-actualiser (APK) ============ */
 .sty-card { background: none; border: none; border-radius: 0; box-shadow: none; overflow: visible; align-items: center; }
 .sty-icon { border-radius: 50%; box-shadow: 0 3px 10px rgba(15,23,42,.09); overflow: hidden; }
-.sty-label { max-width: 90px; padding: 6px 2px 0; }
+.sty-label { max-width: 78px; padding: 5px 2px 0; }
 .end-teaser { margin-top: 40px; }   /* 📏 espace accru entre la fin des Départements et le déroulement Immobilier & Automotive */
 /* indicateur tirer-pour-actualiser (APK uniquement, piloté en JS dans client.jsx) */
 .ptr-ind { position: fixed; top: calc(max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px)) + 52px); left: 50%; transform: translate(-50%, -48px); opacity: 0; z-index: 82; width: 36px; height: 36px; border-radius: 50%; background: #fff; border: 1px solid var(--line); box-shadow: 0 5px 16px rgba(15,23,42,.18); display: flex; align-items: center; justify-content: center; pointer-events: none; transition: opacity .16s; }
 .ptr-ind.spin svg { animation: ptr-spin .7s linear infinite; }
 @keyframes ptr-spin { to { transform: rotate(360deg); } }
 
+
+/* ============ 🩻 v2026.10.08.1 — SQUELETTE « Magasins par catégorie » pendant le chargement ============
+   AVANT : les cartes intégrées (anciennes photos par défaut) s'affichaient quelques secondes
+   puis étaient remplacées → l'utilisateur croyait que ses photos n'étaient pas prises en
+   compte. MAINTENANT : pulsations neutres jusqu'à l'arrivée des vraies cartes. */
+.sty-sk-icon { flex: 0 0 74px; width: 74px; height: 74px; border-radius: 50%; background: linear-gradient(100deg, #eef2f7 40%, #f8fafc 55%, #eef2f7 70%); background-size: 200% 100%; animation: yl-sk 1.1s linear infinite; }
+.sty-sk-label { width: 54px; height: 10px; border-radius: 5px; margin-top: 6px; background: linear-gradient(100deg, #eef2f7 40%, #f8fafc 55%, #eef2f7 70%); background-size: 200% 100%; animation: yl-sk 1.1s linear infinite; }
+@keyframes yl-sk { to { background-position: -200% 0; } }
 
 /* ============ 🗂️ v2026.10.04.2 — pages « catégorie de magasins » & magasin ============ */
 .sty-emoji { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 34px; background: #f1f5f9; }
@@ -712,3 +722,35 @@ button { font-family: inherit; }
 .pd-add { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; padding: 7px 10px; }
 .pd-add-l1 { font-size: 12.5px; font-weight: 800; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pd-add-l2 { font-size: 12.5px; font-weight: 900; }
+
+
+/* ============ 🏪 v2026.10.08.2 — EN-TÊTE MAGASIN PREMIUM (Uber Eats / Talabat / Glovo) ============
+   Couverture 120 px + overlay noir 40 % · boutons 👤/🔔 48 px en verre dépoli · carte d'info
+   glassmorphism (logo vert 56 px bord blanc, nom 24 px/700, catégorie 14 px/80 %, ⭐ #FFC107,
+   🕘 durée) · recherche blanche 56 px coins 20 px + filtre. Au scroll : la couverture se
+   rétracte, la carte + la recherche restent fixées (fond vert #0B7A4B). */
+.sp-head { background: #0B7A4B; }
+.sp-cover { position: relative; overflow: hidden; border-radius: 0 0 18px 18px; background: #062e1e; }
+.sp-bg { position: absolute; top: 0; left: 0; width: 100%; height: 120px; object-fit: cover; display: block; }
+.sp-shade { position: absolute; inset: 0; background: rgba(0, 0, 0, .4); }
+.sp-back { position: absolute; top: 10px; left: 10px; z-index: 3; width: 48px; height: 48px; border-radius: 50%; background: rgba(0, 0, 0, .45); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, .22); display: flex; align-items: center; justify-content: center; }
+.sp-back .icon-btn { background: none; border: none; box-shadow: none; width: 100%; height: 100%; color: #fff; font-size: 24px; margin: 0; }
+.sp-fabs { position: absolute; top: 10px; right: 10px; z-index: 3; display: flex; gap: 8px; }
+.sp-fab { width: 48px; height: 48px; border-radius: 50%; background: rgba(0, 0, 0, .45); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, .22); color: #fff; font-size: 19px; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+.sp-fab:active { transform: scale(.94); }
+.sp-bar { position: relative; z-index: 2; display: flex; align-items: center; gap: 10px; height: 70px; margin: 0 10px; border-radius: 25px; padding: 0 14px 0 7px; background: rgba(0, 0, 0, .45); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: 1px solid rgba(255, 255, 255, .16); box-shadow: 0 10px 26px rgba(2, 20, 12, .28); color: #fff; }
+.sp-logo { flex: none; width: 56px; height: 56px; border-radius: 50%; background: #0B7A4B; border: 2px solid #fff; display: flex; align-items: center; justify-content: center; font-size: 26px; overflow: hidden; }
+.sp-logo img { width: 100%; height: 100%; object-fit: cover; }
+.sp-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.sp-name { font-size: 24px; font-weight: 700; line-height: 1.08; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-type { font-size: 14px; opacity: .8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-rate, .sp-eta { flex: none; text-align: center; line-height: 1.18; display: flex; flex-direction: column; }
+.sp-star { font-size: 14.5px; font-weight: 800; color: #FFC107; white-space: nowrap; }
+.sp-rc { font-size: 10.5px; opacity: .8; }
+.sp-min { font-size: 14.5px; font-weight: 800; white-space: nowrap; }
+.sp-sub { font-size: 10.5px; opacity: .8; }
+.sp-searchrow { padding: 10px 12px 8px; gap: 8px; align-items: center; }
+.sp-searchrow .input { height: 56px; border-radius: 20px; background: #fff; border: 1px solid var(--line); box-shadow: 0 2px 10px rgba(15, 23, 42, .10); font-size: 15px; }
+.sp-filter { flex: none; width: 48px; height: 48px; border-radius: 16px; background: #fff; border: 1px solid var(--line); box-shadow: 0 2px 10px rgba(15, 23, 42, .10); font-size: 20px; cursor: pointer; }
+.sp-filter:active { transform: scale(.95); }
+.sp-chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 2px 0; }

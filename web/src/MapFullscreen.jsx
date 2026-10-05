@@ -8,7 +8,12 @@ import React, { useEffect, useState } from 'react';
 export function useMapFullscreen(mapRef) {
   const [full, setFull] = useState(false);
   useEffect(() => {
-    const t = setTimeout(() => mapRef.current?.invalidateSize(), 90);
+    // 🗺️ v2026.10.05.2 : Leaflet (invalidateSize) ou Mapbox GL (resize)
+    const t = setTimeout(() => {
+      const m = mapRef.current;
+      if (m?.invalidateSize) m.invalidateSize();
+      else m?.resize?.();
+    }, 90);
     return () => clearTimeout(t);
   }, [full]);
   useEffect(() => {

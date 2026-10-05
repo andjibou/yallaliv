@@ -1,28 +1,31 @@
 import React, { useEffect, useRef, useState } from 'react';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import { addBaseLayers } from './mapTiles.js';
 import { useT, useLang, toast } from './lib.jsx';
+import { createMap, gForward, gReverse, mbForward, mbReverse, fetchT, LANG3 } from './MapGl.jsx';
 
-// ================= 📍 v2026.09.23.10 — Géocodage double source (gratuit, sans clé) =================
-// Le champ « Adresse de livraison » du panier propose AUTOMATIQUEMENT des adresses
-// pendant la frappe ; toucher une suggestion pose le point de livraison.
-// Deux bases sont interrogées (la meilleure couverture possible sans clé API) :
-//  · Esri World Geocoder — couverture Égypte excellente, noms arabes locaux ;
-//  · Nominatim / OpenStreetMap — bon dans les zones bien cartographiées par OSM.
-const LANG3 = (l) => (l === 'ar' ? 'ar' : l === 'en' ? 'en' : 'fr');
-const fetchT = async (url, ms = 6000) => {
-  const ac = new AbortController();
-  const tm = setTimeout(() => ac.abort(), ms);
-  try { return await fetch(url, { signal: ac.signal }); } finally { clearTimeout(tm); }
-};
+// ================= 📍 v2026.10.05.3 — Géocodage CINQ-SOURCES (Google en tête) =================
+// Le champ « Adresse de livraison » du panier propose AUTOMATIQUEMENT des
+// adresses pendant la frappe ; toucher une suggestion pose le point de livraison.
+// CINQ bases sont interrogées EN PARALLÈLE (chaque étage tombe en douceur si sa
+// clé/quota manque — jamais de trou de couverture) :
+//  · Google Geocoder (10k/mois gratuits) — 🥇 le meilleur sur l'Égypte ;
+//  · Mapbox Geocoding v6 (100k/mois) — adresses précises (rue + numéro) ;
+//  · Esri World Geocoder — couverture Égypte, noms arabes locaux ;
+//  · Photon (OpenStreetMap) — auto-complétion, imbattable sur les quartiers
+//    (« smou » → Smouha) ;
+//  · Nominatim (OpenStreetMap) — zones bien cartographiées.
+// Fusion + dédoublonnage ≈15 m.
 
 /**
- * Géocodage inverse (coordonnées → adresse lisible) : Esri + Nominatim en parallèle,
- * on garde l'adresse la plus détaillée (rue + numéro + quartier = score le plus haut).
+ * Géocodage inverse (coordonnées → adresse lisible) : Mapbox d'abord (adresse
+ * la plus propre, avec numéro), sinon Esri + Nominatim en parallèle et on garde
+ * l'adresse la plus détaillée (rue + numéro + quartier = score le plus haut).
  */
 export async function reverseGeocode(lat, lng, lang = 'fr') {
   const l = LANG3(lang);
+  const g = await gReverse(lat, lng, l).catch(() => null);   // 🥇 Google d'abord
+  if (g) return g;
+  const mb = await mbReverse(lat, lng, l).catch(() => null);   // 🥈 Mapbox
+  if (mb) return mb;
   const jobs = [
     // Esri World Geocoder (sans clé)
     (async () => {
@@ -52,44 +55,48 @@ export async function reverseGeocode(lat, lng, lang = 'fr') {
 }
 
 /**
- * 🔎 v2026.10.05.1 — Recherche par ADRESSE TAPÉE (texte → position) : TROIS moteurs
- * GRATUITS interrogés EN PARALLÈLE (le maximum de couverture sans clé API, qualité
- * proche de Google) :
- *  · Esri World Geocoder — couverture Égypte excellente, noms arabes locaux ;
- *  · Photon (OpenStreetMap) — auto-complétion rapide, très bon sur les frappes
- *    partielles (« smou » trouve déjà Smouha) ;
- *  · Nominatim (OpenStreetMap) — complet sur les zones bien cartographiées.
- * Fusion + dédoublonnage (≈15 m) + classement par source. Biais vers « near »
- * (Alexandrie par défaut côté appelants) : « Miami » trouve Miami d'Alexandrie.
+ * 🔎 v2026.10.05.3 — Recherche par ADRESSE TAPÉE (texte → position) : CINQ
+ * moteurs interrogés EN PARALLÈLE — Google en tête (les meilleures données
+ * Égypte), puis Mapbox, Esri, Photon (frappes partielles/quartiers) et
+ * Nominatim. Fusion + dédoublonnage (≈15 m) + classement par source. Biais vers
+ * « near » (Alexandrie par défaut côté appelants).
  * Retourne [{lat, lng, label}].
  */
 export async function geocodeSearch(q, lang = 'fr', near = null) {
   const l = LANG3(lang);
   const s = String(q || '').trim();
   if (s.length < 3) return [];
-  // 🥇 ordre de pertinence : frappe PARTIELLE (un seul mot) → Photon d'abord (auto-
-  // complétion façon Google : « smou » trouve Smouha) ; adresse complète → Esri d'abord.
-  const order = s.includes(' ') ? [0, 1, 2] : [1, 0, 2];
+  // 🥇 ordre de pertinence : adresse COMPLÈTE → Google puis Mapbox/Esri ; frappe
+  // PARTIELLE (un seul mot) → Photon d'abord (« smou » trouve déjà Smouha).
+  const order = s.includes(' ') ? [0, 1, 2, 3, 4] : [3, 0, 2, 1, 4];
   const acc = [];   // chaque moteur dépose ses résultats DÈS qu'il répond
   const jobs = [
-    (async () => {   // ① Esri
+    (async () => {   // ① Google Geocoder (🥇 Égypte — renvoie [] sans clé)
+      const r = await gForward(s, l, near).catch(() => []);
+      r.forEach((x) => acc.push({ ...x, src: 0 }));
+    })(),
+    (async () => {   // ② Mapbox Geocoding v6
+      const r = await mbForward(s, l, near).catch(() => []);
+      r.forEach((x) => acc.push({ ...x, src: 1 }));
+    })(),
+    (async () => {   // ③ Esri
       const esri = near ? `&location=${near.lng},${near.lat}&distance=25000` : '';
       const d = await (await fetchT(`https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?f=json&singleLine=${encodeURIComponent(s)}&maxLocations=6&langCode=${l}${esri}`, 4500)).json();
-      (d?.candidates || []).filter((c) => c.location).forEach((c) => acc.push({ lat: c.location.y, lng: c.location.x, label: c.address, src: 0 }));
+      (d?.candidates || []).filter((c) => c.location).forEach((c) => acc.push({ lat: c.location.y, lng: c.location.x, label: c.address, src: 2 }));
     })().catch(() => {}),
-    (async () => {   // ② Photon (auto-complétion façon Google)
+    (async () => {   // ③ Photon (auto-complétion façon Google)
       const bias = near ? `&lat=${near.lat}&lon=${near.lng}` : '';
       const d = await (await fetchT(`https://photon.komoot.io/api/?q=${encodeURIComponent(s)}&limit=6&lang=${l}${bias}`, 4500)).json();
       (d?.features || []).filter((f) => f?.geometry?.coordinates).forEach((f) => {
         const a = f.properties || {};
         const bits = [...new Set([a.name, a.street && (a.housenumber ? a.housenumber + ' ' + a.street : a.street), a.district, a.city, a.state, a.country].filter(Boolean))].slice(0, 4);
-        if (bits.length) acc.push({ lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], label: bits.join(', '), src: 1 });
+        if (bits.length) acc.push({ lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], label: bits.join(', '), src: 3 });
       });
     })().catch(() => {}),
-    (async () => {   // ③ Nominatim
+    (async () => {   // ④ Nominatim
       const vb = near ? `&viewbox=${near.lng - 0.4},${near.lat + 0.4},${near.lng + 0.4},${near.lat - 0.4}` : '';
       const d = await (await fetchT(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(s)}&format=json&limit=5&accept-language=${l}${vb}`, 4500)).json();
-      (d || []).forEach((x) => acc.push({ lat: +x.lat, lng: +x.lon, label: x.display_name, src: 2 }));
+      (d || []).forEach((x) => acc.push({ lat: +x.lat, lng: +x.lon, label: x.display_name, src: 4 }));
     })().catch(() => {}),
   ];
   // ⏱️ 2,8 s GRAND MAX tout compris : un moteur lent ne retarde JAMAIS l'affichage —
@@ -106,9 +113,9 @@ export async function geocodeSearch(q, lang = 'fr', near = null) {
 }
 
 /**
- * Sélecteur de position façon Uber :
+ * Sélecteur de position façon Uber (v2026.10.05.2 : carte Mapbox GL) :
  * l'épingle 📌 reste FIXE au centre — l'utilisateur déplace la carte.
- * L'adresse sous l'épingle = la plus détaillée des deux bases (Esri/OSM).
+ * L'adresse sous l'épingle = Mapbox, sinon la plus détaillée des bases gratuites.
  */
 export default function PickMap({ initial, onConfirm }) {
   const t = useT();
@@ -123,8 +130,7 @@ export default function PickMap({ initial, onConfirm }) {
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    map.current = L.map(el.current, { zoomControl: true }).setView([initial.lat, initial.lng], 16);
-    addBaseLayers(map.current);   // 🗺️ Leaflet | © OpenStreetMap
+    map.current = createMap(el.current, { lang: langRef.current, center: [initial.lng, initial.lat], zoom: 16 });
 
     const upd = () => {
       const c = map.current.getCenter();
@@ -139,14 +145,14 @@ export default function PickMap({ initial, onConfirm }) {
         setAddr(await reverseGeocode(c.lat, c.lng, langRef.current));
       }, 350);
     });
-    setTimeout(() => map.current?.invalidateSize(), 60);
+    setTimeout(() => map.current?.resize(), 60);
     return () => { clearTimeout(tm.current); map.current?.remove(); map.current = null; };
   }, []);
 
   const goToMe = () => {
     if (!navigator.geolocation) return toast(t('gps_fail'), 'err');
     navigator.geolocation.getCurrentPosition(
-      (p) => map.current?.setView([p.coords.latitude, p.coords.longitude], 16),
+      (p) => map.current?.jumpTo({ center: [p.coords.longitude, p.coords.latitude], zoom: 16 }),
       () => toast(t('gps_fail'), 'err'),
       { timeout: 6000 }
     );

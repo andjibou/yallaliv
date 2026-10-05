@@ -9,6 +9,8 @@ import AccountSettings from '../AccountSettings.jsx';
 import { StoresMap } from '../RouteMap.jsx';
 
 const TYPE_META = { restaurant: { e: '🍽️', c: '#ef6c4d' }, market: { e: '🛒', c: '#3b82f6' }, pharmacy: { e: '💊', c: '#14b8a6' } };
+// 🖼️ v2026.10.08.2 — couverture des magasins SANS photo : image de l'activité
+const COVER_IMG = { restaurant: '/stores/restaurant.jpg', market: '/stores/supermarket.jpg', pharmacy: '/stores/pharmacy.jpg', electronics: '/stores/electronics.jpg', appliance: '/stores/appliance.jpg' };
 // 🏪 v2026.09.27.1 — cartes magasins de l'accueil (photos réalistes) + départements
 const STORE_CARDS = [
   { type: 'restaurant', img: '/stores/restaurant.jpg', key: 'restaurant' },
@@ -209,12 +211,14 @@ function PgCard({ p, rating, fav, onFav, onOpen, onAdd }) {
 
 /* ↔️ v2026.10.04.5 : les produits s'affichent en LIGNES HORORALES DÉROULANTES
    (accueil = une seule ligne · catégories/magasins = une ligne par section) */
-function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd }) {
+function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd, grid }) {
   if (!prods || !prods.length) return null;
   return (
     <>
       {title && <div className="h2 mb8 mt12">{title}</div>}
-      <div className="pg-scroll">
+      {/* 🧱 v2026.10.08.2 : grid → GRILLE 2 colonnes (grandes cartes, défilement VERTICAL
+          uniquement) ; sans grid → ligne horizontale déroulante (🏆/✨, accueil : inchangées) */}
+      <div className={grid ? 'pg-grid' : 'pg-scroll'}>
         {prods.map((p) => (
           <PgCard key={p.id} p={p} rating={rating} fav={!!favs[p.id]} onFav={onFav} onOpen={onOpen} onAdd={onAdd} />
         ))}
@@ -427,7 +431,7 @@ export function ClientHome() {
     api('/stores').then((d) => setStores(d.stores)).catch(() => setStores([]));
     api('/products').then((d) => setProducts(d.products)).catch(() => setProducts([]));
     api('/ads').then((d) => setAds(d.ads)).catch(() => setAds([]));   // 📣 pubs du superadmin
-    api('/store-types').then((d) => setStypes(d.types)).catch(() => setStypes(null));   // 🏬 cartes gérées par le superadmin
+    api('/store-types').then((d) => setStypes(d.types)).catch(() => setStypes([]));   // 🏬 cartes gérées par le superadmin (null = chargement → squelette ; [] = erreur/repli cartes intégrées)
     Promise.all([api('/listings?cat=property'), api('/listings?cat=auto')])
       .then(([p, a2]) => setImmo([...p.listings, ...a2.listings]))
       .catch(() => setImmo([]));
@@ -624,7 +628,17 @@ export function ClientHome() {
       {/* 🏪 Magasins par catégorie — v2026.09.30.5 : cartes CARRÉES à icônes, gérées depuis
           l'espace superadmin (ajout / remplacement / suppression). Repli : cartes intégrées. */}
       <div className="h2 mb8 mt12">🏪 {t('stores_by_type')}</div>
-      {stypes && stypes.length > 0 ? (
+      {stypes === null ? (
+        /* 🩻 v2026.10.08.2 : SQUELETTE pendant le chargement — avant, les cartes intégrées
+           (anciennes photos par défaut) s'affichaient quelques secondes avant d'être
+           remplacées par les vraies cartes du superadmin : l'utilisateur voyait d'ANCIENNES
+           PHOTOS à chaque ouverture. Maintenant : rien de faux ne s'affiche. */
+        <div className="stc-row" aria-hidden="true">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <span key={i} className="sty-card"><span className="sty-sk-icon" /><span className="sty-sk-label" /></span>
+          ))}
+        </div>
+      ) : stypes.length > 0 ? (
         <AutoScroll className="stc-row">
           {stypes.map((c) => (
             <button key={c.type} type="button" className="sty-card" onClick={() => nav('/app/stores/' + c.type)} title={lang === 'ar' ? c.label_ar : lang === 'en' ? c.label_en : c.label_fr}>
@@ -761,11 +775,22 @@ export function StorePage() {
     setDetail(null);
   };
 
+  // 🏪 v2026.10.08.2 — progression du scroll (0 → 1) : la couverture se rétracte,
+  // la carte d'info + la recherche restent fixées en haut (en-tête premium compact).
+  const [headP, setHeadP] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    const on = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => setHeadP(Math.min(1, Math.max(0, window.scrollY / 110)))); };
+    window.addEventListener('scroll', on, { passive: true });
+    on();
+    return () => { window.removeEventListener('scroll', on); cancelAnimationFrame(raf); };
+  }, []);
   if (err) return <><div className="topbar"><BackBtn /></div><Empty e="😔" text={err} /></>;
   if (!data) return <Spinner />;
 
   const { store, products } = data;
   const meta = TYPE_META[store.type] || TYPE_META.market;
+  const eta = etaRange(store.type, null);   // 🕘 v2026.10.08.2 : durée de livraison affichée dans la carte
   const s = pq.trim().toLowerCase();
   const fProds = s ? products.filter((p) =>
     (p.name || '').toLowerCase().includes(s) || (p.description || '').toLowerCase().includes(s) || (p.category || '').toLowerCase().includes(s)
@@ -815,75 +840,90 @@ export function StorePage() {
           l'espace restant. La carte 🗺️ s'ouvre à l'intérieur de la bannière. */}
       {/* 📌 v2026.10.04.7 — bannière du magasin + barre de recherche FIXES en haut.
           La bannière est COLLÉE à l'en-tête VERT (aucun espace au-dessus). */}
-      <div className="sticky-head glue">
-      <div className="store-bar">
-        <div className="store-banner" style={{ background: `linear-gradient(135deg, ${store.color || meta.c}, #0f172a)` }}>
-          <div className="sb-top">
-            <BackBtn />
-            <div className="sb-info">
-              <div className="row" style={{ alignItems: 'center', gap: 6 }}>
-                <span className="big ellipsis">{store.name}</span>
-                {closed && <span className="badge st-cancelled">{t('closed')}</span>}
-              </div>
-              <div className="small" style={{ opacity: .9 }}>⭐ {Number(store.rating).toFixed(1)} · {t('type_' + store.type)}</div>
-              {/* ℹ️ v2026.10.04.7 — infos longues : texte raccourci, CLIC = texte complet
-                  dans la bannière (sans déplacer la photo, sans sortir de la bannière) */}
-              {store.description && (
-                <button type="button" className="small sb-desc" onClick={() => setPopInfo((v) => (v === 'desc' ? null : 'desc'))} title={store.description}>ℹ️ {store.description}</button>
-              )}
-              <div className="row wrap" style={{ gap: 6 }}>
-                {store.min_order > 0 && <span className="badge sb-badge">🧾 {t('min_lbl')} {fmtMoney(store.min_order)}</span>}
-                <button type="button" className="badge sb-badge sb-more" onClick={() => setPopInfo((v) => (v === 'addr' ? null : 'addr'))} title={store.address}>📍 {store.address}</button>
-                {store.lat != null && (
-                  <button type="button" className={'chip' + (showMap ? ' on' : '')} onClick={() => setShowMap((v) => !v)} style={{ fontWeight: 800 }}>
-                    🗺️ {t('tab_map')}
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="sb-photo">
-              {store.photo
-                ? <img src={photoUrl(store.photo, 'thumb')} alt="" />
-                : <span className="store-emoji">{store.emoji || meta.e}</span>}
-            </div>
+      <div className="sticky-head glue sp-head">
+        {/* 1️⃣ couverture : photo du magasin (ou image de l'activité) + assombrie 40 %.
+            Sa hauteur se rétracte au scroll (120 px → 0) : l'image, ancrée en haut,
+            disparaît progressivement sous la carte d'info. */}
+        <div className="sp-cover" style={{ height: Math.round(120 * (1 - headP)) }}>
+          <img className="sp-bg" src={store.photo ? photoUrl(store.photo, 'full') : (COVER_IMG[store.type] || '/stores/supermarket.jpg')} alt="" />
+          <div className="sp-shade" />
+          <span className="sp-back" style={{ opacity: 1 - headP * 1.5, pointerEvents: headP > .6 ? 'none' : 'auto' }}><BackBtn /></span>
+          <div className="sp-fabs" style={{ opacity: 1 - headP * 1.5, pointerEvents: headP > .6 ? 'none' : 'auto' }}>
+            <button type="button" className="sp-fab" onClick={() => setPopInfo((v) => (v === 'addr' ? null : 'addr'))} title={store.address}>👤</button>
+            <button type="button" className="sp-fab" onClick={async () => { try { const pr = ('Notification' in window) ? await Notification.requestPermission() : 'unsupported'; if (pr === 'granted') notif('🔔 YallaLiv', store.name); toast(pr === 'granted' ? '🔔 ✓' : '🔕 ' + pr); } catch {} }}>🔔</button>
           </div>
-          {popInfo && (
-            <div className="sb-infopop">
-              <span>{popInfo === 'desc' ? store.description : '📍 ' + store.address}</span>
-              <a className="btn blue sm" style={{ flex: 'none', padding: '4px 10px' }} href={store.lat != null ? gmapsNavUrl(store.lat, store.lng) : gmapsSearchUrl(store.address)} target="_blank" rel="noopener" title={t('gmaps_open')}>🧭</a>
-              <button type="button" onClick={() => setPopInfo(null)} aria-label="fermer">✕</button>
-            </div>
-          )}
-          {showMap && store.lat != null && (
-            <div className="store-mapbox"><StoresMap stores={[store]} height={200} /></div>
-          )}
         </div>
-      </div>
-      {closed && <div className="banner warn">{t('store_closed')}</div>}
-      <div className="row sticky-pad store-search">
-        <SuggestBox
-          value={pq}
-          onChange={setPq}
-          placeholder={'🔍 ' + t('search_product_ph')}
-          clearTitle={t('clear_search')}
-          getSugs={() => fProds.map((p) => ({ key: p.id, icon: p.photo ? <img src={photoUrl(p.photo, 'thumb')} alt="" style={{ width: 24, height: 24, borderRadius: 7, objectFit: 'cover' }} /> : <NoPhoto w={24} h={24} radius={7} />, label: p.name, sub: fmtMoney(p.price), p }))}
-          onEnter={logSearch}
-          onPick={(x) => { logSearch(x.label); openDetail(x.p); }}       // ouvre directement la fiche produit
-        />
-      </div>
+        {/* 2️⃣ carte d'info flottante en VERRE DÉPOLI : logo vert bordé blanc · nom 24 px ·
+            catégorie · ⭐ note + (avis) · 🕘 durée de livraison */}
+        <div className="sp-bar" style={{ marginTop: Math.round(-55 * (1 - headP)) }}>
+          <span className="sp-logo">{store.photo
+            ? <img src={photoUrl(store.photo, 'thumb')} alt="" />
+            : (store.emoji || meta.e)}</span>
+          <span className="sp-mid">
+            <span className="sp-name">{store.name}{closed && <span className="badge st-cancelled" style={{ marginLeft: 6, fontSize: 10, verticalAlign: 'middle' }}>{t('closed')}</span>}</span>
+            <span className="sp-type">{t('type_' + store.type)}{store.min_order > 0 ? ' · 🧾 ' + fmtMoney(store.min_order) : ''}</span>
+          </span>
+          <span className="sp-rate">
+            <span className="sp-star">⭐ {Number(store.rating).toFixed(1)}</span>
+            {store.reviews_count > 0 && <span className="sp-rc">({store.reviews_count})</span>}
+          </span>
+          <span className="sp-eta">
+            <span className="sp-min">🕘 {eta[0]}–{eta[1]}</span>
+            <span className="sp-sub">{t('delivery_fee')}</span>
+          </span>
+        </div>
+        {popInfo && (
+          <div className="sb-infopop">
+            <span>{popInfo === 'desc' ? store.description : '📍 ' + store.address}</span>
+            <a className="btn blue sm" style={{ flex: 'none', padding: '4px 10px' }} href={store.lat != null ? gmapsNavUrl(store.lat, store.lng) : gmapsSearchUrl(store.address)} target="_blank" rel="noopener" title={t('gmaps_open')}>🧭</a>
+            <button type="button" onClick={() => setPopInfo(null)} aria-label="fermer">✕</button>
+          </div>
+        )}
+        {showMap && store.lat != null && (
+          <div className="store-mapbox"><StoresMap stores={[store]} height={200} /></div>
+        )}
+        {closed && <div className="banner warn">{t('store_closed')}</div>}
+        {/* 4️⃣ recherche blanche 56 px + filtre (défile jusqu'aux catégories 🗂️) */}
+        <div className="row sp-searchrow">
+          <SuggestBox
+            value={pq}
+            onChange={setPq}
+            placeholder={'🔍 ' + t('search_product_ph')}
+            clearTitle={t('clear_search')}
+            getSugs={() => fProds.map((p) => ({ key: p.id, icon: p.photo ? <img src={photoUrl(p.photo, 'thumb')} alt="" style={{ width: 24, height: 24, borderRadius: 7, objectFit: 'cover' }} /> : <NoPhoto w={24} h={24} radius={7} />, label: p.name, sub: fmtMoney(p.price), p }))}
+            onEnter={logSearch}
+            onPick={(x) => { logSearch(x.label); openDetail(x.p); }}
+          />
+          <button type="button" className="sp-filter" onClick={() => document.getElementById('sp-prodmenu')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} title={t('products_by_cat')}>🎚️</button>
+        </div>
       </div>{/* fin sticky-head */}
+      {/* mini-puces compactes (défilent avec la page) : adresse 📍 cliquable + carte 🗺️ + description ℹ️ */}
+      <div className="sp-chips">
+        <button type="button" className="badge sb-badge sb-more" onClick={() => setPopInfo((v) => (v === 'addr' ? null : 'addr'))} title={store.address}>📍 {store.address}</button>
+        {store.lat != null && (
+          <button type="button" className={'chip' + (showMap ? ' on' : '')} onClick={() => setShowMap((v) => !v)} style={{ fontWeight: 800 }}>
+            🗺️ {t('tab_map')}
+          </button>
+        )}
+        {store.description && (
+          <button type="button" className="badge sb-badge sb-more" onClick={() => setPopInfo((v) => (v === 'desc' ? null : 'desc'))} title={store.description}>ℹ️ {store.description}</button>
+        )}
+      </div>
       {pq.trim() !== '' && Object.keys(byCat).length === 0 && <div className="mt12"><Empty e="🔎" text={t('no_data')} /></div>}
 
-      {/* 🗂️ 2.2 v2026.10.04.2 — produits par catégorie (cartes rondes ; pharmacie : 💊/💄) */}
+      {/* 🗂️ 2.2 v2026.10.08.2 — MENU HORIZONTAL des catégories : « Tout » en PREMIER, puis
+          une boule par catégorie (pharmacie : 💊/💄). Un tap filtre la grille du dessous. */}
       {!s && cats.length > 0 && (<>
-        <div className="h2 mb8 mt12">🗂️ {t('products_by_cat')}</div>
+        <div id="sp-prodmenu" className="h2 mb8 mt12">🗂️ {t('products_by_cat')}</div>
         <AutoScroll className="stc-row">
-          {cats.map((c) => (
-            <button key={c.label} type="button" className={'sty-card' + (selCat === c.label ? ' on' : '')} onClick={() => setSelCat((v) => (v === c.label ? null : c.label))} title={c.label}>
-              <span className="sty-icon">{c.photo
-                ? <img src={photoUrl(c.photo, 'thumb')} alt="" loading="lazy" />
-                : <span className="sty-emoji">{c.emoji}</span>}</span>
-              <span className="sty-label">{c.label}</span>
+          {[{ label: null }, ...cats].map((c, i) => (
+            <button key={c.label || 'tout'} type="button" className={'sty-card' + ((selCat || null) === c.label ? ' on' : '')} onClick={() => setSelCat(c.label)} title={c.label || t('all')}>
+              <span className="sty-icon">{i === 0
+                ? <span className="sty-emoji">🗂️</span>
+                : c.photo
+                  ? <img src={photoUrl(c.photo, 'thumb')} alt="" loading="lazy" />
+                  : <span className="sty-emoji">{c.emoji}</span>}</span>
+              <span className="sty-label">{c.label || t('all')}</span>
             </button>
           ))}
         </AutoScroll>
@@ -900,12 +940,9 @@ export function StorePage() {
         <ProductGrid title={'✨ ' + t('suggested_for_you')} prods={suggRow} rating={store.rating} favs={favs} onFav={toggleFav} onOpen={openDetail} onAdd={addFromGrid} />
       </>)}
 
-      {Object.entries(byCat).map(([cat, prods]) => (
-        <div key={cat}>
-          <div className="sec-title">{cat}</div>
-          <ProductGrid prods={prods} rating={store.rating} favs={favs} onFav={toggleFav} onOpen={openDetail} onAdd={addFromGrid} />
-        </div>
-      ))}
+      {/* 🧱 v2026.10.08.2 — TOUS les produits (ou la catégorie choisie via le menu) en
+          GRILLE 2 colonnes : grandes cartes, défilement VERTICAL uniquement. */}
+      <ProductGrid grid prods={Object.values(byCat).flat()} rating={store.rating} favs={favs} onFav={toggleFav} onOpen={openDetail} onAdd={addFromGrid} />
 
       <Modal open={!!detail} onClose={() => setDetail(null)} title={t('product_details')}>
         {detail && (
@@ -944,7 +981,7 @@ export function CartPage() {
   const [pickOpen, setPickOpen] = useState(false);
   const [sugg, setSugg] = useState(null);       // 📍 v2026.09.23.10 : propositions d'adresses (frappe)
   const suggTm = useRef(null);
-  const suggSeq = useRef(0);   // 🛡️ v2026.10.05.1 : une réponse tardive d'une frappe précédente ne peut plus écraser les résultats courants
+  const suggSeq = useRef(0);   // 🛡️ v2026.10.08.2 : une réponse tardive d'une frappe précédente ne peut plus écraser les résultats courants
   const [done, setDone] = useState(null); // 🔑 confirmation finale avec le code de remise
   const [coErr, setCoErr] = useState({});  // ⚠️ erreurs par champ du checkout
   const [card, setCard] = useState({ no: '', exp: '', cvc: '' });
@@ -1530,7 +1567,7 @@ export function ClientProfile() {
       </div>
       <div className="card mt12">
         <div style={{ fontWeight: 700 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.05.1</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.08.2</div>
       </div>
 
       {user.role === 'client' && (
@@ -1844,7 +1881,7 @@ export function ListingDetailPage() {
   const [dSugg, setDSugg] = useState(null);
   const [dBusy, setDBusy] = useState(false);
   const dTm = useRef(null);
-  const dSeq = useRef(0);   // 🛡️ v2026.10.05.1 : anti-réponse-périmée
+  const dSeq = useRef(0);   // 🛡️ v2026.10.08.2 : anti-réponse-périmée
   const subLbl = (k) => (SUB_LBL[k] ? (SUB_LBL[k][lang] || SUB_LBL[k].fr) : k);
   const condLbl = (k) => (COND_LBL[k] ? (COND_LBL[k][lang] || COND_LBL[k].fr) : '');
 
@@ -2532,7 +2569,7 @@ export function ServiceRequestPage() {
   const [busy, setBusy] = useState(false);
   const [pPick, setPPick] = useState(false); const [dPick, setDPick] = useState(false);
   const pTm = useRef(null); const dTm = useRef(null);
-  const pSeq = useRef(0); const dSeq = useRef(0);   // 🛡️ v2026.10.05.1 : anti-réponse-périmée
+  const pSeq = useRef(0); const dSeq = useRef(0);   // 🛡️ v2026.10.08.2 : anti-réponse-périmée
 
   const onAddr = (which) => (e) => {
     const v = e.target.value;
@@ -2662,11 +2699,12 @@ export function StoresByTypePage() {
   const [q, setQ] = useState('');
   const [gDetail, setGDetail] = useState(null); const [gQty, setGQty] = useState(1); const [gBig, setGBig] = useState(null);
   const [favs, setFavs] = useState(() => loadPFavs());   // ❤️ v2026.10.04.3 : favoris produits (appareil)
+  const [selPCat, setSelPCat] = useState(null);   // 🗂️ v2026.10.08.2 : filtre par catégorie de produit (null = Tout)
   const isPharma = type === 'pharmacy';
 
   useStickyBelowHead();   // 📌 v2026.10.04.7 : bloc fixé SOUS l'en-tête vert
   useEffect(() => {
-    setStores(null); setProds(null); setTop(null); setSugg(undefined);
+    setStores(null); setProds(null); setTop(null); setSugg(undefined); setSelPCat(null);
     api('/stores?type=' + type).then((d) => setStores(d.stores)).catch(() => setStores([]));
     api('/products?type=' + type).then((d) => setProds(d.products)).catch(() => setProds([]));
     api('/products/top?type=' + type).then((d) => setTop(d.products)).catch(() => setTop([]));
@@ -2719,18 +2757,20 @@ export function StoresByTypePage() {
   const topRow = top === null || prods === null ? null : capPerStore(top.length ? top : prods);
   const suggRow = sugg === undefined || prods === null ? null : capPerStore(sugg || prods);
 
-  // 5️⃣ lignes par nom de produit (pharmacie : 💊 Médicaments / 💄 Cosmétiques)
-  const rows = [];
+  // 5️⃣ v2026.10.08.2 — CATÉGORIES DE PRODUITS (pharmacie : 💊/💄) pour le menu horizontal :
+  // « Tout » + une boule par catégorie (ex. pizza) → la grille affiche tous les produits
+  // de cette catégorie TOUS MAGASINS CONFONDUS (tous les types de pizza de la catégorie).
+  const prodCats = [];
   if (prods) {
     if (isPharma) {
       for (const g of ['meds', 'cosm']) {
         const list = prods.filter((p) => pharmaGroup(p) === g);
-        if (list.length) rows.push({ title: (g === 'meds' ? '💊 ' : '💄 ') + t(g === 'meds' ? 'pharma_meds' : 'pharma_cosm'), prods: list });
+        if (list.length) prodCats.push({ label: t(g === 'meds' ? 'pharma_meds' : 'pharma_cosm'), emoji: g === 'meds' ? '💊' : '💄', photo: list.find((x) => x.photo)?.photo || null, prods: list });
       }
     } else {
       const m = new Map();
-      for (const p of prods) { const k = (p.name || '').trim(); if (!k) continue; if (!m.has(k)) m.set(k, []); m.get(k).push(p); }
-      for (const [name, list] of [...m.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))) rows.push({ title: name, prods: list });
+      for (const p of prods) { const k = p.category || '•'; if (!m.has(k)) m.set(k, []); m.get(k).push(p); }
+      for (const [c, list] of [...m.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))) prodCats.push({ label: c, emoji: list[0]?.emoji || '📦', photo: list.find((x) => x.photo)?.photo || null, prods: list });
     }
   }
 
@@ -2772,9 +2812,26 @@ export function StoresByTypePage() {
         <ProductGrid title={'🏆 ' + t('top_ordered')} prods={topRow} favs={favs} onFav={toggleFav} onOpen={openProduct} onAdd={addFromGrid} />
         {/* 4️⃣ suggestions personnalisées (à défaut : produits disponibles) */}
         <ProductGrid title={'✨ ' + t('suggested_for_you')} prods={suggRow} favs={favs} onFav={toggleFav} onOpen={openProduct} onAdd={addFromGrid} />
-        {/* 5️⃣ une section par nom de produit (pharmacie : 💊 / 💄) — grille 2 colonnes */}
+        {/* 5️⃣ v2026.10.08.2 — MENU HORIZONTAL des catégories (« Tout » en 1er) + GRILLE
+            2 colonnes de tous les produits (défilement VERTICAL uniquement). Un tap sur une
+            catégorie (ex. pizza) → tous les types de pizza, tous magasins confondus. */}
         {prods !== null && prods.length === 0 && <div className="mt12"><Empty e="🛍️" text={t('no_products_type')} /></div>}
-        {rows.map((r) => <ProductGrid key={r.title} title={r.title} prods={capPerStore(r.prods)} favs={favs} onFav={toggleFav} onOpen={openProduct} onAdd={addFromGrid} />)}
+        {prodCats.length > 1 && (<>
+          <div className="h2 mb8 mt12">🗂️ {t('products_by_cat')}</div>
+          <AutoScroll className="stc-row">
+            {[{ label: null }, ...prodCats].map((c, i) => (
+              <button key={c.label || 'tout'} type="button" className={'sty-card' + ((selPCat || null) === c.label ? ' on' : '')} onClick={() => setSelPCat(c.label)} title={c.label || t('all')}>
+                <span className="sty-icon">{i === 0
+                  ? <span className="sty-emoji">🗂️</span>
+                  : c.photo
+                    ? <img src={photoUrl(c.photo, 'thumb')} alt="" loading="lazy" />
+                    : <span className="sty-emoji">{c.emoji}</span>}</span>
+                <span className="sty-label">{c.label || t('all')}</span>
+              </button>
+            ))}
+          </AutoScroll>
+        </>)}
+        <ProductGrid grid prods={(selPCat ? (prodCats.find((c) => c.label === selPCat)?.prods || []) : prods) || []} favs={favs} onFav={toggleFav} onOpen={openProduct} onAdd={addFromGrid} />
       </>)}
 
       {/* fiche produit rapide (depuis la recherche) */}
@@ -3110,7 +3167,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.05.1</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.08.2</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>

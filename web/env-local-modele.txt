@@ -1,0 +1,24 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# 📋 Modèle de fichier web/.env.local — YallaLiv v2026.10.05.3 (Google Maps)
+# ═══════════════════════════════════════════════════════════════════════════
+# USAGE :
+#   1. Copier ce fichier en « .env.local » DANS le dossier web/ (à côté de
+#      package.json) — pour le test local uniquement.
+#   2. ⚠️ .env.local est IGNORÉ par git (protection) — il ne part JAMAIS sur
+#      GitHub. Pour la production, saisir les MÊMES valeurs dans VERCEL :
+#      Settings → Environment Variables (Production + Preview).
+#
+# SANS aucune clé, l'app marche quand même : la façade retombe sur le fond
+# OpenStreetMap. Avec une seule clé, elle utilise le meilleur disponible :
+#   Google (clés présentes) → Mapbox → OpenStreetMap.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# 🥇 GOOGLE MAPS — cartes + recherche d'adresse + itinéraires
+# (console.cloud.google.com → APIs & Services → Credentials → API key)
+# Activer : Maps JavaScript API, Geocoding API, Routes API (la vieille
+# Directions API n'existe plus pour les nouveaux projets depuis le 05/10/2026)
+VITE_GMAPS_KEY=AIza...COLLE_TA_CLE_ICI...
+
+# 🥈 MAPBOX — secours automatique si Google est absent/quota dépassé
+# (mapbox.com → account → tokens)
+VITE_MAPBOX_TOKEN=pk.eyJ1...COLLE_TON_TOKEN_ICI...

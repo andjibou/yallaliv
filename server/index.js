@@ -1081,7 +1081,9 @@ app.get('/api/products/suggested', auth, h(async (req, res) => {
 }));
 
 app.get('/api/stores/:id', h(async (req, res) => {
-  const store = await get('SELECT * FROM stores WHERE id=? AND status=?', [req.params.id, 'approved']);
+  // 🏪 v2026.10.08.2 : reviews_count pour l'en-tête premium (⭐ note + (nb d'avis))
+  const store = await get(`SELECT s.*, (SELECT COUNT(*) FROM reviews r WHERE r.store_id=s.id) AS reviews_count
+    FROM stores s WHERE s.id=? AND s.status='approved'`, [req.params.id]);
   if (!store) return res.status(404).json({ error: 'Magasin introuvable' });
   const products = await all('SELECT * FROM products WHERE store_id=? AND available=1 ORDER BY category, name', [store.id]);
   res.json({ store, products: await withPhotos(products) });

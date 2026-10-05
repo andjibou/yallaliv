@@ -8,3 +8,9 @@ server/data/
 
 *.log
 .DS_Store
+
+# 🔑 v2026.10.05.2 — Token Mapbox : variable d'env LOCALE, jamais sur GitHub
+# (le token est configuré dans Vercel → Settings → Environment Variables)
+web/.env
+web/.env.local
+web/.env.*.local
