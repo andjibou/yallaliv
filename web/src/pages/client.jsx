@@ -9,7 +9,7 @@ import AccountSettings from '../AccountSettings.jsx';
 import { StoresMap } from '../RouteMap.jsx';
 
 const TYPE_META = { restaurant: { e: '🍽️', c: '#ef6c4d' }, market: { e: '🛒', c: '#3b82f6' }, pharmacy: { e: '💊', c: '#14b8a6' } };
-// 🖼️ v2026.10.08.2 — couverture des magasins SANS photo : image de l'activité
+// 🖼️ v2026.10.08.3 — couverture des magasins SANS photo : image de l'activité
 const COVER_IMG = { restaurant: '/stores/restaurant.jpg', market: '/stores/supermarket.jpg', pharmacy: '/stores/pharmacy.jpg', electronics: '/stores/electronics.jpg', appliance: '/stores/appliance.jpg' };
 // 🏪 v2026.09.27.1 — cartes magasins de l'accueil (photos réalistes) + départements
 const STORE_CARDS = [
@@ -216,7 +216,7 @@ function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd, grid })
   return (
     <>
       {title && <div className="h2 mb8 mt12">{title}</div>}
-      {/* 🧱 v2026.10.08.2 : grid → GRILLE 2 colonnes (grandes cartes, défilement VERTICAL
+      {/* 🧱 v2026.10.08.3 : grid → GRILLE 2 colonnes (grandes cartes, défilement VERTICAL
           uniquement) ; sans grid → ligne horizontale déroulante (🏆/✨, accueil : inchangées) */}
       <div className={grid ? 'pg-grid' : 'pg-scroll'}>
         {prods.map((p) => (
@@ -629,7 +629,7 @@ export function ClientHome() {
           l'espace superadmin (ajout / remplacement / suppression). Repli : cartes intégrées. */}
       <div className="h2 mb8 mt12">🏪 {t('stores_by_type')}</div>
       {stypes === null ? (
-        /* 🩻 v2026.10.08.2 : SQUELETTE pendant le chargement — avant, les cartes intégrées
+        /* 🩻 v2026.10.08.3 : SQUELETTE pendant le chargement — avant, les cartes intégrées
            (anciennes photos par défaut) s'affichaient quelques secondes avant d'être
            remplacées par les vraies cartes du superadmin : l'utilisateur voyait d'ANCIENNES
            PHOTOS à chaque ouverture. Maintenant : rien de faux ne s'affiche. */
@@ -775,22 +775,33 @@ export function StorePage() {
     setDetail(null);
   };
 
-  // 🏪 v2026.10.08.2 — progression du scroll (0 → 1) : la couverture se rétracte,
+  // 🏪 v2026.10.08.3 — progression du scroll (0 → 1) : la couverture se rétracte,
   // la carte d'info + la recherche restent fixées en haut (en-tête premium compact).
   const [headP, setHeadP] = useState(0);
   useEffect(() => {
     let raf = 0;
-    const on = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => setHeadP(Math.min(1, Math.max(0, window.scrollY / 110)))); };
+    // 🖼️ v2026.10.08.3 — PHOTO PLEIN ÉCRAN : la page remonte SOUS l'en-tête 🚀 YallaLiv 🔔 👤,
+    // qui devient TRANSPARENT sur la photo (classes body). Dès que la couverture est
+    // rétractée (scroll), l'en-tête redevient vert plein — transition invisible.
+    document.body.classList.add('yl-sp-cover');
+    const on = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const p = Math.min(1, Math.max(0, window.scrollY / 110));
+        setHeadP(p);
+        document.body.classList.toggle('yl-sp-solid', p > 0.97);   /* couverture ~3 px : le repli du seuil est invisible */
+      });
+    };
     window.addEventListener('scroll', on, { passive: true });
     on();
-    return () => { window.removeEventListener('scroll', on); cancelAnimationFrame(raf); };
+    return () => { window.removeEventListener('scroll', on); cancelAnimationFrame(raf); document.body.classList.remove('yl-sp-cover', 'yl-sp-solid'); };
   }, []);
   if (err) return <><div className="topbar"><BackBtn /></div><Empty e="😔" text={err} /></>;
   if (!data) return <Spinner />;
 
   const { store, products } = data;
   const meta = TYPE_META[store.type] || TYPE_META.market;
-  const eta = etaRange(store.type, null);   // 🕘 v2026.10.08.2 : durée de livraison affichée dans la carte
+  const eta = etaRange(store.type, null);   // 🕘 v2026.10.08.3 : durée de livraison affichée dans la carte
   const s = pq.trim().toLowerCase();
   const fProds = s ? products.filter((p) =>
     (p.name || '').toLowerCase().includes(s) || (p.description || '').toLowerCase().includes(s) || (p.category || '').toLowerCase().includes(s)
@@ -834,7 +845,7 @@ export function StorePage() {
   };
 
   return (
-    <>
+    <div className="sp-page">
       {/* 🏪 v2026.10.04.6 — bannière PLEINE LARGEUR : le bouton ← est À L'INTÉRIEUR (tout à
           gauche), TOUTES les infos du magasin d'un côté, et la PHOTO du magasin remplit
           l'espace restant. La carte 🗺️ s'ouvre à l'intérieur de la bannière. */}
@@ -848,10 +859,6 @@ export function StorePage() {
           <img className="sp-bg" src={store.photo ? photoUrl(store.photo, 'full') : (COVER_IMG[store.type] || '/stores/supermarket.jpg')} alt="" />
           <div className="sp-shade" />
           <span className="sp-back" style={{ opacity: 1 - headP * 1.5, pointerEvents: headP > .6 ? 'none' : 'auto' }}><BackBtn /></span>
-          <div className="sp-fabs" style={{ opacity: 1 - headP * 1.5, pointerEvents: headP > .6 ? 'none' : 'auto' }}>
-            <button type="button" className="sp-fab" onClick={() => setPopInfo((v) => (v === 'addr' ? null : 'addr'))} title={store.address}>👤</button>
-            <button type="button" className="sp-fab" onClick={async () => { try { const pr = ('Notification' in window) ? await Notification.requestPermission() : 'unsupported'; if (pr === 'granted') notif('🔔 YallaLiv', store.name); toast(pr === 'granted' ? '🔔 ✓' : '🔕 ' + pr); } catch {} }}>🔔</button>
-          </div>
         </div>
         {/* 2️⃣ carte d'info flottante en VERRE DÉPOLI : logo vert bordé blanc · nom 24 px ·
             catégorie · ⭐ note + (avis) · 🕘 durée de livraison */}
@@ -883,7 +890,7 @@ export function StorePage() {
           <div className="store-mapbox"><StoresMap stores={[store]} height={200} /></div>
         )}
         {closed && <div className="banner warn">{t('store_closed')}</div>}
-        {/* 4️⃣ recherche blanche 56 px + filtre (défile jusqu'aux catégories 🗂️) */}
+        {/* 4️⃣ recherche blanche 56 px (pleine largeur) */}
         <div className="row sp-searchrow">
           <SuggestBox
             value={pq}
@@ -894,7 +901,6 @@ export function StorePage() {
             onEnter={logSearch}
             onPick={(x) => { logSearch(x.label); openDetail(x.p); }}
           />
-          <button type="button" className="sp-filter" onClick={() => document.getElementById('sp-prodmenu')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} title={t('products_by_cat')}>🎚️</button>
         </div>
       </div>{/* fin sticky-head */}
       {/* mini-puces compactes (défilent avec la page) : adresse 📍 cliquable + carte 🗺️ + description ℹ️ */}
@@ -911,10 +917,10 @@ export function StorePage() {
       </div>
       {pq.trim() !== '' && Object.keys(byCat).length === 0 && <div className="mt12"><Empty e="🔎" text={t('no_data')} /></div>}
 
-      {/* 🗂️ 2.2 v2026.10.08.2 — MENU HORIZONTAL des catégories : « Tout » en PREMIER, puis
+      {/* 🗂️ 2.2 v2026.10.08.3 — MENU HORIZONTAL des catégories : « Tout » en PREMIER, puis
           une boule par catégorie (pharmacie : 💊/💄). Un tap filtre la grille du dessous. */}
       {!s && cats.length > 0 && (<>
-        <div id="sp-prodmenu" className="h2 mb8 mt12">🗂️ {t('products_by_cat')}</div>
+        <div className="h2 mb8 mt12">🗂️ {t('products_by_cat')}</div>
         <AutoScroll className="stc-row">
           {[{ label: null }, ...cats].map((c, i) => (
             <button key={c.label || 'tout'} type="button" className={'sty-card' + ((selCat || null) === c.label ? ' on' : '')} onClick={() => setSelCat(c.label)} title={c.label || t('all')}>
@@ -940,7 +946,7 @@ export function StorePage() {
         <ProductGrid title={'✨ ' + t('suggested_for_you')} prods={suggRow} rating={store.rating} favs={favs} onFav={toggleFav} onOpen={openDetail} onAdd={addFromGrid} />
       </>)}
 
-      {/* 🧱 v2026.10.08.2 — TOUS les produits (ou la catégorie choisie via le menu) en
+      {/* 🧱 v2026.10.08.3 — TOUS les produits (ou la catégorie choisie via le menu) en
           GRILLE 2 colonnes : grandes cartes, défilement VERTICAL uniquement. */}
       <ProductGrid grid prods={Object.values(byCat).flat()} rating={store.rating} favs={favs} onFav={toggleFav} onOpen={openDetail} onAdd={addFromGrid} />
 
@@ -949,7 +955,7 @@ export function StorePage() {
           <ProductDetail product={detail} closed={closed} qty={dQty} setQty={setDQty} onAdd={addFromDetail} />
         )}
       </Modal>
-    </>
+    </div>
   );
 }
 // group products by category (no hook: called after conditional returns)
@@ -981,7 +987,7 @@ export function CartPage() {
   const [pickOpen, setPickOpen] = useState(false);
   const [sugg, setSugg] = useState(null);       // 📍 v2026.09.23.10 : propositions d'adresses (frappe)
   const suggTm = useRef(null);
-  const suggSeq = useRef(0);   // 🛡️ v2026.10.08.2 : une réponse tardive d'une frappe précédente ne peut plus écraser les résultats courants
+  const suggSeq = useRef(0);   // 🛡️ v2026.10.08.3 : une réponse tardive d'une frappe précédente ne peut plus écraser les résultats courants
   const [done, setDone] = useState(null); // 🔑 confirmation finale avec le code de remise
   const [coErr, setCoErr] = useState({});  // ⚠️ erreurs par champ du checkout
   const [card, setCard] = useState({ no: '', exp: '', cvc: '' });
@@ -1567,7 +1573,7 @@ export function ClientProfile() {
       </div>
       <div className="card mt12">
         <div style={{ fontWeight: 700 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.08.2</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.08.3</div>
       </div>
 
       {user.role === 'client' && (
@@ -1881,7 +1887,7 @@ export function ListingDetailPage() {
   const [dSugg, setDSugg] = useState(null);
   const [dBusy, setDBusy] = useState(false);
   const dTm = useRef(null);
-  const dSeq = useRef(0);   // 🛡️ v2026.10.08.2 : anti-réponse-périmée
+  const dSeq = useRef(0);   // 🛡️ v2026.10.08.3 : anti-réponse-périmée
   const subLbl = (k) => (SUB_LBL[k] ? (SUB_LBL[k][lang] || SUB_LBL[k].fr) : k);
   const condLbl = (k) => (COND_LBL[k] ? (COND_LBL[k][lang] || COND_LBL[k].fr) : '');
 
@@ -2569,7 +2575,7 @@ export function ServiceRequestPage() {
   const [busy, setBusy] = useState(false);
   const [pPick, setPPick] = useState(false); const [dPick, setDPick] = useState(false);
   const pTm = useRef(null); const dTm = useRef(null);
-  const pSeq = useRef(0); const dSeq = useRef(0);   // 🛡️ v2026.10.08.2 : anti-réponse-périmée
+  const pSeq = useRef(0); const dSeq = useRef(0);   // 🛡️ v2026.10.08.3 : anti-réponse-périmée
 
   const onAddr = (which) => (e) => {
     const v = e.target.value;
@@ -2699,7 +2705,7 @@ export function StoresByTypePage() {
   const [q, setQ] = useState('');
   const [gDetail, setGDetail] = useState(null); const [gQty, setGQty] = useState(1); const [gBig, setGBig] = useState(null);
   const [favs, setFavs] = useState(() => loadPFavs());   // ❤️ v2026.10.04.3 : favoris produits (appareil)
-  const [selPCat, setSelPCat] = useState(null);   // 🗂️ v2026.10.08.2 : filtre par catégorie de produit (null = Tout)
+  const [selPCat, setSelPCat] = useState(null);   // 🗂️ v2026.10.08.3 : filtre par catégorie de produit (null = Tout)
   const isPharma = type === 'pharmacy';
 
   useStickyBelowHead();   // 📌 v2026.10.04.7 : bloc fixé SOUS l'en-tête vert
@@ -2757,7 +2763,7 @@ export function StoresByTypePage() {
   const topRow = top === null || prods === null ? null : capPerStore(top.length ? top : prods);
   const suggRow = sugg === undefined || prods === null ? null : capPerStore(sugg || prods);
 
-  // 5️⃣ v2026.10.08.2 — CATÉGORIES DE PRODUITS (pharmacie : 💊/💄) pour le menu horizontal :
+  // 5️⃣ v2026.10.08.3 — CATÉGORIES DE PRODUITS (pharmacie : 💊/💄) pour le menu horizontal :
   // « Tout » + une boule par catégorie (ex. pizza) → la grille affiche tous les produits
   // de cette catégorie TOUS MAGASINS CONFONDUS (tous les types de pizza de la catégorie).
   const prodCats = [];
@@ -2812,7 +2818,7 @@ export function StoresByTypePage() {
         <ProductGrid title={'🏆 ' + t('top_ordered')} prods={topRow} favs={favs} onFav={toggleFav} onOpen={openProduct} onAdd={addFromGrid} />
         {/* 4️⃣ suggestions personnalisées (à défaut : produits disponibles) */}
         <ProductGrid title={'✨ ' + t('suggested_for_you')} prods={suggRow} favs={favs} onFav={toggleFav} onOpen={openProduct} onAdd={addFromGrid} />
-        {/* 5️⃣ v2026.10.08.2 — MENU HORIZONTAL des catégories (« Tout » en 1er) + GRILLE
+        {/* 5️⃣ v2026.10.08.3 — MENU HORIZONTAL des catégories (« Tout » en 1er) + GRILLE
             2 colonnes de tous les produits (défilement VERTICAL uniquement). Un tap sur une
             catégorie (ex. pizza) → tous les types de pizza, tous magasins confondus. */}
         {prods !== null && prods.length === 0 && <div className="mt12"><Empty e="🛍️" text={t('no_products_type')} /></div>}
@@ -3167,7 +3173,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.08.2</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.08.3</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
