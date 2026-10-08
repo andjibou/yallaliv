@@ -732,8 +732,8 @@ button { font-family: inherit; }
 .sp-cover { position: relative; height: 120px; overflow: hidden; border-radius: 0; background: #062e1e; }   /* 📌 v2026.10.08.5 : plein CADRE — la photo remplit TOUS les coins */
 .sp-bg { position: absolute; top: 0; left: 0; width: 100%; height: 120px; object-fit: cover; display: block; }
 .sp-shade { position: absolute; inset: 0; background: rgba(0, 0, 0, .4); }
-.sp-back { position: fixed; top: calc(max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px)) + 6px); left: 12px; z-index: 95; width: 40px; height: 40px; border-radius: 50%; background: #0e9f6e; border: 1px solid rgba(255, 255, 255, .4); box-shadow: 0 3px 10px rgba(2, 20, 12, .3); display: flex; align-items: center; justify-content: center; }   /* 🟢 v2026.10.08.6 : ← PLUS GROS + FOND VERT, toujours visible, cible de tap confortable */
-.sp-back .icon-btn { background: none; border: none; box-shadow: none; width: 100%; height: 100%; color: #fff; font-size: 27px; margin: 0; }   /* 🟢 v2026.10.08.6 : flèche PLUS GRANDE */
+.sp-back { position: fixed; top: calc(max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px)) + 7px); left: 12px; z-index: 95; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }   /* 🟢 v2026.10.08.7 : taille d'origine rétablie — le look (vert + flèche grasse) vient de .yl-back */
+.sp-back button.icon-btn.yl-back { width: 100%; height: 100%; }   /* la flèche SVG remplit le bouton — pas de style double */
 .sp-bar { position: relative; z-index: 2; display: flex; align-items: center; gap: 10px; height: 70px; margin: 0 10px; border-radius: 25px; padding: 0 14px 0 7px; transition: margin-top .25s ease; background: rgba(0, 0, 0, .45); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: 1px solid rgba(255, 255, 255, .16); box-shadow: 0 10px 26px rgba(2, 20, 12, .28); color: #fff; }
 .sp-logo { flex: none; width: 56px; height: 56px; border-radius: 50%; background: #0B7A4B; border: 2px solid #fff; display: flex; align-items: center; justify-content: center; font-size: 26px; overflow: hidden; }
 .sp-logo img { width: 100%; height: 100%; object-fit: cover; }
@@ -761,7 +761,13 @@ body.yl-sp-cover .mini-head .row:first-child { visibility: hidden; }   /* 🚀 Y
 .sp-fixed .store-mapbox { position: relative; }
 .sp-mapclose { position: absolute; top: 6px; right: 6px; z-index: 5; width: 30px; height: 30px; border-radius: 50%; background: #fff; border: 1px solid var(--line); box-shadow: 0 2px 8px rgba(15, 23, 42, .18); font-size: 14px; cursor: pointer; }
 
-/* 🟢 v2026.10.08.6 — sur la PAGE MAGASIN, les boutons 🔔 👤 de l'en-tête : un peu
-   plus GROS (38 px) + FOND VERT (contraste maximal sur la photo sombre). Les autres
-   pages gardent leurs boutons habituels (fond translucide sur bandeau vert). */
-body.yl-sp-cover .mini-head .head-icon { width: 38px !important; height: 38px !important; font-size: 17px !important; background: #0e9f6e; border-color: rgba(255, 255, 255, .4); box-shadow: 0 3px 10px rgba(2, 20, 12, .3); }
+/* 🟢 v2026.10.08.7 — sur la PAGE MAGASIN, les boutons 🔔 👤 gardent leur TAILLE
+   D'ORIGINE (32 px) mais avec FOND VERT (contraste sur la photo sombre). */
+body.yl-sp-cover .mini-head .head-icon { background: #0e9f6e; border-color: rgba(255, 255, 255, .4); box-shadow: 0 3px 10px rgba(2, 20, 12, .3); }
+
+/* ============ 🔄 v2026.10.08.7 — UNIFICATION : TOUTES les flèches de retour ============
+   Quel que soit l'endroit (marché, commandes, magasin…), le bouton ← est TOUJOURS
+   un CERCLE VERT avec la flèche blanche GRASSE — même identité partout.
+   (specificité button.icon-btn.yl-back : bat les styles locaux .topbar .icon-btn) */
+button.icon-btn.yl-back { width: 36px; height: 36px; border-radius: 50% !important; background: #0e9f6e !important; color: #fff !important; border: 1px solid rgba(255, 255, 255, .4); box-shadow: 0 3px 10px rgba(15, 23, 42, .18); padding: 0; flex: none; }
+button.icon-btn.yl-back:active { transform: scale(.92); }

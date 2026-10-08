@@ -134,6 +134,7 @@ export function Spinner() { return <div className="spinner" />; }
 
 export function BackBtn() {
   const t = useT();
+  const { lang } = useLang();   // 🔄 v2026.10.08.7 : direction de la flèche selon la langue
   const nav = useNavigate();
   const loc = useLocation();
   // 📱 v2026.10.08.6 — SUR TÉLÉPHONE, l'APK peut restaurer la page SANS historique
@@ -144,7 +145,16 @@ export function BackBtn() {
     if (window.history.state && window.history.state.idx > 0) nav(-1);
     else nav(loc.pathname.startsWith('/driver') ? '/driver' : loc.pathname.startsWith('/merchant') ? '/merchant' : loc.pathname.startsWith('/admin') ? '/admin' : '/app');
   };
-  return <button className="icon-btn" onClick={back} title={t('back')}>←</button>;
+  // 🔄 v2026.10.08.7 — flèche SVG GROSSE et GRASSE (trait épais), inversée en ARABE
+  // (langue RTL : « retour » pointe vers la DROITE). Style unifié partout (.yl-back).
+  const rtl = lang === 'ar';
+  return (
+    <button className="icon-btn yl-back" onClick={back} title={t('back')} aria-label={t('back')}>
+      <svg width={rtl ? 21 : 22} height={rtl ? 21 : 22} viewBox="0 0 24 24" aria-hidden="true">
+        <path d={rtl ? 'M5 12h14M13 6l6 6-6 6' : 'M19 12H5M11 18l-6-6 6-6'} stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      </svg>
+    </button>
+  );
 }
 
 // Bottom navigation for the client app
