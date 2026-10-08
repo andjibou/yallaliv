@@ -729,13 +729,12 @@ button { font-family: inherit; }
    glassmorphism (logo vert 56 px bord blanc, nom 24 px/700, catégorie 14 px/80 %, ⭐ #FFC107,
    🕘 durée) · recherche blanche 56 px coins 20 px + filtre. Au scroll : la couverture se
    rétracte, la carte + la recherche restent fixées (fond vert #0B7A4B). */
-.sp-head { background: #0B7A4B; }
-.sp-cover { position: relative; overflow: hidden; border-radius: 0 0 18px 18px; background: #062e1e; }
+.sp-cover { position: relative; height: 120px; overflow: hidden; border-radius: 0 0 18px 18px; background: #062e1e; }   /* hauteur fixe : la photo défile NATURELLEMENT sous l'en-tête */
 .sp-bg { position: absolute; top: 0; left: 0; width: 100%; height: 120px; object-fit: cover; display: block; }
 .sp-shade { position: absolute; inset: 0; background: rgba(0, 0, 0, .4); }
-.sp-back { position: absolute; top: calc(var(--mini-h, 54px) + 8px); left: 10px; z-index: 3; width: 48px; height: 48px; border-radius: 50%; background: rgba(0, 0, 0, .45); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, .22); display: flex; align-items: center; justify-content: center; }
+.sp-back { position: fixed; top: calc(max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px)) + 7px); left: 12px; z-index: 95; width: 34px; height: 34px; border-radius: 50%; background: rgba(0, 0, 0, .35); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, .25); display: flex; align-items: center; justify-content: center; }   /* ← TOUJOURS visible : prend la place du 🚀 dans l'en-tête (comme Uber Eats) */
 .sp-back .icon-btn { background: none; border: none; box-shadow: none; width: 100%; height: 100%; color: #fff; font-size: 24px; margin: 0; }
-.sp-bar { position: relative; z-index: 2; display: flex; align-items: center; gap: 10px; height: 70px; margin: 0 10px; border-radius: 25px; padding: 0 14px 0 7px; background: rgba(0, 0, 0, .45); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: 1px solid rgba(255, 255, 255, .16); box-shadow: 0 10px 26px rgba(2, 20, 12, .28); color: #fff; }
+.sp-bar { position: relative; z-index: 2; display: flex; align-items: center; gap: 10px; height: 70px; margin: 0 10px; border-radius: 25px; padding: 0 14px 0 7px; transition: margin-top .25s ease; background: rgba(0, 0, 0, .45); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: 1px solid rgba(255, 255, 255, .16); box-shadow: 0 10px 26px rgba(2, 20, 12, .28); color: #fff; }
 .sp-logo { flex: none; width: 56px; height: 56px; border-radius: 50%; background: #0B7A4B; border: 2px solid #fff; display: flex; align-items: center; justify-content: center; font-size: 26px; overflow: hidden; }
 .sp-logo img { width: 100%; height: 100%; object-fit: cover; }
 .sp-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
@@ -755,11 +754,10 @@ button { font-family: inherit; }
    (ses éléments 🚀 YallaLiv 🔔 👤 restent à leur place, SUR la photo). Dès que la
    couverture est rétractée par le scroll, l'en-tête redevient VERT plein. */
 .sp-page { margin-top: calc(-1 * (var(--mini-h, 54px) + 8px)); }   /* remonte sous l'en-tête */
-body.yl-sp-cover .mini-head { background: transparent; box-shadow: none; z-index: 90; }   /* 90 > sticky-head 79 : l'en-tête reste AU-DESSUS de la photo */
+body.yl-sp-cover .mini-head { background: transparent; box-shadow: none; z-index: 90; transition: background .25s ease, box-shadow .25s ease; }   /* 90 : au-dessus de la photo */
 body.yl-sp-cover.yl-sp-solid .mini-head { background: linear-gradient(135deg, #0e9f6e, #0b7a54); box-shadow: 0 4px 12px rgba(11, 122, 84, .3); }   /* scroll : vert plein */
-/* ⚠️ sans ceci, le sticky-head se colle DÉJÀ AU REPOS à son seuil (top: --mini-h) et la
-   photo ne monterait jamais sous l'en-tête. Seuil 0 tant que la couverture est visible ;
-/* seuil normal (sous l'en-tête vert redevenu plein) une fois la couverture rétractée. */
-body.yl-sp-cover .sp-page .sticky-head { top: 0; }
-body.yl-sp-cover.yl-sp-solid .sp-page .sticky-head { top: var(--mini-h, 54px); }
-.sp-page .sticky-head { transition: top .25s ease; }   /* repli doux au changement de seuil */
+body.yl-sp-cover .mini-head .row:first-child { visibility: hidden; }   /* 🚀 YallaLiv caché : sa place est prise par le ← fixe (toujours accessible) */
+/* 📌 carte + recherche : PERSISTANTES — elles se collent sous l'en-tête dès que la
+   photo a défilé, et y restent (fond vert #0B7A4B) pendant toute la visite du magasin. */
+.sp-stick { position: sticky; top: var(--mini-h, 54px); z-index: 79; }
+.sp-stick.stuck { background: #0B7A4B; box-shadow: 0 6px 14px rgba(15, 23, 42, .14); }
