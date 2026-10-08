@@ -729,7 +729,7 @@ button { font-family: inherit; }
    glassmorphism (logo vert 56 px bord blanc, nom 24 px/700, catégorie 14 px/80 %, ⭐ #FFC107,
    🕘 durée) · recherche blanche 56 px coins 20 px + filtre. Au scroll : la couverture se
    rétracte, la carte + la recherche restent fixées (fond vert #0B7A4B). */
-.sp-cover { position: relative; height: 120px; overflow: hidden; border-radius: 0 0 18px 18px; background: #062e1e; }   /* hauteur fixe : la photo défile NATURELLEMENT sous l'en-tête */
+.sp-cover { position: relative; height: 120px; overflow: hidden; border-radius: 0; background: #062e1e; }   /* 📌 v2026.10.08.5 : plein CADRE — la photo remplit TOUS les coins */
 .sp-bg { position: absolute; top: 0; left: 0; width: 100%; height: 120px; object-fit: cover; display: block; }
 .sp-shade { position: absolute; inset: 0; background: rgba(0, 0, 0, .4); }
 .sp-back { position: fixed; top: calc(max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px)) + 7px); left: 12px; z-index: 95; width: 34px; height: 34px; border-radius: 50%; background: rgba(0, 0, 0, .35); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, .25); display: flex; align-items: center; justify-content: center; }   /* ← TOUJOURS visible : prend la place du 🚀 dans l'en-tête (comme Uber Eats) */
@@ -749,15 +749,14 @@ button { font-family: inherit; }
 .sp-searchrow .input { height: 56px; border-radius: 20px; background: #fff; border: 1px solid var(--line); box-shadow: 0 2px 10px rgba(15, 23, 42, .10); font-size: 15px; }
 .sp-chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 2px 0; }
 
-/* ============ 🖼️ v2026.10.08.3 — PHOTO PLEIN ÉCRAN derrière l'en-tête 🚀 YallaLiv 🔔 👤 ============
-   Sur la page magasin : la page remonte sous l'en-tête vert, qui devient TRANSPARENT
-   (ses éléments 🚀 YallaLiv 🔔 👤 restent à leur place, SUR la photo). Dès que la
-   couverture est rétractée par le scroll, l'en-tête redevient VERT plein. */
-.sp-page { margin-top: calc(-1 * (var(--mini-h, 54px) + 8px)); }   /* remonte sous l'en-tête */
-body.yl-sp-cover .mini-head { background: transparent; box-shadow: none; z-index: 90; transition: background .25s ease, box-shadow .25s ease; }   /* 90 : au-dessus de la photo */
-body.yl-sp-cover.yl-sp-solid .mini-head { background: linear-gradient(135deg, #0e9f6e, #0b7a54); box-shadow: 0 4px 12px rgba(11, 122, 84, .3); }   /* scroll : vert plein */
-body.yl-sp-cover .mini-head .row:first-child { visibility: hidden; }   /* 🚀 YallaLiv caché : sa place est prise par le ← fixe (toujours accessible) */
-/* 📌 carte + recherche : PERSISTANTES — elles se collent sous l'en-tête dès que la
-   photo a défilé, et y restent (fond vert #0B7A4B) pendant toute la visite du magasin. */
-.sp-stick { position: sticky; top: var(--mini-h, 54px); z-index: 79; }
-.sp-stick.stuck { background: #0B7A4B; box-shadow: 0 6px 14px rgba(15, 23, 42, .14); }
+/* ============ 📌 v2026.10.08.5 — EN-TÊTE MAGASIN 100 % FIXE ============
+   La photo (plein cadre) + la carte d'info + la recherche restent en haut pendant
+   tout le défilement. L'en-tête 🚀 YallaLiv 🔔 👤 reste TRANSPARENT sur la photo
+   (jamais vert sur cette page). Le contenu défile dessous. */
+.sp-fixed { position: fixed; top: 0; left: 0; right: 0; z-index: 79; }
+.sp-page { padding-top: calc(var(--sp-fixed-h, 210px) - var(--mini-h, 54px)); }   /* le contenu passe sous l'en-tête fixe (hauteur mesurée en direct) */
+body.yl-sp-cover .mini-head { background: transparent; box-shadow: none; z-index: 90; }   /* 90 : au-dessus de la photo — TOUJOURS transparent ici */
+body.yl-sp-cover .mini-head .row:first-child { visibility: hidden; }   /* 🚀 YallaLiv caché : sa place est prise par le ← fixe */
+.sp-addr { background: none; border: none; padding: 0; color: #fff; opacity: .88; font-size: 13.5px; font-weight: 600; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; display: block; max-width: 100%; }
+.sp-fixed .store-mapbox { position: relative; }
+.sp-mapclose { position: absolute; top: 6px; right: 6px; z-index: 5; width: 30px; height: 30px; border-radius: 50%; background: #fff; border: 1px solid var(--line); box-shadow: 0 2px 8px rgba(15, 23, 42, .18); font-size: 14px; cursor: pointer; }
