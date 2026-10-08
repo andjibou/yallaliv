@@ -135,7 +135,16 @@ export function Spinner() { return <div className="spinner" />; }
 export function BackBtn() {
   const t = useT();
   const nav = useNavigate();
-  return <button className="icon-btn" onClick={() => nav(-1)} title={t('back')}>←</button>;
+  const loc = useLocation();
+  // 📱 v2026.10.08.6 — SUR TÉLÉPHONE, l'APK peut restaurer la page SANS historique
+  // (application relancée directement sur cette page, WebView qui reprend son état) :
+  // nav(-1) ne faisait alors RIEN (aucune page précédente). Si l'historique est vide,
+  // on renvoie à l'accueil de la section — le ← marche DANS TOUS les cas.
+  const back = () => {
+    if (window.history.state && window.history.state.idx > 0) nav(-1);
+    else nav(loc.pathname.startsWith('/driver') ? '/driver' : loc.pathname.startsWith('/merchant') ? '/merchant' : loc.pathname.startsWith('/admin') ? '/admin' : '/app');
+  };
+  return <button className="icon-btn" onClick={back} title={t('back')}>←</button>;
 }
 
 // Bottom navigation for the client app
