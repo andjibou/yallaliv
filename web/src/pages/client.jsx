@@ -8,10 +8,10 @@ import PickMap, { reverseGeocode, geocodeSearch } from '../PickMap.jsx';
 import AccountSettings from '../AccountSettings.jsx';
 import { StoresMap } from '../RouteMap.jsx';
 
-const TYPE_META = { restaurant: { e: '🍽️', c: '#ef6c4d' }, market: { e: '🛒', c: '#3b82f6' }, pharmacy: { e: '💊', c: '#14b8a6' }, clothing: { e: '👕', c: '#8b5cf6' } };   // 👕 v2026.10.08.12
+const TYPE_META = { restaurant: { e: '🍽️', c: '#ef6c4d' }, market: { e: '🛒', c: '#3b82f6' }, pharmacy: { e: '💊', c: '#14b8a6' }, clothing: { e: '👕', c: '#8b5cf6' }, clothes: { e: '👕', c: '#8b5cf6' }, home: { e: '🛋️', c: '#f59e0b' } };   // 👕 v2026.10.08.12 : clothes = valeur RÉELLE du formulaire partenaire
 const SIB_TYPES = ['restaurant', 'market', 'pharmacy'];   // 🧲 v2026.10.08.11 : bande « même catégorie » réservée à ces types de magasins
 // 🖼️ v2026.10.08.8 — couverture des magasins SANS photo : image de l'activité
-const COVER_IMG = { restaurant: '/stores/restaurant.jpg', market: '/stores/supermarket.jpg', pharmacy: '/stores/pharmacy.jpg', electronics: '/stores/electronics.jpg', appliance: '/stores/appliance.jpg', clothing: '/market/fashion.jpg' };
+const COVER_IMG = { restaurant: '/stores/restaurant.jpg', market: '/stores/supermarket.jpg', pharmacy: '/stores/pharmacy.jpg', electronics: '/stores/electronics.jpg', appliance: '/stores/appliance.jpg', clothing: '/market/fashion.jpg', clothes: '/market/fashion.jpg', home: '/market/home.jpg' };
 // 🏪 v2026.09.27.1 — cartes magasins de l'accueil (photos réalistes) + départements
 const STORE_CARDS = [
   { type: 'restaurant', img: '/stores/restaurant.jpg', key: 'restaurant' },

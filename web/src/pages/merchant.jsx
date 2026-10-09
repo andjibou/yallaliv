@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, alarm, pushSubscribe, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage, detectColors, COLOR_HEX, ph as photoUrl, gmapsNavUrl, gmapsSearchUrl } from '../lib.jsx';
+import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, alarm, pushSubscribe, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage, detectColors, COLOR_HEX, isClothingType, ph as photoUrl, gmapsNavUrl, gmapsSearchUrl } from '../lib.jsx';
 import { StatusBadge, PayBadge, Empty, Spinner, Modal, LangSwitch, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import { BarsChart, compactMoney } from '../Chart.jsx';
@@ -367,7 +367,7 @@ function Products() {
     if (r.error === 'too_big') return toast(t('img_err_big'), 'err');
     setPhoto(r);   // { thumb, display }
     // 🎨 v2026.10.08.12 : couleurs détectées automatiquement — visibles sous la photo avant d'enregistrer
-    if (data?.store?.type === 'clothing') {
+    if (isClothingType(data?.store?.type)) {
       const found = await detectColors(r.display);
       setDet((d) => ({ ...d, main: found }));
       setColors((c) => [...new Set([...c, ...found])]);
@@ -388,7 +388,7 @@ function Products() {
       if (r.error) { toast((r.error === 'too_big' ? t('img_err_big') : t('img_err_format')) + ' · ' + f.name, 'err'); continue; }
       try { await api(`/merchant/products/${edit.id}/photos`, { method: 'POST', body: { thumb: r.thumb, display: r.display } }); ok++; }
       catch (ex) { toast(ex.message, 'err'); }
-      if (data?.store?.type === 'clothing') {   // 🎨 couleurs détectées → enregistrées tout de suite
+      if (isClothingType(data?.store?.type)) {   // 🎨 couleurs détectées → enregistrées tout de suite
         const found = await detectColors(r.display);
         if (found.length) {
           const merged = [...new Set([...(edit.colors || []), ...found])];
@@ -417,7 +417,7 @@ function Products() {
       const r = await processImage(f);
       if (r.error) { toast((r.error === 'too_big' ? t('img_err_big') : t('img_err_format')) + ' · ' + f.name, 'err'); continue; }
       add.push(r);
-      if (data?.store?.type === 'clothing') {   // 🎨 détection sur chaque photo ajoutée
+      if (isClothingType(data?.store?.type)) {   // 🎨 détection sur chaque photo ajoutée
         const found = await detectColors(r.display);
         if (found.length) { setDet((d) => ({ ...d, ['g' + add.length]: found })); setColors((c) => [...new Set([...c, ...found])]); }
       }
@@ -470,7 +470,7 @@ function Products() {
     if (hasErr(e)) return;
     setBusy(true);
     try {
-      const isClothing = data?.store?.type === 'clothing';   // 👕 v2026.10.08.12 : variantes vêtements
+      const isClothing = isClothingType(data?.store?.type);   // 👕 v2026.10.08.12 : variantes vêtements (tout slug vêtement)
       const sizes = isClothing
         ? (edit.sizes || []).map((x) => ({ size: String(x.size || '').trim(), price: x.price === '' || x.price == null ? parseFloat(edit.price) : parseFloat(x.price) })).filter((x) => x.size && !isNaN(x.price))
         : undefined;
@@ -682,7 +682,7 @@ function Products() {
                 <input className="input" type="number" min="0" step="1" value={edit.qty ?? ''} onChange={(e) => setEdit({ ...edit, qty: e.target.value })} placeholder="vide = illimité" />
               </div>
             </div>
-            {data?.store?.type === 'clothing' && (   // 👕🎨 v2026.10.08.12 — champs VÊTEMENTS
+            {isClothingType(data?.store?.type) && (   // 👕🎨 v2026.10.08.12 — champs VÊTEMENTS (clothing, vêtements, mode…)
               <>
                 <div className="row">
                   <div className="field" style={{ width: 170 }}>

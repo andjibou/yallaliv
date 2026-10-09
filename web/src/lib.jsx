@@ -868,6 +868,16 @@ function drawScaled(img, maxSide, quality) {
   ctx.drawImage(img, 0, 0, w, hh);
   return c.toDataURL('image/jpeg', quality);
 }
+// 👕 v2026.10.08.12 — un magasin « vêtements » peut avoir n'importe quel slug de type
+// (clothing, vêtements, mode, fashion, habits…) : on normalise (minuscules, sans
+// accents) et on compare à des slugs/racines connues. Si ton type manque, dis-le moi.
+export const isClothingType = (type) => {
+  const s = String(type || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  if (!s) return false;
+  return ['clothing', 'vetements', 'vetement', 'mode', 'fashion', 'habits', 'habit', 'habillement', 'dress', 'wear', 'textile', 'confection', 'pret-a-porter'].includes(s.replace(/[^a-z-]/g, ''))
+    || /cloth|vetement|fashion|habillement|textile|confection|streetwear|sportwear/.test(s);
+};
+
 // 🎨 v2026.10.08.12 — couleurs des vêtements détectées AUTOMATIQUEMENT depuis les photos.
 // On échantillonne la zone CENTRALE de l'image (le vêtement est au milieu, le fond sur
 // les bords), chaque pixel est classé par teinte/luminosité, et on garde les couleurs
