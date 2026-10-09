@@ -260,7 +260,19 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
   useEffect(() => { if (zoom && zRef.current) zRef.current.scrollTo({ left: zc * zRef.current.clientWidth }); }, [zoom]);
   const onZoomScroll = () => { const el = zRef.current; if (el) setZc(Math.max(0, Math.round(el.scrollLeft / Math.max(1, el.clientWidth)))); };
   return (
-    <div>
+    <div className="pd-sheet">
+      {/* 🧲 v2026.10.08.10 — produits de la MÊME CATÉGORIE : EN HAUT de la page et
+          COMPLÈTEMENT HORS du cadre du produit (zone grise bord à bord). Ce sont les
+          MÊMES cartes standard que partout (ligne horizontale déroulante). La zone a
+          son PROPRE défilement → le cadre produit en dessous ne bouge JAMAIS. */}
+      {sibs.length > 0 && (
+        <div className="pd-sibs-zone">
+          <ProductGrid title={'🧲 ' + t('same_cat')} prods={sibs} rating={sibRating} favs={sibFavs || {}} onFav={sibOnFav || (() => {})} onOpen={(p) => onPick?.(p)} onAdd={sibOnAdd || (() => {})} />
+        </div>
+      )}
+      {/* 📌 v2026.10.08.10 — CADRE PRODUIT FIXE : photo 4:5, nom, description, bouton
+          panier. Il reste en place quand on fait défiler les produits de la catégorie. */}
+      <div className="pd-frame">
       {header}
       <div className="pd-galwrap">
         <div className="pd-gal" ref={galRef} onScroll={onGal}>
@@ -299,15 +311,7 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
           </button>
         </div>
       )}
-      {/* 🧲 v2026.10.08.9 — produits de la MÊME CATÉGORIE, HORS du cadre du produit :
-          zone grise bord à bord SOUS la fiche, avec les MÊMES cartes que partout
-          (ProductGrid/PgCard : photo, prix, nom, ⭐, ❤️, ＋). Un tap ouvre la fiche
-          du produit choisi. */}
-      {sibs.length > 0 && (
-        <div className="pd-sibs-zone">
-          <ProductGrid grid title={'🧲 ' + t('same_cat')} prods={sibs} rating={sibRating} favs={sibFavs || {}} onFav={sibOnFav || (() => {})} onOpen={(p) => onPick?.(p)} onAdd={sibOnAdd || (() => {})} />
-        </div>
-      )}
+      </div>
       {/* 🔍 v2026.10.08.9 — VISIONNEUSE PLEIN ÉCRAN : fond noir, la photo ENTIÈRE est
           visible (contain). Glisser = photo suivante · tap n'importe où = fermer. */}
       {zoom && (
@@ -590,7 +594,7 @@ export function ClientHome() {
       add(product, store); // autre magasin : propose de vider le panier
     }
     toast(t('added'));
-    setGDetail(null);
+    // 🛒 v2026.10.08.10 : la page produit reste OUVERTE après l'ajout au panier
   };
 
   const hour = new Date().getHours();
@@ -754,7 +758,7 @@ export function ClientHome() {
       </div>
 
       {/* fiche produit rapide (depuis la recherche) */}
-      <Modal open={!!gDetail} onClose={() => setGDetail(null)} title={t('product_details')}>
+      <Modal open={!!gDetail} onClose={() => setGDetail(null)} title={t('product_details')} className="pd-modal">
         {gDetail?.loading ? <Spinner /> : gDetail?.store && gDetail?.product ? (
           <ProductDetail
             product={gDetail.product} closed={!gDetail.store.is_open} qty={gQty} setQty={setGQty} onAdd={addFromGlobal}
@@ -811,7 +815,7 @@ export function StorePage() {
       add(detail, store); // autre magasin : propose de vider le panier
     }
     toast(t('added'));
-    setDetail(null);
+    // 🛒 v2026.10.08.10 : la page produit reste OUVERTE après l'ajout au panier
   };
 
   // 🏪 v2026.10.08.8 — progression du scroll (0 → 1) : la couverture se rétracte,
@@ -989,7 +993,7 @@ export function StorePage() {
           GRILLE 2 colonnes : grandes cartes, défilement VERTICAL uniquement. */}
       <ProductGrid grid prods={Object.values(byCat).flat()} rating={store.rating} favs={favs} onFav={toggleFav} onOpen={openDetail} onAdd={addFromGrid} />
 
-      <Modal open={!!detail} onClose={() => setDetail(null)} title={t('product_details')}>
+      <Modal open={!!detail} onClose={() => setDetail(null)} title={t('product_details')} className="pd-modal">
         {detail && (
           <ProductDetail product={detail} closed={closed} qty={dQty} setQty={setDQty} onAdd={addFromDetail}
             siblings={products?.filter((p) => p.category === detail.category)} onPick={openDetail}
@@ -2791,7 +2795,7 @@ export function StoresByTypePage() {
       add(product, store); // autre magasin : propose de vider le panier
     }
     toast(t('added'));
-    setGDetail(null);
+    // 🛒 v2026.10.08.10 : la page produit reste OUVERTE après l'ajout au panier
   };
 
   const s = q.trim().toLowerCase();
@@ -2882,7 +2886,7 @@ export function StoresByTypePage() {
       </>)}
 
       {/* fiche produit rapide (depuis la recherche) */}
-      <Modal open={!!gDetail} onClose={() => setGDetail(null)} title={t('product_details')}>
+      <Modal open={!!gDetail} onClose={() => setGDetail(null)} title={t('product_details')} className="pd-modal">
         {gDetail?.loading ? <Spinner /> : gDetail?.store && gDetail?.product ? (
           <ProductDetail
             product={gDetail.product} closed={!gDetail.store.is_open} qty={gQty} setQty={setGQty} onAdd={addFromGlobal}

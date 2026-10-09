@@ -77,13 +77,13 @@ export class ErrorBoundary extends React.Component {
   }
 }
 
-export function Modal({ open, onClose, title, children }) {
+export function Modal({ open, onClose, title, children, className }) {   // 🧲 v2026.10.08.10 : className (pd-modal = fiche produit plein cadre fixe)
   // ← bouton retour (téléphone/navigateur) : ferme la fenêtre au lieu de quitter la page
   useBackClose(open, onClose);
   if (!open) return null;
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className={'modal' + (className ? ' ' + className : '')} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <div className="h2">{title}</div>
           <button className="icon-btn" onClick={onClose}>✕</button>

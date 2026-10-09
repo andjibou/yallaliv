@@ -800,3 +800,19 @@ button.icon-btn.yl-back:active { transform: scale(.92); }
 .pd-zoom-track img { flex: 0 0 100%; width: 100%; height: 100%; object-fit: contain; scroll-snap-align: center; }
 .pd-zoom-close { position: absolute; top: calc(12px + env(safe-area-inset-top, 0px)); right: 12px; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(255,255,255,.16); color: #fff; font-size: 18px; font-weight: 900; line-height: 1; cursor: pointer; }
 .pd-zoom-count { position: absolute; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); color: #fff; font-size: 12.5px; font-weight: 800; background: rgba(15,23,42,.55); padding: 4px 12px; border-radius: 999px; }
+
+/* ═══ 🧲🖼️🛒 v2026.10.08.10 — FICHE PRODUIT : 3 CORRECTIONS ═══
+   1. 🧲 « Dans la même catégorie » EN HAUT et HORS du cadre du produit : bande grise
+      bord à bord avec les cartes standard en ligne déroulante → le CADRE produit en
+      dessous reste FIXE (plus jamais de défilement solidaire)
+   2. 🖼️ photos produits au format 4:5 (portrait) — presque toutes les photos sont
+      entièrement visibles (le 🔍 plein écran reste dispo pour les autres)
+   3. 🛒 ajouter au panier ne ferme PLUS la page produit */
+.modal.pd-modal { display: flex; flex-direction: column; overflow: hidden; max-height: 96vh; max-height: 96dvh; }   /* la fiche ne défile plus EN BLOC : cadre fixe + zones indépendantes */
+.modal.pd-modal .modal-head { flex: none; margin-bottom: 10px; }
+.pd-sheet { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.pd-sibs-zone { flex: none; margin: 0 -18px; padding: 8px 18px 10px; background: #f1f5f9; border-top: none; border-bottom: 1px solid var(--line); }   /* 🧲 EN HAUT, bord à bord, hors du cadre */
+.pd-sibs-zone .h2 { margin-top: 2px; margin-bottom: 6px; }
+.pd-frame { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }   /* 📌 cadre produit : sa place est FIXE sous la bande */
+.pd-gal img, .pd-nophoto { height: auto; aspect-ratio: 4 / 5; min-width: 0; }   /* 🖼️ format 4:5 — min-width:0 sinon le plancher flex (largeur intrinsèque de la photo) dépasse le cadre */
+.pd-actions { position: sticky; bottom: 0; margin: 12px 0 0; padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 0px)); background: #fff; border-top: 1px solid var(--line); box-shadow: 0 -6px 16px rgba(15, 23, 42, .07); }   /* 🛒 barre collante dans le cadre fixe */
