@@ -9,6 +9,7 @@ import AccountSettings from '../AccountSettings.jsx';
 import { StoresMap } from '../RouteMap.jsx';
 
 const TYPE_META = { restaurant: { e: '🍽️', c: '#ef6c4d' }, market: { e: '🛒', c: '#3b82f6' }, pharmacy: { e: '💊', c: '#14b8a6' } };
+const SIB_TYPES = ['restaurant', 'market', 'pharmacy'];   // 🧲 v2026.10.08.11 : bande « même catégorie » réservée à ces types de magasins
 // 🖼️ v2026.10.08.8 — couverture des magasins SANS photo : image de l'activité
 const COVER_IMG = { restaurant: '/stores/restaurant.jpg', market: '/stores/supermarket.jpg', pharmacy: '/stores/pharmacy.jpg', electronics: '/stores/electronics.jpg', appliance: '/stores/appliance.jpg' };
 // 🏪 v2026.09.27.1 — cartes magasins de l'accueil (photos réalistes) + départements
@@ -238,7 +239,7 @@ function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd, grid })
      retourne de l'autre côté quand toutes les photos ont été défilées
    • la description défile dans sa PROPRE boîte verticale (v2026.10.08.9) — tout le
      reste est visible directement · le bouton panier ne déborde JAMAIS */
-function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, onPick, sibFavs, sibOnFav, sibOnAdd, sibRating }) {   // 🧲🔍 v2026.10.08.9 : même catégorie HORS du cadre (cartes standard) + photo PLEIN ÉCRAN
+function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, onPick, sibFavs, sibOnFav, sibOnAdd, sibRating, storeType }) {   // 🧲🖼️🛒 v2026.10.08.11 : bande réservée restaurant/pharmacie/supermarché + photo taille réduite + textes supprimés
   const t = useT();
   const galRef = useRef(null);
   const [atEnd, setAtEnd] = useState(false);
@@ -254,20 +255,22 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
   useEffect(() => { if (galRef.current) galRef.current.scrollLeft = 0; setAtEnd(false); setZoom(false); }, [product.id]);
   const onGal = () => { const el = galRef.current; if (el) setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 6); };
   const gal = (dir) => galRef.current && galRef.current.scrollBy({ left: dir * galRef.current.clientWidth * 0.92, behavior: 'smooth' });
-  const sibs = (siblings || []).filter((p) => p && p.id !== product.id).slice(0, 12);
+  // 🧲 v2026.10.08.11 : la bande « même catégorie » n'apparaît QUE dans les magasins
+  // restaurant / supermarché / pharmacie — éliminée pour tous les autres types.
+  const sibs = SIB_TYPES.includes(storeType) ? (siblings || []).filter((p) => p && p.id !== product.id).slice(0, 12) : [];
   // 🔍 v2026.10.08.9 : la visionneuse s'ouvre DIRECTEMENT sur la photo cliquée ; le
   // compteur suit le glissé (photo suivante/précédente). Tap n'importe où = fermer.
   useEffect(() => { if (zoom && zRef.current) zRef.current.scrollTo({ left: zc * zRef.current.clientWidth }); }, [zoom]);
   const onZoomScroll = () => { const el = zRef.current; if (el) setZc(Math.max(0, Math.round(el.scrollLeft / Math.max(1, el.clientWidth)))); };
   return (
     <div className="pd-sheet">
-      {/* 🧲 v2026.10.08.10 — produits de la MÊME CATÉGORIE : EN HAUT de la page et
-          COMPLÈTEMENT HORS du cadre du produit (zone grise bord à bord). Ce sont les
-          MÊMES cartes standard que partout (ligne horizontale déroulante). La zone a
-          son PROPRE défilement → le cadre produit en dessous ne bouge JAMAIS. */}
+      {/* 🧲 v2026.10.08.11 — produits de la MÊME CATÉGORIE : EN HAUT, carte grise
+          arrondie SÉPARÉE du cadre produit par un espace transparent (plus de titre —
+          les cartes standard parlent d'elles-mêmes). Défilement indépendant : le
+          cadre produit en dessous ne bouge JAMAIS. */}
       {sibs.length > 0 && (
         <div className="pd-sibs-zone">
-          <ProductGrid title={'🧲 ' + t('same_cat')} prods={sibs} rating={sibRating} favs={sibFavs || {}} onFav={sibOnFav || (() => {})} onOpen={(p) => onPick?.(p)} onAdd={sibOnAdd || (() => {})} />
+          <ProductGrid prods={sibs} rating={sibRating} favs={sibFavs || {}} onFav={sibOnFav || (() => {})} onOpen={(p) => onPick?.(p)} onAdd={sibOnAdd || (() => {})} />
         </div>
       )}
       {/* 📌 v2026.10.08.10 — CADRE PRODUIT FIXE : photo 4:5, nom, description, bouton
@@ -758,7 +761,7 @@ export function ClientHome() {
       </div>
 
       {/* fiche produit rapide (depuis la recherche) */}
-      <Modal open={!!gDetail} onClose={() => setGDetail(null)} title={t('product_details')} className="pd-modal">
+      <Modal open={!!gDetail} onClose={() => setGDetail(null)} className="pd-modal">
         {gDetail?.loading ? <Spinner /> : gDetail?.store && gDetail?.product ? (
           <ProductDetail
             product={gDetail.product} closed={!gDetail.store.is_open} qty={gQty} setQty={setGQty} onAdd={addFromGlobal}
@@ -766,6 +769,7 @@ export function ClientHome() {
             onPick={(p) => { setGDetail((g) => ({ ...g, product: p })); setGBig(p.photo || null); setGQty(1); }}
             sibFavs={favs} sibOnFav={toggleFav}
             sibOnAdd={(p) => addFromGrid({ ...p, store_id: gDetail.store.id, store_name: gDetail.store.name, delivery_fee: gDetail.store.delivery_fee, min_order: gDetail.store.min_order || 0 })}
+            storeType={gDetail.store.type}
 
             header={(
               <div className="row wrap" style={{ justifyContent: 'center', gap: 8, alignItems: 'center', marginBottom: 8 }}>
@@ -993,11 +997,11 @@ export function StorePage() {
           GRILLE 2 colonnes : grandes cartes, défilement VERTICAL uniquement. */}
       <ProductGrid grid prods={Object.values(byCat).flat()} rating={store.rating} favs={favs} onFav={toggleFav} onOpen={openDetail} onAdd={addFromGrid} />
 
-      <Modal open={!!detail} onClose={() => setDetail(null)} title={t('product_details')} className="pd-modal">
+      <Modal open={!!detail} onClose={() => setDetail(null)} className="pd-modal">
         {detail && (
           <ProductDetail product={detail} closed={closed} qty={dQty} setQty={setDQty} onAdd={addFromDetail}
             siblings={products?.filter((p) => p.category === detail.category)} onPick={openDetail}
-            sibFavs={favs} sibOnFav={toggleFav} sibOnAdd={addFromGrid} sibRating={store.rating} />
+            sibFavs={favs} sibOnFav={toggleFav} sibOnAdd={addFromGrid} sibRating={store.rating} storeType={store.type} />
         )}
       </Modal>
     </div>
@@ -2886,7 +2890,7 @@ export function StoresByTypePage() {
       </>)}
 
       {/* fiche produit rapide (depuis la recherche) */}
-      <Modal open={!!gDetail} onClose={() => setGDetail(null)} title={t('product_details')} className="pd-modal">
+      <Modal open={!!gDetail} onClose={() => setGDetail(null)} className="pd-modal">
         {gDetail?.loading ? <Spinner /> : gDetail?.store && gDetail?.product ? (
           <ProductDetail
             product={gDetail.product} closed={!gDetail.store.is_open} qty={gQty} setQty={setGQty} onAdd={addFromGlobal}
@@ -2894,6 +2898,7 @@ export function StoresByTypePage() {
             onPick={(p) => { setGDetail((g) => ({ ...g, product: p })); setGBig(p.photo || null); setGQty(1); }}
             sibFavs={favs} sibOnFav={toggleFav}
             sibOnAdd={(p) => addFromGrid({ ...p, store_id: gDetail.store.id, store_name: gDetail.store.name, delivery_fee: gDetail.store.delivery_fee, min_order: gDetail.store.min_order || 0 })}
+            storeType={gDetail.store.type}
 
             header={(
               <div className="row wrap" style={{ justifyContent: 'center', gap: 8, alignItems: 'center', marginBottom: 8 }}>
