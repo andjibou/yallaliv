@@ -782,3 +782,21 @@ button.icon-btn.yl-back:active { transform: scale(.92); }
 .pd-sib-n { font-size: 11px; font-weight: 700; color: #334155; line-height: 1.15; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 25px; }
 .pd-sib-p { font-size: 11.5px; font-weight: 800; color: #0e9f6e; }
 .pd-actions { position: sticky; bottom: -18px; margin: 12px -18px -18px; padding: 10px 18px calc(12px + env(safe-area-inset-bottom, 0px)); background: #fff; border-top: 1px solid var(--line); box-shadow: 0 -6px 16px rgba(15, 23, 42, .06); }   /* 🛒 le bouton panier reste TOUJOURS visible pendant le défilement de la fiche */
+
+/* ═══ 🧲📜🔍 v2026.10.08.9 — FICHE PRODUIT : 3 CORRECTIONS ═══
+   1. 🧲 produits de la MÊME CATÉGORIE : HORS du cadre du produit — zone grise bord à
+      bord SOUS la fiche, avec les MÊMES cartes que partout (ProductGrid / pg-grid 2 col.)
+   2. 📜 description : PROPRE boîte à défilement VERTICAL (max 150 px) — le texte ne
+      déborde JAMAIS à droite (coupe les mots trop longs), on glisse dedans pour lire
+   3. 🔍 photo : tap → AGRANDISSEMENT PLEIN ÉCRAN (fond noir, photo ENTIÈRE visible) */
+.pd-sibs-zone { margin: 16px -18px -18px; padding: 12px 18px calc(16px + env(safe-area-inset-bottom, 0px)); background: #f1f5f9; border-top: 1px solid var(--line); }
+.pd-sibs-zone .h2 { margin-top: 0; }
+.pd-desc { max-height: 150px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; overflow-wrap: anywhere; word-break: break-word; border-radius: 10px; scrollbar-width: thin; }
+.pd-gal img { cursor: zoom-in; }
+.pd-zoomhint { position: absolute; right: 8px; bottom: 8px; z-index: 2; background: rgba(15,23,42,.55); color: #fff; font-size: 13px; line-height: 1; padding: 6px 8px; border-radius: 999px; pointer-events: none; }
+.pd-zoom { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.96); display: flex; align-items: center; justify-content: center; }
+.pd-zoom-track { display: flex; width: 100%; height: 100%; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scrollbar-width: none; overscroll-behavior: contain; }
+.pd-zoom-track::-webkit-scrollbar { display: none; }
+.pd-zoom-track img { flex: 0 0 100%; width: 100%; height: 100%; object-fit: contain; scroll-snap-align: center; }
+.pd-zoom-close { position: absolute; top: calc(12px + env(safe-area-inset-top, 0px)); right: 12px; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(255,255,255,.16); color: #fff; font-size: 18px; font-weight: 900; line-height: 1; cursor: pointer; }
+.pd-zoom-count { position: absolute; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); color: #fff; font-size: 12.5px; font-weight: 800; background: rgba(15,23,42,.55); padding: 4px 12px; border-radius: 999px; }

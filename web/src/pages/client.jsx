@@ -236,46 +236,41 @@ function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd, grid })
 /* ═══ 🖼️ v2026.10.04.8 — FICHE PRODUIT (partagée accueil / catégorie / magasin) ═══
    • les photos défilent HORIZONTALEMENT — flèche au milieu qui indique le sens et se
      retourne de l'autre côté quand toutes les photos ont été défilées
-   • SEULE la description défile verticalement — tout le reste est visible directement
-   • plus de miniatures ni de catégorie · le bouton panier ne déborde JAMAIS */
-function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, onPick }) {   // 🧲 v2026.10.08.8 : siblings = produits de la MÊME CATÉGORIE (bande en haut, défilement horizontal)
+   • la description défile dans sa PROPRE boîte verticale (v2026.10.08.9) — tout le
+     reste est visible directement · le bouton panier ne déborde JAMAIS */
+function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, onPick, sibFavs, sibOnFav, sibOnAdd, sibRating }) {   // 🧲🔍 v2026.10.08.9 : même catégorie HORS du cadre (cartes standard) + photo PLEIN ÉCRAN
   const t = useT();
   const galRef = useRef(null);
   const [atEnd, setAtEnd] = useState(false);
+  const [zoom, setZoom] = useState(false);   // 🔍 v2026.10.08.9 : visionneuse PLEIN ÉCRAN ouverte ?
+  const [zc, setZc] = useState(0);           // photo affichée dans la visionneuse
+  const zRef = useRef(null);
   // les photos arrivent sous 2 formats : .gallery (tableau de chaînes — lignes 🏆/✨/grilles)
   // ou .photos (tableaux d'objets — page magasin). On accepte les deux.
   const pics = [product.photo,
     ...((product.gallery || []).filter(Boolean)),
     ...((product.photos || []).map((x) => x && x.photo).filter(Boolean)),
   ].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
-  useEffect(() => { if (galRef.current) galRef.current.scrollLeft = 0; setAtEnd(false); }, [product.id]);
+  useEffect(() => { if (galRef.current) galRef.current.scrollLeft = 0; setAtEnd(false); setZoom(false); }, [product.id]);
   const onGal = () => { const el = galRef.current; if (el) setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 6); };
   const gal = (dir) => galRef.current && galRef.current.scrollBy({ left: dir * galRef.current.clientWidth * 0.92, behavior: 'smooth' });
   const sibs = (siblings || []).filter((p) => p && p.id !== product.id).slice(0, 12);
+  // 🔍 v2026.10.08.9 : la visionneuse s'ouvre DIRECTEMENT sur la photo cliquée ; le
+  // compteur suit le glissé (photo suivante/précédente). Tap n'importe où = fermer.
+  useEffect(() => { if (zoom && zRef.current) zRef.current.scrollTo({ left: zc * zRef.current.clientWidth }); }, [zoom]);
+  const onZoomScroll = () => { const el = zRef.current; if (el) setZc(Math.max(0, Math.round(el.scrollLeft / Math.max(1, el.clientWidth)))); };
   return (
     <div>
       {header}
-      {/* 🧲 v2026.10.08.8 — EN HAUT de la fiche : les produits de la MÊME CATÉGORIE,
-          défilables HORIZONTALEMENT. Un tap remplace la fiche par ce produit. */}
-      {sibs.length > 0 && (
-        <div className="pd-sibs">
-          {sibs.map((p) => (
-            <button type="button" key={p.id} className="pd-sib" onClick={() => onPick?.(p)} title={p.name}>
-              {p.photo
-                ? <img src={photoUrl(p.photo, 'thumb')} alt="" />
-                : <span className="pd-sib-noph"><NoPhoto w={62} h={62} radius={9} /></span>}
-              <span className="pd-sib-n">{p.name}</span>
-              <span className="pd-sib-p">{fmtMoney(p.price)}</span>
-            </button>
-          ))}
-        </div>
-      )}
       <div className="pd-galwrap">
         <div className="pd-gal" ref={galRef} onScroll={onGal}>
           {pics.length
-            ? pics.map((src, i) => <img key={i} src={photoUrl(src)} alt="" />)
+            ? pics.map((src, i) => <img key={i} src={photoUrl(src)} alt="" onClick={() => { setZc(i); setZoom(true); }} />)
             : <div className="pd-nophoto"><NoPhoto w={130} h={130} radius={16} /></div>}
         </div>
+        {/* 🔍 v2026.10.08.9 : tap sur la photo → AGRANDISSEMENT PLEIN ÉCRAN (la photo
+            ENTIÈRE devient visible — réponse au cadrage cover qui rogne les bords) */}
+        {pics.length > 0 && <span className="pd-zoomhint">🔍</span>}
         {pics.length > 1 && (
           <button type="button" className={'pd-nav ' + (atEnd ? 'left' : 'right')} onClick={() => gal(atEnd ? -1 : 1)} aria-label="photos">
             {atEnd ? '‹' : '›'}
@@ -283,9 +278,9 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
         )}
       </div>
       <div className="pd-name">{product.name}</div>
-      {/* 📜 v2026.10.08.8 — la description coule NATURELLEMENT : la FICCHE ENTIÈRE
-          défile (plus de scroll interne de la description) — on descend pour lire
-          la description et voir les options du produit. */}
+      {/* 📜 v2026.10.08.9 — la description défile dans sa PROPRE boîte VERTICALE
+          (max 150 px) : le texte ne déborde JAMAIS à droite, on lit la suite en
+          glissant DANS la boîte. */}
       {product.description
         ? <div className="pd-desc">{product.description}</div>
         : <div style={{ height: 8 }} />}
@@ -302,6 +297,26 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
             <span className="pd-add-l1">🛒 {t('add_to_cart')}</span>
             <span className="pd-add-l2">{fmtMoney(product.price * qty)}</span>
           </button>
+        </div>
+      )}
+      {/* 🧲 v2026.10.08.9 — produits de la MÊME CATÉGORIE, HORS du cadre du produit :
+          zone grise bord à bord SOUS la fiche, avec les MÊMES cartes que partout
+          (ProductGrid/PgCard : photo, prix, nom, ⭐, ❤️, ＋). Un tap ouvre la fiche
+          du produit choisi. */}
+      {sibs.length > 0 && (
+        <div className="pd-sibs-zone">
+          <ProductGrid grid title={'🧲 ' + t('same_cat')} prods={sibs} rating={sibRating} favs={sibFavs || {}} onFav={sibOnFav || (() => {})} onOpen={(p) => onPick?.(p)} onAdd={sibOnAdd || (() => {})} />
+        </div>
+      )}
+      {/* 🔍 v2026.10.08.9 — VISIONNEUSE PLEIN ÉCRAN : fond noir, la photo ENTIÈRE est
+          visible (contain). Glisser = photo suivante · tap n'importe où = fermer. */}
+      {zoom && (
+        <div className="pd-zoom" onClick={() => setZoom(false)}>
+          <button type="button" className="pd-zoom-close" aria-label="fermer" onClick={() => setZoom(false)}>✕</button>
+          <div className="pd-zoom-track" ref={zRef} onScroll={onZoomScroll}>
+            {pics.map((src, i) => <img key={i} src={photoUrl(src)} alt="" />)}
+          </div>
+          {pics.length > 1 && <span className="pd-zoom-count">{zc + 1} / {pics.length}</span>}
         </div>
       )}
     </div>
@@ -745,6 +760,8 @@ export function ClientHome() {
             product={gDetail.product} closed={!gDetail.store.is_open} qty={gQty} setQty={setGQty} onAdd={addFromGlobal}
             siblings={(gDetail.prods || []).filter((x) => x.category === gDetail.product.category)}
             onPick={(p) => { setGDetail((g) => ({ ...g, product: p })); setGBig(p.photo || null); setGQty(1); }}
+            sibFavs={favs} sibOnFav={toggleFav}
+            sibOnAdd={(p) => addFromGrid({ ...p, store_id: gDetail.store.id, store_name: gDetail.store.name, delivery_fee: gDetail.store.delivery_fee, min_order: gDetail.store.min_order || 0 })}
 
             header={(
               <div className="row wrap" style={{ justifyContent: 'center', gap: 8, alignItems: 'center', marginBottom: 8 }}>
@@ -975,7 +992,8 @@ export function StorePage() {
       <Modal open={!!detail} onClose={() => setDetail(null)} title={t('product_details')}>
         {detail && (
           <ProductDetail product={detail} closed={closed} qty={dQty} setQty={setDQty} onAdd={addFromDetail}
-            siblings={products?.filter((p) => p.category === detail.category)} onPick={openDetail} />
+            siblings={products?.filter((p) => p.category === detail.category)} onPick={openDetail}
+            sibFavs={favs} sibOnFav={toggleFav} sibOnAdd={addFromGrid} sibRating={store.rating} />
         )}
       </Modal>
     </div>
@@ -2870,6 +2888,8 @@ export function StoresByTypePage() {
             product={gDetail.product} closed={!gDetail.store.is_open} qty={gQty} setQty={setGQty} onAdd={addFromGlobal}
             siblings={(gDetail.prods || []).filter((x) => x.category === gDetail.product.category)}
             onPick={(p) => { setGDetail((g) => ({ ...g, product: p })); setGBig(p.photo || null); setGQty(1); }}
+            sibFavs={favs} sibOnFav={toggleFav}
+            sibOnAdd={(p) => addFromGrid({ ...p, store_id: gDetail.store.id, store_name: gDetail.store.name, delivery_fee: gDetail.store.delivery_fee, min_order: gDetail.store.min_order || 0 })}
 
             header={(
               <div className="row wrap" style={{ justifyContent: 'center', gap: 8, alignItems: 'center', marginBottom: 8 }}>
