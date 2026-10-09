@@ -837,3 +837,21 @@ button.icon-btn.yl-back:active { transform: scale(.92); }
 .pd-gal img { aspect-ratio: auto; height: auto; max-height: 300px; max-height: 42dvh; }   /* 🖼️ ratio NATUREL, plafonné — la photo ne dépasse jamais le panier */
 .pd-nophoto { aspect-ratio: auto; height: 210px; }   /* cadre réduit pour les produits sans photo */
 .pd-actions { position: sticky; bottom: 0; margin: 12px -14px -12px; padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px)); background: #fff; border-top: 1px solid var(--line); box-shadow: 0 -6px 16px rgba(15, 23, 42, .07); border-radius: 0 0 15px 15px; }   /* 🛒 collant, bord à bord de la carte produit */
+
+/* ═══ 👕🎨🏷️ v2026.10.08.12 — VÊTEMENTS : variantes (tailles + couleurs + promo) ═══ */
+.pg-card.v-pr .pg-imgwrap img { aspect-ratio: 4 / 5; }   /* cartes vêtements un peu plus LONGUES (place pour les couleurs) */
+.pg-colors { display: flex; gap: 4px; flex-wrap: wrap; padding: 5px 2px 0; }   /* 🎨 pastilles JUSTE SOUS la photo, AU-DESSUS du prix */
+.pg-colors i { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid rgba(15,23,42,.22); display: inline-block; }
+.pg-old { color: #94a3b8; font-weight: 600; font-size: 11px; }
+.pg-promo { color: #0e9f6e; font-weight: 900; }
+.pg-sizes-hint { color: #64748b; font-weight: 700; font-size: 11.5px; }   /* 👕 prix masqué : la fiche révèle le prix après le choix de la taille */
+.pd-price-row { text-align: center; margin-top: 2px; font-size: 15px; }
+.pd-price-row s { color: #94a3b8; margin-inline-end: 6px; }
+.pd-price-row b { color: #0e9f6e; font-weight: 900; }
+.pd-vars { background: #f8fafc; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-top: 10px; display: flex; flex-direction: column; gap: 7px; }
+.pd-vars-l { font-size: 12.5px; font-weight: 800; color: #334155; }
+.pd-var { border: 1.5px solid var(--line); background: #fff; border-radius: 10px; padding: 6px 12px; font-size: 13px; font-weight: 800; color: #334155; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.pd-var.on { border-color: #0e9f6e; background: #e6f7f0; color: #0b7a55; }
+.pd-var i { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid rgba(15,23,42,.25); display: inline-block; }
+.pd-price-now { font-size: 15px; font-weight: 900; color: #0e9f6e; }
+.pd-color-chip { border: 1px solid var(--line); }

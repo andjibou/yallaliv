@@ -997,11 +997,39 @@ async function withPhotos(products) {
   return products.map((p) => ({ ...p, photos: byP[p.id] || [] }));
 }
 
+// 👕🎨 v2026.10.08.12 — variantes vêtements : promo_price + tailles (prix par taille)
+// + couleurs détectées, attachées à chaque liste de produits servie au client/marchand.
+async function withVariants(products) {
+  if (!products || !products.length) return products || [];
+  const ids = products.map((p) => p.id);
+  const ph = ids.map(() => '?').join(',');
+  const sizes = await all(`SELECT product_id, size, price FROM product_sizes WHERE product_id IN (${ph}) ORDER BY id`, ids).catch(() => []);
+  const colors = await all(`SELECT product_id, color FROM product_colors WHERE product_id IN (${ph}) ORDER BY id`, ids).catch(() => []);
+  const smap = {}, cmap = {};
+  for (const s of sizes) (smap[s.product_id] = smap[s.product_id] || []).push({ size: s.size, price: s.price });
+  for (const c of colors) (cmap[c.product_id] = cmap[c.product_id] || []).push(c.color);
+  return products.map((p) => ({ ...p, promo_price: p.promo_price ?? null, sizes: smap[p.id] || null, has_sizes: !!(smap[p.id] || []).length, colors: cmap[p.id] || null }));
+}
+
+// 👕 v2026.10.08.12 — enregistre les tailles et couleurs d'un produit (remplace tout).
+async function saveVariants(productId, sizes, colors) {
+  await run('DELETE FROM product_sizes WHERE product_id=?', [productId]).catch(() => {});
+  await run('DELETE FROM product_colors WHERE product_id=?', [productId]).catch(() => {});
+  const szs = Array.isArray(sizes) ? sizes.map((s) => ({ size: String(s?.size ?? '').trim().slice(0, 12), price: parseFloat(s?.price) })).filter((s) => s.size && !isNaN(s.price) && s.price >= 0) : [];
+  for (const s of new Map(szs.map((s) => [s.size.toLowerCase(), s])).values()) {
+    await run('INSERT INTO product_sizes(product_id,size,price,created_at) VALUES(?,?,?,?) ON CONFLICT (product_id, size) DO NOTHING', [productId, s.size, round2(s.price), Date.now()]).catch(() => {});
+  }
+  const cols = Array.isArray(colors) ? [...new Set(colors.map((c) => String(c ?? '').trim()).filter(Boolean).slice(0, 8))] : [];
+  for (const c of cols) {
+    await run('INSERT INTO product_colors(product_id,color,created_at) VALUES(?,?,?) ON CONFLICT (product_id, color) DO NOTHING', [productId, c.slice(0, 20), Date.now()]).catch(() => {});
+  }
+}
+
 // Produits de tous les magasins approuves (vue globale client) : chaque produit
 // porte l'indice du magasin (nom, logo emoji, couleur) qui le publie.
 app.get('/api/products', h(async (req, res) => {
   const { q, type } = req.query;
-  let sql = `SELECT p.id, p.name, p.emoji, p.photo, p.price, p.category, p.store_id,
+  let sql = `SELECT p.id, p.name, p.emoji, p.photo, p.price, p.promo_price, p.category, p.store_id,
     s.name AS store_name, s.emoji AS store_emoji, s.color AS store_color, s.photo AS store_photo, s.type AS store_type,
     s.address AS store_address, s.lat AS store_lat, s.lng AS store_lng, s.is_open,
     s.rating AS store_rating, s.delivery_fee, s.min_order,
@@ -1012,7 +1040,7 @@ app.get('/api/products', h(async (req, res) => {
   if (type && type !== 'all') { sql += ' AND s.type = ?'; args.push(type); }
   if (q) { sql += ' AND (p.name ILIKE ? OR s.name ILIKE ?)'; args.push(`%${q}%`, `%${q}%`); }
   sql += ' ORDER BY s.rating DESC, p.id DESC LIMIT 300';
-  res.json({ products: await all(sql, args) });
+  res.json({ products: await withVariants(await all(sql, args)) });
 }));
 
 // 🔎 v2026.10.04.2 — journal des recherches produits (page catégorie / page magasin) :
@@ -1036,14 +1064,14 @@ app.get('/api/products/top', h(async (req, res) => {
   let where = " WHERE p.available=1 AND s.status='approved' AND s.is_open=1";
   if (store_id) { where += ' AND p.store_id=?'; args.push(parseInt(store_id) || 0); }
   else if (type && type !== 'all') { where += ' AND s.type=?'; args.push(String(type)); }
-  const rows = await all(`SELECT p.id, p.name, p.emoji, p.photo, p.price, p.category, p.description, p.store_id,
+  const rows = await all(`SELECT p.id, p.name, p.emoji, p.photo, p.price, p.promo_price, p.category, p.description, p.store_id,
       s.name AS store_name, s.emoji AS store_emoji, s.color AS store_color, s.photo AS store_photo, s.type AS store_type, s.rating,
       s.delivery_fee, s.min_order, (SELECT json_agg(pp.photo) FROM product_photos pp WHERE pp.product_id=p.id) AS gallery,
       (SELECT COALESCE(SUM(oi.qty),0) FROM order_items oi JOIN orders o ON o.id=oi.order_id
         WHERE oi.product_id=p.id AND o.status NOT IN ('cancelled','rejected','refused')) AS ordered
     FROM products p JOIN stores s ON s.id=p.store_id${where}
     ORDER BY ordered DESC, s.rating DESC, p.id DESC LIMIT 40`, args);
-  res.json({ products: rows.filter((r) => r.ordered > 0) });
+  res.json({ products: await withVariants(rows.filter((r) => r.ordered > 0)) });
 }));
 
 // ✨ v2026.10.04.2 — suggestions personnalisées : produits du contexte (?type= ou ?store_id=)
@@ -1055,7 +1083,7 @@ app.get('/api/products/suggested', auth, h(async (req, res) => {
   let where = " WHERE p.available=1 AND s.status='approved' AND s.is_open=1";
   if (store_id) { where += ' AND p.store_id=?'; args.push(parseInt(store_id) || 0); }
   else if (type && type !== 'all') { where += ' AND s.type=?'; args.push(String(type)); }
-  const prods = await all(`SELECT p.id, p.name, p.emoji, p.photo, p.price, p.category, p.description, p.store_id,
+  const prods = await all(`SELECT p.id, p.name, p.emoji, p.photo, p.price, p.promo_price, p.category, p.description, p.store_id,
       s.name AS store_name, s.emoji AS store_emoji, s.color AS store_color, s.photo AS store_photo, s.type AS store_type, s.rating,
       s.delivery_fee, s.min_order, (SELECT json_agg(pp.photo) FROM product_photos pp WHERE pp.product_id=p.id) AS gallery
     FROM products p JOIN stores s ON s.id=p.store_id${where}
@@ -1077,7 +1105,7 @@ app.get('/api/products/suggested', auth, h(async (req, res) => {
     if (best > 0) matched.push([best, p]);
   }
   matched.sort((a, b) => b[0] - a[0] || b[1].rating - a[1].rating);
-  res.json({ products: matched.slice(0, 24).map((m) => m[1]), matched: matched.length > 0 });
+  res.json({ products: await withVariants(matched.slice(0, 24).map((m) => m[1])), matched: matched.length > 0 });
 }));
 
 app.get('/api/stores/:id', h(async (req, res) => {
@@ -1086,7 +1114,7 @@ app.get('/api/stores/:id', h(async (req, res) => {
     FROM stores s WHERE s.id=? AND s.status='approved'`, [req.params.id]);
   if (!store) return res.status(404).json({ error: 'Magasin introuvable' });
   const products = await all('SELECT * FROM products WHERE store_id=? AND available=1 ORDER BY category, name', [store.id]);
-  res.json({ store, products: await withPhotos(products) });
+  res.json({ store, products: await withVariants(await withPhotos(products)) });
 }));
 
 // ---------- CLIENT ----------
@@ -1105,8 +1133,18 @@ app.post('/api/orders', auth, requireRole('client', 'merchant', 'superadmin'), h
     const p = await get('SELECT * FROM products WHERE id=? AND store_id=? AND available=1', [it.product_id, store.id]);
     if (!p) return res.status(400).json({ error: 'Produit indisponible' });
     const qty = Math.max(1, Math.min(99, parseInt(it.qty) || 1));
-    subtotal += p.price * qty;
-    rows.push([p.id, p.name, p.emoji, p.price, qty]);
+    // 👕🏷️ v2026.10.08.12 : taille choisie → prix de CETTE taille ; sinon prix promo ; sinon prix base.
+    let unit = p.price;
+    let label = p.name;
+    if (it.size) {
+      const sz = await get('SELECT price FROM product_sizes WHERE product_id=? AND size=?', [p.id, String(it.size).slice(0, 12)]).catch(() => null);
+      if (sz) unit = sz.price;
+      label = p.name + ' — ' + String(it.size).slice(0, 12) + (it.color ? ' · ' + String(it.color).slice(0, 20) : '');
+    } else if (p.promo_price != null) {
+      unit = p.promo_price;
+    }
+    subtotal += unit * qty;
+    rows.push([p.id, label, p.emoji, unit, qty]);
   }
   if (subtotal < store.min_order) return res.status(400).json({ error: `Commande minimum: ${store.min_order}` });
   const rate = parseFloat(await getSetting('commission_rate', '10')) || 0;
@@ -1193,7 +1231,7 @@ app.get('/api/merchant/store', auth, requireRole('merchant'), h(async (req, res)
   const store = await get('SELECT * FROM stores WHERE owner_id=?', [req.user.id]);
   if (!store) return res.status(404).json({ error: 'Aucun magasin' });
   const products = await all('SELECT * FROM products WHERE store_id=? ORDER BY category, name', [store.id]);
-  res.json({ store, products: await withPhotos(products) });
+  res.json({ store, products: await withVariants(await withPhotos(products)) });
 }));
 
 // Photo de profil du magasin (logo) — visible par les clients
@@ -1236,9 +1274,11 @@ app.post('/api/merchant/products', auth, requireRole('merchant'), h(async (req, 
   if (!name || !String(name).trim()) return res.status(400).json({ error: 'Nom du produit requis (ex. : Sandwich falafel)' });
   if (price === undefined || isNaN(parseFloat(price)) || parseFloat(price) < 0) return res.status(400).json({ error: 'Prix invalide (ex. : 45.50)' });
   const qty = (req.body.qty === '' || req.body.qty == null || isNaN(parseInt(req.body.qty))) ? null : Math.max(0, parseInt(req.body.qty));
-  const p = await get('INSERT INTO products(store_id,name,category,description,price,qty,emoji,available,created_at) VALUES(?,?,?,?,?,?,?,?,?) RETURNING *',
-    [store.id, String(name).trim(), String(category), String(description), round2(parseFloat(price)), qty, String(emoji).slice(0, 4), available ? 1 : 0, Date.now()]);
-  res.json({ product: p });
+  const promo = req.body.promo_price === '' || req.body.promo_price == null || isNaN(parseFloat(req.body.promo_price)) ? null : round2(parseFloat(req.body.promo_price));   // 🏷️ v2026.10.08.12
+  const p = await get('INSERT INTO products(store_id,name,category,description,price,promo_price,qty,emoji,available,created_at) VALUES(?,?,?,?,?,?,?,?,?,?) RETURNING *',
+    [store.id, String(name).trim(), String(category), String(description), round2(parseFloat(price)), promo, qty, String(emoji).slice(0, 4), available ? 1 : 0, Date.now()]);
+  await saveVariants(p.id, req.body.sizes, req.body.colors);   // 👕🎨 tailles + couleurs
+  res.json({ product: (await withVariants([p]))[0] });
 }));
 
 app.put('/api/merchant/products/:id', auth, requireRole('merchant'), h(async (req, res) => {
@@ -1247,13 +1287,16 @@ app.put('/api/merchant/products/:id', auth, requireRole('merchant'), h(async (re
   if (!p) return res.status(404).json({ error: 'Produit introuvable' });
   const { name, category, description, price, emoji, available } = req.body;
   const qty = (req.body.qty === '' || req.body.qty == null || isNaN(parseInt(req.body.qty))) ? null : Math.max(0, parseInt(req.body.qty));
-  const out = await get('UPDATE products SET name=?, category=?, description=?, price=?, qty=?, emoji=?, available=? WHERE id=? RETURNING *',
+  const promo = req.body.promo_price === undefined ? p.promo_price : (req.body.promo_price === '' || req.body.promo_price == null || isNaN(parseFloat(req.body.promo_price)) ? null : round2(parseFloat(req.body.promo_price)));   // 🏷️ v2026.10.08.12
+  const out = await get('UPDATE products SET name=?, category=?, description=?, price=?, promo_price=?, qty=?, emoji=?, available=? WHERE id=? RETURNING *',
     [String(name ?? p.name).trim(), String(category ?? p.category), String(description ?? p.description),
       price !== undefined ? round2(parseFloat(price) || p.price) : p.price,
+      promo,
       req.body.qty === undefined ? p.qty : qty,
       String(emoji ?? p.emoji).slice(0, 4),
       available === undefined ? p.available : (available ? 1 : 0), p.id]);
-  res.json({ product: out });
+  if (req.body.sizes !== undefined || req.body.colors !== undefined) await saveVariants(p.id, req.body.sizes, req.body.colors);   // 👕🎨 tailles + couleurs
+  res.json({ product: (await withVariants([out]))[0] });
 }));
 
 app.delete('/api/merchant/products/:id', auth, requireRole('merchant'), h(async (req, res) => {

@@ -138,6 +138,21 @@ CREATE TABLE IF NOT EXISTS password_resets (
   photo TEXT NOT NULL,
   created_at BIGINT NOT NULL
 );
+  CREATE TABLE IF NOT EXISTS product_sizes (
+  id SERIAL PRIMARY KEY,
+  product_id INTEGER NOT NULL,
+  size TEXT NOT NULL,
+  price REAL NOT NULL,
+  created_at BIGINT NOT NULL,
+  UNIQUE(product_id, size)
+);
+  CREATE TABLE IF NOT EXISTS product_colors (
+  id SERIAL PRIMARY KEY,
+  product_id INTEGER NOT NULL,
+  color TEXT NOT NULL,
+  created_at BIGINT NOT NULL,
+  UNIQUE(product_id, color)
+);
 CREATE TABLE IF NOT EXISTS orders (
   id SERIAL PRIMARY KEY,
   client_id INTEGER NOT NULL,
@@ -384,6 +399,7 @@ export async function initDb() {
   await run('ALTER TABLE orders ADD COLUMN refuse_reason TEXT').catch(() => {});   // ↩️ motif de refus client
   await run('ALTER TABLE products ADD COLUMN qty INTEGER').catch(() => {});              // 📦 quantité visible par le client (NULL = illimité)
   await run('ALTER TABLE products ADD COLUMN via_excel INTEGER NOT NULL DEFAULT 0').catch(() => {});   // 📥 importé par Excel (remplaçable par un nouvel import)
+  await run('ALTER TABLE products ADD COLUMN promo_price REAL').catch(() => {});        // 🏷️ v2026.10.08.12 : prix de promotion (vêtements)
   await run('ALTER TABLE driver_locations ADD COLUMN bearing REAL').catch(() => {});    // 🧭 v2026.09.23.3 : cap du livreur — le magasin voit le bec pivoter (même sur place)
   await run("ALTER TABLE push_subscriptions ADD COLUMN kind TEXT NOT NULL DEFAULT 'web'").catch(() => {});   // 🔔 'web' (VAPID) ou 'fcm' (APK)
   await run('ALTER TABLE push_subscriptions ADD COLUMN fcm_token TEXT').catch(() => {});

@@ -1,17 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useNavigate, useParams, useLocation, Outlet, useSearchParams } from 'react-router-dom';
 import TrackMap from '../TrackMap.jsx';
-import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage, gmapsNavUrl, gmapsSearchUrl } from '../lib.jsx';
+import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage, gmapsNavUrl, gmapsSearchUrl, COLOR_HEX } from '../lib.jsx';
 import { BottomNav, CartBar, StatusBadge, PayBadge, Stepper, Empty, Spinner, BackBtn, LangSwitch, Modal, Stars, SuggestBox, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import PickMap, { reverseGeocode, geocodeSearch } from '../PickMap.jsx';
 import AccountSettings from '../AccountSettings.jsx';
 import { StoresMap } from '../RouteMap.jsx';
 
-const TYPE_META = { restaurant: { e: '🍽️', c: '#ef6c4d' }, market: { e: '🛒', c: '#3b82f6' }, pharmacy: { e: '💊', c: '#14b8a6' } };
+const TYPE_META = { restaurant: { e: '🍽️', c: '#ef6c4d' }, market: { e: '🛒', c: '#3b82f6' }, pharmacy: { e: '💊', c: '#14b8a6' }, clothing: { e: '👕', c: '#8b5cf6' } };   // 👕 v2026.10.08.12
 const SIB_TYPES = ['restaurant', 'market', 'pharmacy'];   // 🧲 v2026.10.08.11 : bande « même catégorie » réservée à ces types de magasins
 // 🖼️ v2026.10.08.8 — couverture des magasins SANS photo : image de l'activité
-const COVER_IMG = { restaurant: '/stores/restaurant.jpg', market: '/stores/supermarket.jpg', pharmacy: '/stores/pharmacy.jpg', electronics: '/stores/electronics.jpg', appliance: '/stores/appliance.jpg' };
+const COVER_IMG = { restaurant: '/stores/restaurant.jpg', market: '/stores/supermarket.jpg', pharmacy: '/stores/pharmacy.jpg', electronics: '/stores/electronics.jpg', appliance: '/stores/appliance.jpg', clothing: '/market/fashion.jpg' };
 // 🏪 v2026.09.27.1 — cartes magasins de l'accueil (photos réalistes) + départements
 const STORE_CARDS = [
   { type: 'restaurant', img: '/stores/restaurant.jpg', key: 'restaurant' },
@@ -175,12 +175,14 @@ const loadPFavs = () => { try { return JSON.parse(localStorage.getItem(PFAV_KEY)
 const HEART_PATH = 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z';
 
 function PgCard({ p, rating, fav, onFav, onOpen, onAdd }) {
+  const t = useT();   // 👕 v2026.10.08.12 : libellé « Taille » sur les cartes vêtements
   const [pi, setPi] = useState(0);   // photo affichée (navigation ‹ › sans ouvrir le produit)
   const gal = (p.gallery || (p.photos || []).map((x) => x && x.photo) || []).filter(Boolean);
   const pics = [p.photo, ...gal].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
   const r = rating ?? p.store_rating ?? p.rating;
+  const hasVars = (p.sizes || []).length > 0 || (p.colors || []).length > 0;   // 👕🎨 v2026.10.08.12
   return (
-    <div className="pg-card">
+    <div className={'pg-card' + (hasVars ? ' v-pr' : '')}>
       <button type="button" className={'pg-heart' + (fav ? ' on' : '')} aria-label="favori"
         onClick={(e) => { e.stopPropagation(); onFav(p.id); }}>
         <svg viewBox="0 0 24 24"><path d={HEART_PATH} /></svg>
@@ -197,14 +199,24 @@ function PgCard({ p, rating, fav, onFav, onOpen, onAdd }) {
           <span className="pg-dots">{pics.map((_, i) => <i key={i} className={i === pi ? 'on' : ''} />)}</span>
         </>)}
       </div>
+      {(p.colors || []).length > 0 && (   // 🎨 couleurs disponibles : justes sous la photo, AU-DESSUS du prix
+        <div className="pg-colors">{p.colors.map((c) => <i key={c} title={c} style={{ background: COLOR_HEX[c] || '#cbd5e1' }} />)}</div>
+      )}
       <div className="pg-foot" onClick={() => onOpen(p)}>
         <div className="pg-info">
-          <div className="pg-price">{fmtMoney(p.price)}</div>
+          <div className="pg-price">
+            {p.has_sizes
+              /* 👕 prix visible seulement après choix de la taille dans la fiche */
+              ? <span className="pg-sizes-hint">📏 {t('size')}</span>
+              : p.promo_price != null
+                ? <><s className="pg-old">{fmtMoney(p.price)}</s> <span className="pg-promo">{fmtMoney(p.promo_price)}</span></>
+                : fmtMoney(p.price)}
+          </div>
           <div className="pg-name">{p.name}</div>
           {r != null && <div className="pg-rate">⭐ {Number(r).toFixed(1)}</div>}
         </div>
         <button type="button" className="pg-add" aria-label="ajouter au panier"
-          onClick={(e) => { e.stopPropagation(); onAdd(p); }}>＋</button>
+          onClick={(e) => { e.stopPropagation(); if (hasVars) onOpen(p, { vars: true }); else onAdd(p); }}>＋</button>
       </div>
     </div>
   );
@@ -239,20 +251,31 @@ function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd, grid })
      retourne de l'autre côté quand toutes les photos ont été défilées
    • la description défile dans sa PROPRE boîte verticale (v2026.10.08.9) — tout le
      reste est visible directement · le bouton panier ne déborde JAMAIS */
-function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, onPick, sibFavs, sibOnFav, sibOnAdd, sibRating, storeType }) {   // 🧲🖼️🛒 v2026.10.08.11 : bande réservée restaurant/pharmacie/supermarché + photo taille réduite + textes supprimés
+function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, onPick, sibFavs, sibOnFav, sibOnAdd, sibRating, storeType, autoVars }) {   // 👕🎨 v2026.10.08.12 : tailles/couleurs à confirmer avant l'ajout au panier
   const t = useT();
   const galRef = useRef(null);
   const [atEnd, setAtEnd] = useState(false);
   const [zoom, setZoom] = useState(false);   // 🔍 v2026.10.08.9 : visionneuse PLEIN ÉCRAN ouverte ?
   const [zc, setZc] = useState(0);           // photo affichée dans la visionneuse
   const zRef = useRef(null);
+  // 👕🎨 v2026.10.08.12 — variante sélectionnée : le panneau s'ouvre via 🛒/＋ (autoVars si
+  // arrivé par le ＋ d'une carte). Le prix n'apparaît qu'après le choix de la taille.
+  const hasSizes = (product.sizes || []).length > 0;
+  const hasColors = (product.colors || []).length > 0;
+  const needVars = hasSizes || hasColors;
+  const [varsOpen, setVarsOpen] = useState(!!autoVars);
+  const [selSize, setSelSize] = useState(null);
+  const [selColor, setSelColor] = useState(null);
+  const unitPrice = () => (hasSizes
+    ? (selSize ? (product.sizes.find((z) => z.size === selSize)?.price ?? product.price) : null)
+    : (product.promo_price != null ? product.promo_price : product.price));
   // les photos arrivent sous 2 formats : .gallery (tableau de chaînes — lignes 🏆/✨/grilles)
   // ou .photos (tableaux d'objets — page magasin). On accepte les deux.
   const pics = [product.photo,
     ...((product.gallery || []).filter(Boolean)),
     ...((product.photos || []).map((x) => x && x.photo).filter(Boolean)),
   ].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
-  useEffect(() => { if (galRef.current) galRef.current.scrollLeft = 0; setAtEnd(false); setZoom(false); }, [product.id]);
+  useEffect(() => { if (galRef.current) galRef.current.scrollLeft = 0; setAtEnd(false); setZoom(false); setVarsOpen(!!autoVars); setSelSize(null); setSelColor(null); }, [product.id]);
   const onGal = () => { const el = galRef.current; if (el) setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 6); };
   const gal = (dir) => galRef.current && galRef.current.scrollBy({ left: dir * galRef.current.clientWidth * 0.92, behavior: 'smooth' });
   // 🧲 v2026.10.08.11 : la bande « même catégorie » n'apparaît QUE dans les magasins
@@ -293,6 +316,36 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
         )}
       </div>
       <div className="pd-name">{product.name}</div>
+      {!needVars && product.promo_price != null && (   // 🏷️ prix promo (produit SANS tailles) : ancien prix barré
+        <div className="pd-price-row"><s>{fmtMoney(product.price)}</s> <b>🏷️ {fmtMoney(product.promo_price)}</b></div>
+      )}
+      {/* 👕🎨 v2026.10.08.12 — CHAMPS TAILLE + COULEUR (ouverts par 🛒 / ＋) : le prix se
+          révèle après le choix de la taille. Confirmer ajoute la variante au panier. */}
+      {needVars && varsOpen && (
+        <div className="pd-vars">
+          {hasSizes && (<>
+            <div className="pd-vars-l">📏 {t('size')}</div>
+            <div className="row wrap" style={{ gap: 6 }}>
+              {product.sizes.map((z) => (
+                <button key={z.size} type="button" className={'pd-var' + (selSize === z.size ? ' on' : '')} onClick={() => setSelSize(z.size)}>{z.size}</button>
+              ))}
+            </div>
+            <div className="pd-price-now">{selSize
+              ? '💰 ' + fmtMoney(product.sizes.find((z) => z.size === selSize)?.price ?? product.price)
+              : <span className="muted small">👆 {t('pick_size_price')}</span>}</div>
+          </>)}
+          {hasColors && (<>
+            <div className="pd-vars-l">🎨 {t('color')}</div>
+            <div className="row wrap" style={{ gap: 6 }}>
+              {product.colors.map((c) => (
+                <button key={c} type="button" className={'pd-var pd-var-c' + (selColor === c ? ' on' : '')} onClick={() => setSelColor(c)}>
+                  <i style={{ background: COLOR_HEX[c] || '#cbd5e1' }} />{c}
+                </button>
+              ))}
+            </div>
+          </>)}
+        </div>
+      )}
       {/* 📜 v2026.10.08.9 — la description défile dans sa PROPRE boîte VERTICALE
           (max 150 px) : le texte ne déborde JAMAIS à droite, on lit la suite en
           glissant DANS la boîte. */}
@@ -301,6 +354,23 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
         : <div style={{ height: 8 }} />}
       {closed ? (
         <div className="banner warn mt8">{t('store_closed')}</div>
+      ) : needVars ? (
+        <div className="row pd-actions" style={{ gap: 10 }}>
+          <div className="qty-stepper" style={{ padding: '8px 10px', flex: 'none' }}>
+            <button className="qs-btn" onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button>
+            <span style={{ minWidth: 20, textAlign: 'center' }}>{qty}</span>
+            <button className="qs-btn" onClick={() => setQty((q) => Math.min(99, q + 1))}>+</button>
+          </div>
+          <button type="button" className="btn primary grow pd-add"
+            disabled={varsOpen && ((hasSizes && !selSize) || (hasColors && !selColor))}
+            onClick={() => {
+              if (!varsOpen) { setVarsOpen(true); return; }   // ① le clic OUVRE les champs taille + couleur
+              onAdd({ size: selSize, color: selColor, price: unitPrice() });   // ② confirmation → ajout de LA variante choisie
+            }}>
+            <span className="pd-add-l1">🛒 {!varsOpen ? t('add_to_cart') : (hasSizes && !selSize) || (hasColors && !selColor) ? t('pick_variant') : '✓ ' + t('confirm')}</span>
+            <span className="pd-add-l2">{!varsOpen ? (hasSizes ? '📏 ' + t('size') : '🎨 ' + t('color')) : (unitPrice() != null ? fmtMoney(unitPrice() * qty) : '—')}</span>
+          </button>
+        </div>
       ) : (
         <div className="row pd-actions" style={{ gap: 10 }}>
           <div className="qty-stepper" style={{ padding: '8px 10px', flex: 'none' }}>
@@ -308,9 +378,9 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
             <span style={{ minWidth: 20, textAlign: 'center' }}>{qty}</span>
             <button className="qs-btn" onClick={() => setQty((q) => Math.min(99, q + 1))}>+</button>
           </div>
-          <button className="btn primary grow pd-add" onClick={onAdd}>
+          <button className="btn primary grow pd-add" onClick={() => onAdd()}>
             <span className="pd-add-l1">🛒 {t('add_to_cart')}</span>
-            <span className="pd-add-l2">{fmtMoney(product.price * qty)}</span>
+            <span className="pd-add-l2">{fmtMoney((product.promo_price != null ? product.promo_price : product.price) * qty)}</span>
           </button>
         </div>
       )}
@@ -576,19 +646,25 @@ export function ClientHome() {
     else add(p, stub);   // autre magasin : propose de vider le panier
   };
   // Ouvre la FICHE PRODUIT (pas le magasin) : charge le produit complet + sa boutique
-  const openProduct = async (p) => {
+  const openProduct = async (p, o) => {
     setGDetail({ loading: true });
     try {
       const d = await api('/stores/' + p.store_id);
       const prod = d.products.find((x) => x.id === p.id);
       if (!prod) throw new Error(trErr('Produit introuvable'));
-      setGDetail({ store: d.store, product: prod, prods: d.products });   // 🧲 v2026.10.08.8 : produits du magasin gardés pour la bande « même catégorie »
+      setGDetail({ store: d.store, product: prod, prods: d.products, confirm: !!(o && o.vars) });   // 👕 v2026.10.08.12 : confirm = ouvrir sur les champs taille/couleur
       setGBig(prod.photo || null);
       setGQty(1);
     } catch (e) { setGDetail(null); toast(e.message, 'err'); }
   };
-  const addFromGlobal = () => {
+  const addFromGlobal = (variant) => {
     const { store, product } = gDetail;
+    if (variant && variant.price != null) {   // 👕 v2026.10.08.12 : variante confirmée (taille/couleur)
+      const label = [variant.size, variant.color].filter(Boolean).join(' · ');
+      add(product, store, { label, size: variant.size, color: variant.color, price: variant.price }, gQty);
+      toast(t('added'));
+      return;
+    }
     const inCart = items.find((i) => i.product_id === product.id && i.store_id === store.id)?.qty || 0;
     if (!items.length || items[0].store_id === store.id) {
       if (inCart === 0) add(product, store);
@@ -764,9 +840,9 @@ export function ClientHome() {
       <Modal open={!!gDetail} onClose={() => setGDetail(null)} className="pd-modal">
         {gDetail?.loading ? <Spinner /> : gDetail?.store && gDetail?.product ? (
           <ProductDetail
-            product={gDetail.product} closed={!gDetail.store.is_open} qty={gQty} setQty={setGQty} onAdd={addFromGlobal}
+            product={gDetail.product} closed={!gDetail.store.is_open} qty={gQty} setQty={setGQty} onAdd={addFromGlobal} autoVars={gDetail.confirm}
             siblings={(gDetail.prods || []).filter((x) => x.category === gDetail.product.category)}
-            onPick={(p) => { setGDetail((g) => ({ ...g, product: p })); setGBig(p.photo || null); setGQty(1); }}
+            onPick={(p) => { setGDetail((g) => ({ ...g, product: p, confirm: false })); setGBig(p.photo || null); setGQty(1); }}
             sibFavs={favs} sibOnFav={toggleFav}
             sibOnAdd={(p) => addFromGrid({ ...p, store_id: gDetail.store.id, store_name: gDetail.store.name, delivery_fee: gDetail.store.delivery_fee, min_order: gDetail.store.min_order || 0 })}
             storeType={gDetail.store.type}
@@ -810,8 +886,15 @@ export function StorePage() {
     api('/products/suggested?store_id=' + id).then((d) => setSuggP(d.matched ? d.products : null)).catch(() => setSuggP(null));   // ✨ 2.4
   }, [id]);
 
-  const openDetail = (p) => { setDetail(p); setBigPhoto(p.photo || null); setDQty(qtyOf(p.id) || 1); };
-  const addFromDetail = () => {
+  const [dVars, setDVars] = useState(false);   // 👕 v2026.10.08.12 : ouvrir la fiche DIRECTEMENT sur les champs taille/couleur (clic ＋)
+  const openDetail = (p, o) => { setDetail(p); setBigPhoto(p.photo || null); setDQty(qtyOf(p.id) || 1); setDVars(!!(o && o.vars)); };
+  const addFromDetail = (variant) => {
+    if (variant && variant.price != null) {   // 👕 v2026.10.08.12 : variante confirmée (taille/couleur) → ligne dédiée au panier
+      const label = [variant.size, variant.color].filter(Boolean).join(' · ');
+      add(detail, store, { label, size: variant.size, color: variant.color, price: variant.price }, dQty);
+      toast(t('added'));
+      return;
+    }
     if (!items.length || items[0].store_id === store.id) {
       if (qtyOf(detail.id) === 0) add(detail, store);
       setQty(detail.id, dQty);
@@ -999,7 +1082,7 @@ export function StorePage() {
 
       <Modal open={!!detail} onClose={() => setDetail(null)} className="pd-modal">
         {detail && (
-          <ProductDetail product={detail} closed={closed} qty={dQty} setQty={setDQty} onAdd={addFromDetail}
+          <ProductDetail product={detail} closed={closed} qty={dQty} setQty={setDQty} onAdd={addFromDetail} autoVars={dVars}
             siblings={products?.filter((p) => p.category === detail.category)} onPick={openDetail}
             sibFavs={favs} sibOnFav={toggleFav} sibOnAdd={addFromGrid} sibRating={store.rating} storeType={store.type} />
         )}
@@ -1132,7 +1215,7 @@ export function CartPage() {
           store_id: store.id, address, phone: finalPhone, note, payment,
           client_lat: gps?.lat, client_lng: gps?.lng,
           promo_code: promo?.code,
-          items: items.map((i) => ({ product_id: i.product_id, qty: i.qty }))
+          items: items.map((i) => ({ product_id: i.product_id, qty: i.qty, size: i.size || undefined, color: i.color || undefined }))
         }
       });
 
@@ -1179,7 +1262,7 @@ export function CartPage() {
             <div className="qty-stepper">
               <button className="qs-btn" onClick={() => setQty(i.product_id, i.qty - 1)}>−</button>
               <span>{i.qty}</span>
-              <button className="qs-btn" onClick={() => setQty(i.product_id, i.qty + 1)}>+</button>
+              <button className="qs-btn" onClick={() => setQty(i.vkey ?? i.product_id, i.qty + 1)}>+</button>
             </div>
           </div>
         ))}
@@ -2778,19 +2861,25 @@ export function StoresByTypePage() {
   };
 
   // fiche produit rapide (même modale que l'accueil)
-  const openProduct = async (p) => {
+  const openProduct = async (p, o) => {
     setGDetail({ loading: true });
     try {
       const d = await api('/stores/' + p.store_id);
       const prod = d.products.find((x) => x.id === p.id);
       if (!prod) throw new Error(trErr('Produit introuvable'));
-      setGDetail({ store: d.store, product: prod, prods: d.products });   // 🧲 v2026.10.08.8 : produits du magasin gardés pour la bande « même catégorie »
+      setGDetail({ store: d.store, product: prod, prods: d.products, confirm: !!(o && o.vars) });   // 👕 v2026.10.08.12 : confirm = ouvrir sur les champs taille/couleur
       setGBig(prod.photo || null);
       setGQty(1);
     } catch (e) { setGDetail(null); toast(e.message, 'err'); }
   };
-  const addFromGlobal = () => {
+  const addFromGlobal = (variant) => {
     const { store, product } = gDetail;
+    if (variant && variant.price != null) {   // 👕 v2026.10.08.12 : variante confirmée (taille/couleur)
+      const label = [variant.size, variant.color].filter(Boolean).join(' · ');
+      add(product, store, { label, size: variant.size, color: variant.color, price: variant.price }, gQty);
+      toast(t('added'));
+      return;
+    }
     const inCart = items.find((i) => i.product_id === product.id && i.store_id === store.id)?.qty || 0;
     if (!items.length || items[0].store_id === store.id) {
       if (inCart === 0) add(product, store);
@@ -2893,9 +2982,9 @@ export function StoresByTypePage() {
       <Modal open={!!gDetail} onClose={() => setGDetail(null)} className="pd-modal">
         {gDetail?.loading ? <Spinner /> : gDetail?.store && gDetail?.product ? (
           <ProductDetail
-            product={gDetail.product} closed={!gDetail.store.is_open} qty={gQty} setQty={setGQty} onAdd={addFromGlobal}
+            product={gDetail.product} closed={!gDetail.store.is_open} qty={gQty} setQty={setGQty} onAdd={addFromGlobal} autoVars={gDetail.confirm}
             siblings={(gDetail.prods || []).filter((x) => x.category === gDetail.product.category)}
-            onPick={(p) => { setGDetail((g) => ({ ...g, product: p })); setGBig(p.photo || null); setGQty(1); }}
+            onPick={(p) => { setGDetail((g) => ({ ...g, product: p, confirm: false })); setGBig(p.photo || null); setGQty(1); }}
             sibFavs={favs} sibOnFav={toggleFav}
             sibOnAdd={(p) => addFromGrid({ ...p, store_id: gDetail.store.id, store_name: gDetail.store.name, delivery_fee: gDetail.store.delivery_fee, min_order: gDetail.store.min_order || 0 })}
             storeType={gDetail.store.type}

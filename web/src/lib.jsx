@@ -266,7 +266,7 @@ const DICT = {
     route: 'Trajet', view_route: 'Voir le trajet',
     choose_on_map: 'Choisir sur la carte', pin_hint: 'L\u2019épingle est fixe : déplacez la carte jusqu\u2019à ce que le centre soit exactement votre adresse',
     confirm_location: 'Confirmer cette position', locating: 'Recherche de l\u2019adresse…', address_updated: 'Adresse mise à jour 📍',
-    loc_defined: 'Position précise définie', product_details: 'Détail du produit', same_cat: 'Dans la même catégorie', add_to_cart: 'Ajouter au panier',
+    loc_defined: 'Position précise définie', product_details: 'Détail du produit', color: 'Couleur', pick_size_price: 'Choisis une taille pour voir le prix', pick_variant: 'Choisis taille et couleur', confirm: 'Confirmer', same_cat: 'Dans la même catégorie', add_to_cart: 'Ajouter au panier',
     tab_active: 'En cours', tab_new: 'Nouvelles', tab_done: 'Terminées',
     drivers_team: 'Mes livreurs', add_driver: 'Ajouter un livreur', no_drivers: 'Aucun livreur pour le moment — ajoutez votre premier livreur 🛵',
     driver_created: 'Livreur créé ✓', login_note: 'Identifiant à communiquer au livreur :', live_positions: 'Positions en direct',
@@ -449,7 +449,7 @@ const DICT = {
     route: 'المسار', view_route: 'عرض المسار',
     choose_on_map: 'اختر على الخريطة', pin_hint: 'الدبوس ثابت: حرّك الخريطة حتى يصبح المركز هو عنوانك بالضبط',
     confirm_location: 'تأكيد هذا الموقع', locating: 'جارٍ البحث عن العنوان…', address_updated: 'تم تحديث العنوان 📍',
-    loc_defined: 'تم تحديد الموقع بدقة', product_details: 'تفاصيل المنتج', same_cat: 'من نفس الفئة', add_to_cart: 'أضف إلى السلة',
+    loc_defined: 'تم تحديد الموقع بدقة', product_details: 'تفاصيل المنتج', color: 'اللون', pick_size_price: 'اختر المقاس لرؤية السعر', pick_variant: 'اختر المقاس واللون', confirm: 'تأكيد', same_cat: 'من نفس الفئة', add_to_cart: 'أضف إلى السلة',
     tab_active: 'جارية', tab_new: 'جديدة', tab_done: 'منتهية',
     drivers_team: 'سائقوّي', add_driver: 'إضافة سائق', no_drivers: 'لا يوجد سائقون — أضف أول سائق 🛵',
     driver_created: 'تم إنشاء السائق ✓', login_note: 'المعرف الذي يجب إبلاغه للسائق:', live_positions: 'المواقع المباشرة',
@@ -631,7 +631,7 @@ const DICT = {
     route: 'Route', view_route: 'View route',
     choose_on_map: 'Choose on the map', pin_hint: 'The pin is fixed: move the map until the center is exactly your address',
     confirm_location: 'Confirm this position', locating: 'Locating address…', address_updated: 'Address updated 📍',
-    loc_defined: 'Precise position set', product_details: 'Product details', same_cat: 'In the same category', add_to_cart: 'Add to cart',
+    loc_defined: 'Precise position set', product_details: 'Product details', color: 'Color', pick_size_price: 'Pick a size to see the price', pick_variant: 'Pick size and color', confirm: 'Confirm', same_cat: 'In the same category', add_to_cart: 'Add to cart',
     tab_active: 'Active', tab_new: 'New', tab_done: 'Done',
     drivers_team: 'My drivers', add_driver: 'Add driver', no_drivers: 'No drivers yet — add your first driver 🛵',
     driver_created: 'Driver created ✓', login_note: 'Login to give to the driver:', live_positions: 'Live positions',
@@ -733,30 +733,34 @@ export const homeFor = (u) => !u ? '/login' : u.role === 'superadmin' ? '/admin'
 
 // ================= Cart =================
 const CartCtx = createContext(null);
-const cartItem = (product, store, qty) => ({
-  product_id: product.id, name: product.name, emoji: product.emoji, photo: product.photo || null, price: product.price, qty,
+const cartItem = (product, store, qty, variant) => ({   // 👕 v2026.10.08.12 : variante = { label: 'M · Rouge', price } — ligne distincte dans le panier
+  product_id: product.id, vkey: variant ? product.id + '|' + variant.label : product.id,
+  name: variant ? product.name + ' (' + variant.label + ')' : product.name,
+  emoji: product.emoji, photo: product.photo || null, price: variant ? variant.price : product.price, qty,
+  variant: variant ? variant.label : null, size: variant?.size || null, color: variant?.color || null,
   store_id: store.id, store_name: store.name, store_lat: store.lat ?? null, store_lng: store.lng ?? null, delivery_fee: store.delivery_fee, min_order: store.min_order || 0
 });
 export function CartProvider({ children }) {
   const [items, setItems] = useState(() => { try { return JSON.parse(localStorage.getItem('yl_cart') || '[]'); } catch { return []; } });
   const [swap, setSwap] = useState(null);
   useEffect(() => { localStorage.setItem('yl_cart', JSON.stringify(items)); }, [items]);
-  const add = (product, store) => {
-    if (items.length && items[0].store_id !== store.id) { setSwap({ product, store }); return; }
+  const add = (product, store, variant, qty = 1) => {
+    if (items.length && items[0].store_id !== store.id) { setSwap({ product, store, variant, qty }); return; }
     setItems((its) => {
-      const ex = its.find((i) => i.product_id === product.id);
-      if (ex) return its.map((i) => (i.product_id === product.id ? { ...i, qty: i.qty + 1 } : i));
-      return [...its, cartItem(product, store, 1)];
+      const k = variant ? product.id + '|' + variant.label : product.id;
+      const ex = its.find((i) => (i.vkey ?? i.product_id) === k);
+      if (ex) return its.map((i) => ((i.vkey ?? i.product_id) === k ? { ...i, qty: i.qty + qty } : i));
+      return [...its, cartItem(product, store, qty, variant)];
     });
   };
   const confirmSwap = () => {
     if (!swap) return;
-    const { product, store } = swap;
+    const { product, store, variant, qty } = swap;
     setSwap(null);
-    setItems([cartItem(product, store, 1)]);
+    setItems([cartItem(product, store, qty || 1, variant)]);
   };
-  const setQty = (pid, qty) =>
-    setItems((its) => (qty <= 0 ? its.filter((i) => i.product_id !== pid) : its.map((i) => (i.product_id === pid ? { ...i, qty } : i))));
+  const setQty = (vkey, qty) =>   // 👕 v2026.10.08.12 : clé = id produit OU id|variante (les articles sans variante gardent l'id)
+    setItems((its) => (qty <= 0 ? its.filter((i) => (i.vkey ?? i.product_id) === vkey) : its.map((i) => ((i.vkey ?? i.product_id) === vkey ? { ...i, qty } : i))));
   const clear = () => setItems([]);
   const count = items.reduce((s, i) => s + i.qty, 0);
   const subtotal = items.reduce((s, i) => s + i.qty * i.price, 0);
@@ -864,6 +868,69 @@ function drawScaled(img, maxSide, quality) {
   ctx.drawImage(img, 0, 0, w, hh);
   return c.toDataURL('image/jpeg', quality);
 }
+// 🎨 v2026.10.08.12 — couleurs des vêtements détectées AUTOMATIQUEMENT depuis les photos.
+// On échantillonne la zone CENTRALE de l'image (le vêtement est au milieu, le fond sur
+// les bords), chaque pixel est classé par teinte/luminosité, et on garde les couleurs
+// dominantes. Heuristique volontairement simple : le marchand voit le résultat sous
+// chaque photo et peut retirer une couleur fausse d'un tap (✕).
+export const COLOR_HEX = {
+  rouge: '#dc2626', bleu: '#2563eb', vert: '#16a34a', noir: '#111827', blanc: '#f8fafc',
+  jaune: '#eab308', orange: '#ea580c', violet: '#7c3aed', rose: '#ec4899', gris: '#9ca3af',
+  marron: '#92400e', beige: '#d6bfa4', turquoise: '#0891b2',
+};
+const hslName = (h, sat, lig) => {
+  if (sat < 0.14) return lig > 0.86 ? 'blanc' : lig < 0.22 ? 'noir' : 'gris';
+  if (lig > 0.82 && sat < 0.35) return 'blanc';
+  if (lig < 0.28 && (h < 50 || h > 330)) return 'marron';
+  if (h < 15 || h >= 345) return 'rouge';
+  if (h < 42) return lig < 0.4 ? 'marron' : 'orange';
+  if (h < 68) return 'jaune';
+  if (h < 160) return 'vert';
+  if (h < 200) return 'turquoise';
+  if (h < 262) return 'bleu';
+  if (h < 300) return 'violet';
+  return 'rose';
+};
+export function detectColors(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const cv = document.createElement('canvas');
+        cv.width = 40; cv.height = 40;
+        const cx = cv.getContext('2d', { willReadFrequently: true });
+        // zone centrale (60 %) : le vêtement, pas le fond
+        const cw = img.width * 0.6, chh = img.height * 0.6;
+        cx.drawImage(img, (img.width - cw) / 2, (img.height - chh) / 2, cw, chh, 0, 0, 40, 40);
+        const d = cx.getImageData(0, 0, 40, 40).data;
+        const counts = {};
+        let tot = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          const r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255;
+          const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+          const l = (mx + mn) / 2;
+          const sat = mx === mn ? 0 : (mx - mn) / (1 - Math.abs(2 * l - 1));
+          let h = 0;
+          if (mx !== mn) {
+            const dd = mx - mn;
+            if (mx === r) h = 60 * (((g - b) / dd) % 6);
+            else if (mx === g) h = 60 * ((b - r) / dd + 2);
+            else h = 60 * ((r - g) / dd + 4);
+            if (h < 0) h += 360;
+          }
+          counts[hslName(h, sat, l)] = (counts[hslName(h, sat, l)] || 0) + 1;
+          tot++;
+        }
+        const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+        resolve(sorted.filter(([, c]) => c / tot >= 0.08).slice(0, 3).map(([n]) => n));
+      } catch { resolve([]); }
+    };
+    img.onerror = () => resolve([]);
+    img.src = src;
+  });
+}
+
 export async function processImage(file) {
   try {
     const MAX = 50 * 1024 * 1024;

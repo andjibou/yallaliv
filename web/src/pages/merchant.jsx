@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, alarm, pushSubscribe, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage, ph as photoUrl, gmapsNavUrl, gmapsSearchUrl } from '../lib.jsx';
+import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, alarm, pushSubscribe, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage, detectColors, COLOR_HEX, ph as photoUrl, gmapsNavUrl, gmapsSearchUrl } from '../lib.jsx';
 import { StatusBadge, PayBadge, Empty, Spinner, Modal, LangSwitch, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import { BarsChart, compactMoney } from '../Chart.jsx';
@@ -326,7 +326,17 @@ function Dashboard() {
 }
 
 /* ---------- Products ---------- */
-const EMPTY_P = { name: '', category: '', price: '', emoji: '📦', description: '', available: true };
+const EMPTY_P = { name: '', category: '', price: '', emoji: '📦', description: '', available: true, promo_price: '', sizes: [], colors: [] };   // 👕 v2026.10.08.12
+
+function ColorChip({ name, onRemove, small }) {   // 🎨 pastille couleur détectée (avec ✕ pour retirer une fausse détection)
+  return (
+    <span className={'badge' + (small ? '' : ' pd-color-chip')} style={{ background: '#f1f5f9', color: '#1e293b', display: 'inline-flex', alignItems: 'center', gap: 5, padding: small ? '2px 6px' : '4px 9px' }}>
+      <i style={{ width: 12, height: 12, borderRadius: '50%', background: COLOR_HEX[name] || '#cbd5e1', border: '1px solid rgba(15,23,42,.25)', display: 'inline-block' }} />
+      <b style={{ fontSize: 11.5 }}>{name}</b>
+      {onRemove && <button type="button" onClick={onRemove} aria-label={'retirer ' + name} style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 0, fontSize: 11, lineHeight: 1, color: '#ef4444' }}>✕</button>}
+    </span>
+  );
+}
 
 function Products() {
   const t = useT();
@@ -338,6 +348,8 @@ function Products() {
   const fileXl = useRef(null);
   const xlMode = useRef(false);   // false = premier import · true = mise à jour (remplace les produits Excel)
   const [photo, setPhoto] = useState(null); // dataURL en attente d'envoi
+  const [colors, setColors] = useState([]);   // 🎨 v2026.10.08.12 : couleurs du produit (union des détections, retirables)
+  const [det, setDet] = useState({});         // 🎨 détections par photo ('main' ou 'g0','g1'…) → pastilles sous chaque photo
   const [busy, setBusy] = useState(false);
   const [galleryBusy, setGalleryBusy] = useState(false);
 
@@ -354,6 +366,12 @@ function Products() {
     if (r.error === 'format') return toast(t('img_err_format'), 'err');
     if (r.error === 'too_big') return toast(t('img_err_big'), 'err');
     setPhoto(r);   // { thumb, display }
+    // 🎨 v2026.10.08.12 : couleurs détectées automatiquement — visibles sous la photo avant d'enregistrer
+    if (data?.store?.type === 'clothing') {
+      const found = await detectColors(r.display);
+      setDet((d) => ({ ...d, main: found }));
+      setColors((c) => [...new Set([...c, ...found])]);
+    }
   };
 
   const addGallery = async (files) => {
@@ -370,6 +388,14 @@ function Products() {
       if (r.error) { toast((r.error === 'too_big' ? t('img_err_big') : t('img_err_format')) + ' · ' + f.name, 'err'); continue; }
       try { await api(`/merchant/products/${edit.id}/photos`, { method: 'POST', body: { thumb: r.thumb, display: r.display } }); ok++; }
       catch (ex) { toast(ex.message, 'err'); }
+      if (data?.store?.type === 'clothing') {   // 🎨 couleurs détectées → enregistrées tout de suite
+        const found = await detectColors(r.display);
+        if (found.length) {
+          const merged = [...new Set([...(edit.colors || []), ...found])];
+          setEdit((e) => ({ ...e, colors: merged })); setColors(merged);
+          try { await api(`/merchant/products/${edit.id}`, { method: 'PUT', body: { colors: merged } }); } catch {}
+        }
+      }
     }
     setGalleryBusy(false);
     if (ok > 0) toast(ok === 1 ? t('photo_added') : t('photos_n_added').replace('{n}', ok));
@@ -391,6 +417,10 @@ function Products() {
       const r = await processImage(f);
       if (r.error) { toast((r.error === 'too_big' ? t('img_err_big') : t('img_err_format')) + ' · ' + f.name, 'err'); continue; }
       add.push(r);
+      if (data?.store?.type === 'clothing') {   // 🎨 détection sur chaque photo ajoutée
+        const found = await detectColors(r.display);
+        if (found.length) { setDet((d) => ({ ...d, ['g' + add.length]: found })); setColors((c) => [...new Set([...c, ...found])]); }
+      }
     }
     setGalleryBusy(false);
     if (add.length) setPendGal((g) => [...g, ...add]);
@@ -440,7 +470,13 @@ function Products() {
     if (hasErr(e)) return;
     setBusy(true);
     try {
-      const body = { ...edit, price: parseFloat(edit.price), qty: edit.qty === '' || edit.qty == null ? null : parseInt(edit.qty, 10), category: edit.category || 'Général' };
+      const isClothing = data?.store?.type === 'clothing';   // 👕 v2026.10.08.12 : variantes vêtements
+      const sizes = isClothing
+        ? (edit.sizes || []).map((x) => ({ size: String(x.size || '').trim(), price: x.price === '' || x.price == null ? parseFloat(edit.price) : parseFloat(x.price) })).filter((x) => x.size && !isNaN(x.price))
+        : undefined;
+      const body = { ...edit, price: parseFloat(edit.price), qty: edit.qty === '' || edit.qty == null ? null : parseInt(edit.qty, 10), category: edit.category || 'Général',
+        promo_price: isClothing && edit.promo_price !== '' && edit.promo_price != null && !isNaN(parseFloat(edit.promo_price)) ? parseFloat(edit.promo_price) : null,
+        sizes, colors: isClothing ? [...new Set(colors)] : undefined };
       let saved;
       if (edit.id) saved = (await api('/merchant/products/' + edit.id, { method: 'PUT', body })).product;
       else saved = (await api('/merchant/products', { method: 'POST', body })).product;
@@ -474,7 +510,7 @@ function Products() {
       <div className="row spread mb12">
         <div className="h2">📦 {t('products')} ({data.products.length})</div>
         <div className="row wrap" style={{ gap: 6 }}>
-          <button className="btn primary sm" onClick={() => { setEdit({ ...EMPTY_P }); setPhoto(null); setPendGal([]); }}>＋ {t('add_product')}</button>
+          <button className="btn primary sm" onClick={() => { setEdit({ ...EMPTY_P }); setPhoto(null); setPendGal([]); setColors([]); setDet({}); }}>＋ {t('add_product')}</button>
           <button className="btn blue sm" onClick={() => { xlMode.current = false; fileXl.current?.click(); }}>📥 Excel</button>
           <button className="btn amber sm" onClick={() => { xlMode.current = true; fileXl.current?.click(); }}>🔄 Mettre à jour (Excel)</button>
           <input ref={fileXl} type="file" accept=".xlsx,.xls,.csv" hidden onChange={(e) => { onXlFile(e.target.files[0], xlMode.current); e.target.value = ''; }} />
@@ -490,9 +526,15 @@ function Products() {
             <div className="grow">
               <div style={{ fontWeight: 700 }}>{p.name} {p.via_excel ? <span className="badge" style={{ background: '#e0e7ff', color: '#4338ca' }}>📥 Excel</span> : null} {!p.available && <span className="badge st-cancelled">{t('closed')}</span>}</div>
               <div className="muted small">{p.category}</div>
-              <div className="small" style={{ color: 'var(--brand-dark)', fontWeight: 800 }}>{fmtMoney(p.price)}</div>
+              <div className="small" style={{ color: 'var(--brand-dark)', fontWeight: 800 }}>
+                {p.promo_price != null
+                  ? <><s style={{ color: '#94a3b8', fontWeight: 600 }}>{fmtMoney(p.price)}</s> 🏷️ {fmtMoney(p.promo_price)}</>
+                  : fmtMoney(p.price)}
+              </div>
+              {(p.sizes || []).length > 0 && <div className="muted small">📏 {(p.sizes || []).map((x) => x.size).join(' · ')}</div>}
+              {(p.colors || []).length > 0 && <div className="row" style={{ gap: 3 }}>{(p.colors || []).slice(0, 6).map((c) => <i key={c} title={c} style={{ width: 10, height: 10, borderRadius: '50%', background: (COLOR_HEX[c] || '#cbd5e1'), display: 'inline-block', border: '1px solid rgba(15,23,42,.18)' }} />)}</div>}
             </div>
-            <button className="btn ghost sm" onClick={() => setEdit(p)}>✏️</button>
+            <button className="btn ghost sm" onClick={() => { setEdit(p); setColors(p.colors || []); setDet({}); }}>✏️</button>
             <button className="btn danger sm" onClick={() => del(p)}>🗑️</button>
           </div>
         ))}
@@ -574,6 +616,12 @@ function Products() {
                 <span className="muted small">{t('photo_hint')}</span>
               </div>
             </div>
+            {det.main?.length > 0 && (
+              <div className="row wrap mb12" style={{ gap: 6 }}>
+                <span className="muted small">🎨 Couleurs détectées :</span>
+                {det.main.map((c) => <ColorChip key={c} name={c} onRemove={() => { setDet((d) => ({ ...d, main: d.main.filter((x) => x !== c) })); setColors((cs) => cs.filter((x) => x !== c || (det['g0'] || []).includes(x))); }} />)}
+              </div>
+            )}
 
             <div className="mb12">
               <div className="label mb8">🖼️ {t('more_photos')} ({edit.id ? (edit.photos || []).length : pendGal.length})</div>
@@ -591,6 +639,11 @@ function Products() {
                       <img className="p-photo" src={r.display} alt="" />
                       <button className="btn danger sm" style={{ position: 'absolute', top: -7, insetInlineEnd: -7, padding: '2px 7px', minWidth: 0 }}
                         onClick={() => setPendGal((g) => g.filter((_, x) => x !== i))}>✕</button>
+                      {(det['g' + (i + 1)] || []).length > 0 && (
+                        <div className="col" style={{ gap: 2, marginTop: 4 }}>
+                          {det['g' + (i + 1)].map((c) => <ColorChip key={c} name={c} small onRemove={() => setDet((d) => ({ ...d, ['g' + (i + 1)]: (d['g' + (i + 1)] || []).filter((x) => x !== c) }))} />)}
+                        </div>
+                      )}
                     </div>
                   ))}
                 <label className={'btn blue sm' + (galleryBusy ? ' soft' : '')} style={{ width: 48, height: 48, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 12, pointerEvents: galleryBusy ? 'none' : 'auto' }}>
@@ -629,6 +682,46 @@ function Products() {
                 <input className="input" type="number" min="0" step="1" value={edit.qty ?? ''} onChange={(e) => setEdit({ ...edit, qty: e.target.value })} placeholder="vide = illimité" />
               </div>
             </div>
+            {data?.store?.type === 'clothing' && (   // 👕🎨 v2026.10.08.12 — champs VÊTEMENTS
+              <>
+                <div className="row">
+                  <div className="field" style={{ width: 170 }}>
+                    <label className="label">🏷️ Prix promotionnel</label>
+                    <input className="input" type="number" min="0" step="0.5" value={edit.promo_price ?? ''} onChange={(e) => setEdit({ ...edit, promo_price: e.target.value })} placeholder="vide = aucun" />
+                  </div>
+                  <div className="field" style={{ width: 170 }}>
+                    <label className="label">📏 Tailles (prix / taille)</label>
+                    <div className="row" style={{ gap: 4 }}>
+                      {['S', 'M', 'L', 'XL'].map((z) => (
+                        <button key={z} type="button" className={'btn sm' + ((edit.sizes || []).some((x) => x.size === z) ? ' primary' : ' ghost')} style={{ minWidth: 0, padding: '4px 8px' }}
+                          onClick={() => setEdit((e) => ({ ...e, sizes: (e.sizes || []).some((x) => x.size === z) ? (e.sizes || []).filter((x) => x.size !== z) : [...(e.sizes || []), { size: z, price: '' }] }))}>{z}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {(edit.sizes || []).length > 0 && (
+                  <div className="col mb8" style={{ gap: 6 }}>
+                    {(edit.sizes || []).map((z, i) => (
+                      <div key={i} className="row" style={{ gap: 6, alignItems: 'center' }}>
+                        <input className="input" style={{ width: 90 }} value={z.size} placeholder="Taille" onChange={(e) => setEdit((ed) => ({ ...ed, sizes: ed.sizes.map((x, xi) => xi === i ? { ...x, size: e.target.value } : x) }))} />
+                        <input className="input" style={{ width: 120 }} type="number" min="0" step="0.5" value={z.price} placeholder={'prix (' + (edit.price || '—') + ')'} onChange={(e) => setEdit((ed) => ({ ...ed, sizes: ed.sizes.map((x, xi) => xi === i ? { ...x, price: e.target.value } : x) }))} />
+                        <button type="button" className="btn danger sm" style={{ minWidth: 0, padding: '4px 8px' }} onClick={() => setEdit((ed) => ({ ...ed, sizes: ed.sizes.filter((_, xi) => xi !== i) }))}>✕</button>
+                      </div>
+                    ))}
+                    <span className="muted small">💡 Prix par taille : le client ne voit le prix qu'après avoir choisi sa taille. Vide = prix normal du produit.</span>
+                  </div>
+                )}
+                <div className="row" style={{ gap: 6 }}>
+                  <button type="button" className="btn blue sm" onClick={() => setEdit((ed) => ({ ...ed, sizes: [...(ed.sizes || []), { size: '', price: '' }] }))}>＋ Taille personnalisée</button>
+                </div>
+                <div className="field mt8">
+                  <label className="label">🎨 Couleurs du vêtement (détectées automatiquement sur les photos)</label>
+                  {colors.length > 0
+                    ? <div className="row wrap" style={{ gap: 6 }}>{colors.map((c) => <ColorChip key={c} name={c} onRemove={() => setColors((cs) => cs.filter((x) => x !== c))} />)}</div>
+                    : <span className="muted small">Ajoute une photo : les couleurs apparaîtront ici (tu peux en retirer avec ✕).</span>}
+                </div>
+              </>
+            )}
             <div className="field">
               <label className="label">{t('description')}</label>
               <input className="input" value={edit.description || ''} onChange={(e) => setEdit({ ...edit, description: e.target.value })} />
