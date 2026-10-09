@@ -9,7 +9,7 @@ import AccountSettings from '../AccountSettings.jsx';
 import { StoresMap } from '../RouteMap.jsx';
 
 const TYPE_META = { restaurant: { e: '🍽️', c: '#ef6c4d' }, market: { e: '🛒', c: '#3b82f6' }, pharmacy: { e: '💊', c: '#14b8a6' } };
-// 🖼️ v2026.10.08.7 — couverture des magasins SANS photo : image de l'activité
+// 🖼️ v2026.10.08.8 — couverture des magasins SANS photo : image de l'activité
 const COVER_IMG = { restaurant: '/stores/restaurant.jpg', market: '/stores/supermarket.jpg', pharmacy: '/stores/pharmacy.jpg', electronics: '/stores/electronics.jpg', appliance: '/stores/appliance.jpg' };
 // 🏪 v2026.09.27.1 — cartes magasins de l'accueil (photos réalistes) + départements
 const STORE_CARDS = [
@@ -216,7 +216,7 @@ function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd, grid })
   return (
     <>
       {title && <div className="h2 mb8 mt12">{title}</div>}
-      {/* 🧱 v2026.10.08.7 : grid → GRILLE 2 colonnes (grandes cartes, défilement VERTICAL
+      {/* 🧱 v2026.10.08.8 : grid → GRILLE 2 colonnes (grandes cartes, défilement VERTICAL
           uniquement) ; sans grid → ligne horizontale déroulante (🏆/✨, accueil : inchangées) */}
       <div className={grid ? 'pg-grid' : 'pg-scroll'}>
         {prods.map((p) => (
@@ -238,7 +238,7 @@ function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd, grid })
      retourne de l'autre côté quand toutes les photos ont été défilées
    • SEULE la description défile verticalement — tout le reste est visible directement
    • plus de miniatures ni de catégorie · le bouton panier ne déborde JAMAIS */
-function ProductDetail({ product, closed, qty, setQty, onAdd, header }) {
+function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, onPick }) {   // 🧲 v2026.10.08.8 : siblings = produits de la MÊME CATÉGORIE (bande en haut, défilement horizontal)
   const t = useT();
   const galRef = useRef(null);
   const [atEnd, setAtEnd] = useState(false);
@@ -251,9 +251,25 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header }) {
   useEffect(() => { if (galRef.current) galRef.current.scrollLeft = 0; setAtEnd(false); }, [product.id]);
   const onGal = () => { const el = galRef.current; if (el) setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 6); };
   const gal = (dir) => galRef.current && galRef.current.scrollBy({ left: dir * galRef.current.clientWidth * 0.92, behavior: 'smooth' });
+  const sibs = (siblings || []).filter((p) => p && p.id !== product.id).slice(0, 12);
   return (
     <div>
       {header}
+      {/* 🧲 v2026.10.08.8 — EN HAUT de la fiche : les produits de la MÊME CATÉGORIE,
+          défilables HORIZONTALEMENT. Un tap remplace la fiche par ce produit. */}
+      {sibs.length > 0 && (
+        <div className="pd-sibs">
+          {sibs.map((p) => (
+            <button type="button" key={p.id} className="pd-sib" onClick={() => onPick?.(p)} title={p.name}>
+              {p.photo
+                ? <img src={photoUrl(p.photo, 'thumb')} alt="" />
+                : <span className="pd-sib-noph"><NoPhoto w={62} h={62} radius={9} /></span>}
+              <span className="pd-sib-n">{p.name}</span>
+              <span className="pd-sib-p">{fmtMoney(p.price)}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <div className="pd-galwrap">
         <div className="pd-gal" ref={galRef} onScroll={onGal}>
           {pics.length
@@ -267,13 +283,16 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header }) {
         )}
       </div>
       <div className="pd-name">{product.name}</div>
+      {/* 📜 v2026.10.08.8 — la description coule NATURELLEMENT : la FICCHE ENTIÈRE
+          défile (plus de scroll interne de la description) — on descend pour lire
+          la description et voir les options du produit. */}
       {product.description
         ? <div className="pd-desc">{product.description}</div>
         : <div style={{ height: 8 }} />}
       {closed ? (
         <div className="banner warn mt8">{t('store_closed')}</div>
       ) : (
-        <div className="row mt12" style={{ gap: 10 }}>
+        <div className="row pd-actions" style={{ gap: 10 }}>
           <div className="qty-stepper" style={{ padding: '8px 10px', flex: 'none' }}>
             <button className="qs-btn" onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button>
             <span style={{ minWidth: 20, textAlign: 'center' }}>{qty}</span>
@@ -541,7 +560,7 @@ export function ClientHome() {
       const d = await api('/stores/' + p.store_id);
       const prod = d.products.find((x) => x.id === p.id);
       if (!prod) throw new Error(trErr('Produit introuvable'));
-      setGDetail({ store: d.store, product: prod });
+      setGDetail({ store: d.store, product: prod, prods: d.products });   // 🧲 v2026.10.08.8 : produits du magasin gardés pour la bande « même catégorie »
       setGBig(prod.photo || null);
       setGQty(1);
     } catch (e) { setGDetail(null); toast(e.message, 'err'); }
@@ -629,7 +648,7 @@ export function ClientHome() {
           l'espace superadmin (ajout / remplacement / suppression). Repli : cartes intégrées. */}
       <div className="h2 mb8 mt12">🏪 {t('stores_by_type')}</div>
       {stypes === null ? (
-        /* 🩻 v2026.10.08.7 : SQUELETTE pendant le chargement — avant, les cartes intégrées
+        /* 🩻 v2026.10.08.8 : SQUELETTE pendant le chargement — avant, les cartes intégrées
            (anciennes photos par défaut) s'affichaient quelques secondes avant d'être
            remplacées par les vraies cartes du superadmin : l'utilisateur voyait d'ANCIENNES
            PHOTOS à chaque ouverture. Maintenant : rien de faux ne s'affiche. */
@@ -724,6 +743,9 @@ export function ClientHome() {
         {gDetail?.loading ? <Spinner /> : gDetail?.store && gDetail?.product ? (
           <ProductDetail
             product={gDetail.product} closed={!gDetail.store.is_open} qty={gQty} setQty={setGQty} onAdd={addFromGlobal}
+            siblings={(gDetail.prods || []).filter((x) => x.category === gDetail.product.category)}
+            onPick={(p) => { setGDetail((g) => ({ ...g, product: p })); setGBig(p.photo || null); setGQty(1); }}
+
             header={(
               <div className="row wrap" style={{ justifyContent: 'center', gap: 8, alignItems: 'center', marginBottom: 8 }}>
                 <div className="store-emoji" style={{ width: 26, height: 26, fontSize: 14, background: gDetail.store.color || '#0e9f6e' }}>{gDetail.store.emoji || '🏪'}</div>
@@ -775,9 +797,9 @@ export function StorePage() {
     setDetail(null);
   };
 
-  // 🏪 v2026.10.08.7 — progression du scroll (0 → 1) : la couverture se rétracte,
+  // 🏪 v2026.10.08.8 — progression du scroll (0 → 1) : la couverture se rétracte,
   // la carte d'info + la recherche restent fixées en haut (en-tête premium compact).
-  // 📌 v2026.10.08.7 — EN-TÊTE 100 % FIXE : la photo + la carte d'info + la recherche
+  // 📌 v2026.10.08.8 — EN-TÊTE 100 % FIXE : la photo + la carte d'info + la recherche
   // ne défilent JAMAIS (l'en-tête 🚀/🔔/👤 reste transparent sur la photo — plus
   // AUCUN état vert ici). Le contenu défile dessous : le décalage est piloté par
   // ResizeObserver (il s'adapte aussi quand la carte 🗺️ s'ouvre dans l'en-tête).
@@ -796,7 +818,7 @@ export function StorePage() {
 
   const { store, products } = data;
   const meta = TYPE_META[store.type] || TYPE_META.market;
-  const eta = etaRange(store.type, null);   // 🕘 v2026.10.08.7 : durée de livraison affichée dans la carte
+  const eta = etaRange(store.type, null);   // 🕘 v2026.10.08.8 : durée de livraison affichée dans la carte
   const s = pq.trim().toLowerCase();
   const fProds = s ? products.filter((p) =>
     (p.name || '').toLowerCase().includes(s) || (p.description || '').toLowerCase().includes(s) || (p.category || '').toLowerCase().includes(s)
@@ -846,10 +868,10 @@ export function StorePage() {
           l'espace restant. La carte 🗺️ s'ouvre à l'intérieur de la bannière. */}
       {/* 📌 v2026.10.04.7 — bannière du magasin + barre de recherche FIXES en haut.
           La bannière est COLLÉE à l'en-tête VERT (aucun espace au-dessus). */}
-      {/* 📌 v2026.10.08.7 — EN-TÊTE FIXE : photo PLEIN CADRE (tous les coins) + carte
+      {/* 📌 v2026.10.08.8 — EN-TÊTE FIXE : photo PLEIN CADRE (tous les coins) + carte
           d'info + recherche restent en haut pendant TOUT le défilement. L'en-tête
           🚀/🔔/👤 reste transparent sur la photo (jamais vert sur cette page). */}
-      {/* ⚠️ v2026.10.08.7 — le ← est HORS de .sp-fixed (volontairement) : à l'intérieur,
+      {/* ⚠️ v2026.10.08.8 — le ← est HORS de .sp-fixed (volontairement) : à l'intérieur,
           son z-index 95 serait LOCAL au contexte de .sp-fixed (z-index 79) et l'en-tête
           🚀/🔔/👤 (z-index 90) INTERCEPTAIT LES TAPS → bouton mort sur téléphone. Ici,
           au niveau racine, le ← flotte réellement AU-DESSUS de tout. */}
@@ -917,7 +939,7 @@ export function StorePage() {
       )}
       {pq.trim() !== '' && Object.keys(byCat).length === 0 && <div className="mt12"><Empty e="🔎" text={t('no_data')} /></div>}
 
-      {/* 🗂️ 2.2 v2026.10.08.7 — MENU HORIZONTAL des catégories : « Tout » en PREMIER, puis
+      {/* 🗂️ 2.2 v2026.10.08.8 — MENU HORIZONTAL des catégories : « Tout » en PREMIER, puis
           une boule par catégorie (pharmacie : 💊/💄). Un tap filtre la grille du dessous. */}
       {!s && cats.length > 0 && (<>
         <div className="h2 mb8 mt12">🗂️ {t('products_by_cat')}</div>
@@ -946,13 +968,14 @@ export function StorePage() {
         <ProductGrid title={'✨ ' + t('suggested_for_you')} prods={suggRow} rating={store.rating} favs={favs} onFav={toggleFav} onOpen={openDetail} onAdd={addFromGrid} />
       </>)}
 
-      {/* 🧱 v2026.10.08.7 — TOUS les produits (ou la catégorie choisie via le menu) en
+      {/* 🧱 v2026.10.08.8 — TOUS les produits (ou la catégorie choisie via le menu) en
           GRILLE 2 colonnes : grandes cartes, défilement VERTICAL uniquement. */}
       <ProductGrid grid prods={Object.values(byCat).flat()} rating={store.rating} favs={favs} onFav={toggleFav} onOpen={openDetail} onAdd={addFromGrid} />
 
       <Modal open={!!detail} onClose={() => setDetail(null)} title={t('product_details')}>
         {detail && (
-          <ProductDetail product={detail} closed={closed} qty={dQty} setQty={setDQty} onAdd={addFromDetail} />
+          <ProductDetail product={detail} closed={closed} qty={dQty} setQty={setDQty} onAdd={addFromDetail}
+            siblings={products?.filter((p) => p.category === detail.category)} onPick={openDetail} />
         )}
       </Modal>
     </div>
@@ -987,7 +1010,7 @@ export function CartPage() {
   const [pickOpen, setPickOpen] = useState(false);
   const [sugg, setSugg] = useState(null);       // 📍 v2026.09.23.10 : propositions d'adresses (frappe)
   const suggTm = useRef(null);
-  const suggSeq = useRef(0);   // 🛡️ v2026.10.08.7 : une réponse tardive d'une frappe précédente ne peut plus écraser les résultats courants
+  const suggSeq = useRef(0);   // 🛡️ v2026.10.08.8 : une réponse tardive d'une frappe précédente ne peut plus écraser les résultats courants
   const [done, setDone] = useState(null); // 🔑 confirmation finale avec le code de remise
   const [coErr, setCoErr] = useState({});  // ⚠️ erreurs par champ du checkout
   const [card, setCard] = useState({ no: '', exp: '', cvc: '' });
@@ -1573,7 +1596,7 @@ export function ClientProfile() {
       </div>
       <div className="card mt12">
         <div style={{ fontWeight: 700 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.08.7</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.08.8</div>
       </div>
 
       {user.role === 'client' && (
@@ -1887,7 +1910,7 @@ export function ListingDetailPage() {
   const [dSugg, setDSugg] = useState(null);
   const [dBusy, setDBusy] = useState(false);
   const dTm = useRef(null);
-  const dSeq = useRef(0);   // 🛡️ v2026.10.08.7 : anti-réponse-périmée
+  const dSeq = useRef(0);   // 🛡️ v2026.10.08.8 : anti-réponse-périmée
   const subLbl = (k) => (SUB_LBL[k] ? (SUB_LBL[k][lang] || SUB_LBL[k].fr) : k);
   const condLbl = (k) => (COND_LBL[k] ? (COND_LBL[k][lang] || COND_LBL[k].fr) : '');
 
@@ -2575,7 +2598,7 @@ export function ServiceRequestPage() {
   const [busy, setBusy] = useState(false);
   const [pPick, setPPick] = useState(false); const [dPick, setDPick] = useState(false);
   const pTm = useRef(null); const dTm = useRef(null);
-  const pSeq = useRef(0); const dSeq = useRef(0);   // 🛡️ v2026.10.08.7 : anti-réponse-périmée
+  const pSeq = useRef(0); const dSeq = useRef(0);   // 🛡️ v2026.10.08.8 : anti-réponse-périmée
 
   const onAddr = (which) => (e) => {
     const v = e.target.value;
@@ -2705,7 +2728,7 @@ export function StoresByTypePage() {
   const [q, setQ] = useState('');
   const [gDetail, setGDetail] = useState(null); const [gQty, setGQty] = useState(1); const [gBig, setGBig] = useState(null);
   const [favs, setFavs] = useState(() => loadPFavs());   // ❤️ v2026.10.04.3 : favoris produits (appareil)
-  const [selPCat, setSelPCat] = useState(null);   // 🗂️ v2026.10.08.7 : filtre par catégorie de produit (null = Tout)
+  const [selPCat, setSelPCat] = useState(null);   // 🗂️ v2026.10.08.8 : filtre par catégorie de produit (null = Tout)
   const isPharma = type === 'pharmacy';
 
   useStickyBelowHead();   // 📌 v2026.10.04.7 : bloc fixé SOUS l'en-tête vert
@@ -2735,7 +2758,7 @@ export function StoresByTypePage() {
       const d = await api('/stores/' + p.store_id);
       const prod = d.products.find((x) => x.id === p.id);
       if (!prod) throw new Error(trErr('Produit introuvable'));
-      setGDetail({ store: d.store, product: prod });
+      setGDetail({ store: d.store, product: prod, prods: d.products });   // 🧲 v2026.10.08.8 : produits du magasin gardés pour la bande « même catégorie »
       setGBig(prod.photo || null);
       setGQty(1);
     } catch (e) { setGDetail(null); toast(e.message, 'err'); }
@@ -2763,7 +2786,7 @@ export function StoresByTypePage() {
   const topRow = top === null || prods === null ? null : capPerStore(top.length ? top : prods);
   const suggRow = sugg === undefined || prods === null ? null : capPerStore(sugg || prods);
 
-  // 5️⃣ v2026.10.08.7 — CATÉGORIES DE PRODUITS (pharmacie : 💊/💄) pour le menu horizontal :
+  // 5️⃣ v2026.10.08.8 — CATÉGORIES DE PRODUITS (pharmacie : 💊/💄) pour le menu horizontal :
   // « Tout » + une boule par catégorie (ex. pizza) → la grille affiche tous les produits
   // de cette catégorie TOUS MAGASINS CONFONDUS (tous les types de pizza de la catégorie).
   const prodCats = [];
@@ -2818,7 +2841,7 @@ export function StoresByTypePage() {
         <ProductGrid title={'🏆 ' + t('top_ordered')} prods={topRow} favs={favs} onFav={toggleFav} onOpen={openProduct} onAdd={addFromGrid} />
         {/* 4️⃣ suggestions personnalisées (à défaut : produits disponibles) */}
         <ProductGrid title={'✨ ' + t('suggested_for_you')} prods={suggRow} favs={favs} onFav={toggleFav} onOpen={openProduct} onAdd={addFromGrid} />
-        {/* 5️⃣ v2026.10.08.7 — MENU HORIZONTAL des catégories (« Tout » en 1er) + GRILLE
+        {/* 5️⃣ v2026.10.08.8 — MENU HORIZONTAL des catégories (« Tout » en 1er) + GRILLE
             2 colonnes de tous les produits (défilement VERTICAL uniquement). Un tap sur une
             catégorie (ex. pizza) → tous les types de pizza, tous magasins confondus. */}
         {prods !== null && prods.length === 0 && <div className="mt12"><Empty e="🛍️" text={t('no_products_type')} /></div>}
@@ -2845,6 +2868,9 @@ export function StoresByTypePage() {
         {gDetail?.loading ? <Spinner /> : gDetail?.store && gDetail?.product ? (
           <ProductDetail
             product={gDetail.product} closed={!gDetail.store.is_open} qty={gQty} setQty={setGQty} onAdd={addFromGlobal}
+            siblings={(gDetail.prods || []).filter((x) => x.category === gDetail.product.category)}
+            onPick={(p) => { setGDetail((g) => ({ ...g, product: p })); setGBig(p.photo || null); setGQty(1); }}
+
             header={(
               <div className="row wrap" style={{ justifyContent: 'center', gap: 8, alignItems: 'center', marginBottom: 8 }}>
                 <div className="store-emoji" style={{ width: 26, height: 26, fontSize: 14, background: gDetail.store.color || '#0e9f6e' }}>{gDetail.store.emoji || '🏪'}</div>
@@ -3173,7 +3199,7 @@ export function SettingsPage() {
 
       <div className="card mb12">
         <div style={{ fontWeight: 800 }}>ℹ️ {t('about')}</div>
-        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.08.7</div>
+        <div className="muted small mt4">YallaLiv — livraison &amp; marché 🚀🛍️ · v2026.10.08.8</div>
       </div>
 
       <button className="btn danger block" onClick={() => { logout(); window.location.href = '/login'; }}>🔓 {t('logout')}</button>
