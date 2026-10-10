@@ -515,7 +515,9 @@ function Products() {
 
   const save = async () => {
     const v = V(t);
-    const e = runV({ name: v.name(t('product_name')), price: v.num(t('price'), 0, '45.50') }, edit);
+    // 💰 v2026.10.08.17 — si au moins une TAILLE a un prix, le champ « Prix » n'est PLUS obligatoire
+    const hasPricedSize = (edit.sizes || []).some((z) => z.price !== '' && z.price != null && !isNaN(parseFloat(z.price)));
+    const e = runV({ name: v.name(t('product_name')), ...(hasPricedSize ? {} : { price: v.num(t('price'), 0, '45.50') }) }, edit);
     setPErr(e);
     if (hasErr(e)) return;
     setBusy(true);
@@ -526,7 +528,7 @@ function Products() {
         ? (edit.sizes || []).map((x) => ({ size: String(x.size || '').trim(), price: x.price === '' || x.price == null ? parseFloat(edit.price) : parseFloat(x.price) })).filter((x) => x.size && !isNaN(x.price))
         : undefined;
       const body = { ...edit, price: parseFloat(edit.price), qty: edit.qty === '' || edit.qty == null ? null : parseInt(edit.qty, 10), category: edit.category || 'Général',
-        promo_price: isClothing && edit.promo_price !== '' && edit.promo_price != null && !isNaN(parseFloat(edit.promo_price)) ? parseFloat(edit.promo_price) : null,
+        promo_price: withSizes && edit.promo_price !== '' && edit.promo_price != null && !isNaN(parseFloat(edit.promo_price)) ? parseFloat(edit.promo_price) : null,   // 🏷️ v2026.10.08.17 : promo vêtements + restaurants
         sizes, colors: undefined };   // 🎨 v2026.10.08.13 : couleurs envoyées après l'upload (chemins des photos)
       let saved;
       if (edit.id) saved = (await api('/merchant/products/' + edit.id, { method: 'PUT', body })).product;
@@ -739,12 +741,10 @@ function Products() {
             {hasSizePrices(data?.store?.type) && (   // 👕🍕 v2026.10.08.16 — TAILLES prix/taille : VÊTEMENTS et RESTAURANTS (restaurants : PAS de couleurs)
               <>
                 <div className="row">
-                  {isClothingType(data?.store?.type) && (   // 🏷️ promo : vêtements uniquement
-                    <div className="field" style={{ width: 170 }}>
-                      <label className="label">🏷️ Prix promotionnel</label>
-                      <input className="input" type="number" min="0" step="0.5" value={edit.promo_price ?? ''} onChange={(e) => setEdit({ ...edit, promo_price: e.target.value })} placeholder="vide = aucun" />
-                    </div>
-                  )}
+                  <div className="field" style={{ width: 170 }}>   {/* 🏷️ v2026.10.08.17 : promo pour vêtements ET restaurants */}
+                    <label className="label">🏷️ Prix promotionnel</label>
+                    <input className="input" type="number" min="0" step="0.5" value={edit.promo_price ?? ''} onChange={(e) => setEdit({ ...edit, promo_price: e.target.value })} placeholder="vide = aucun" />
+                  </div>
                   <div className="field" style={{ width: 170 }}>
                     <label className="label">📏 Tailles (prix / taille)</label>
                     <div className="row" style={{ gap: 4 }}>
@@ -780,7 +780,7 @@ function Products() {
               <input type="checkbox" checked={!!edit.available} onChange={(e) => setEdit({ ...edit, available: e.target.checked })} />
               {t('available')}
             </label>
-            <button className="btn primary block" disabled={busy || !edit.name || edit.price === ''} onClick={save}>{t('save')}</button>
+            <button className="btn primary block" disabled={busy || !edit.name || (edit.price === '' && !(edit.sizes || []).some((z) => z.price !== '' && z.price != null && !isNaN(parseFloat(z.price))))} onClick={save}>{t('save')}</button>   {/* 💰 v2026.10.08.17 : Prix facultatif si une taille a un prix */}
           </>
         )}
       </Modal>

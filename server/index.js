@@ -1282,11 +1282,17 @@ app.post('/api/merchant/products', auth, requireRole('merchant'), h(async (req, 
   if (!store) return res.status(404).json({ error: 'Aucun magasin' });
   const { name, category = 'Général', description = '', price, emoji = '📦', available = true } = req.body;
   if (!name || !String(name).trim()) return res.status(400).json({ error: 'Nom du produit requis (ex. : Sandwich falafel)' });
-  if (price === undefined || isNaN(parseFloat(price)) || parseFloat(price) < 0) return res.status(400).json({ error: 'Prix invalide (ex. : 45.50)' });
+  // 💰 v2026.10.08.17 — le prix de base devient OPTIONNEL si des TAILLES ont leur prix
+  // (la base prend alors le MOINS CHER des tailles ; le client voit la fourchette)
+  const szArr = Array.isArray(req.body.sizes) ? req.body.sizes : [];
+  const szPrices = szArr.map((z) => z && z.price != null && z.price !== '' && !isNaN(parseFloat(z.price)) ? round2(parseFloat(z.price)) : null).filter((x) => x != null);
+  const hasBase = price !== undefined && price !== null && price !== '' && !isNaN(parseFloat(price)) && parseFloat(price) >= 0;
+  if (!hasBase && !szPrices.length) return res.status(400).json({ error: 'Prix invalide (ex. : 45.50) — ou donne le prix de chaque taille' });
+  const basePrice = hasBase ? round2(parseFloat(price)) : Math.min(...szPrices);
   const qty = (req.body.qty === '' || req.body.qty == null || isNaN(parseInt(req.body.qty))) ? null : Math.max(0, parseInt(req.body.qty));
   const promo = req.body.promo_price === '' || req.body.promo_price == null || isNaN(parseFloat(req.body.promo_price)) ? null : round2(parseFloat(req.body.promo_price));   // 🏷️ v2026.10.08.12
   const p = await get('INSERT INTO products(store_id,name,category,description,price,promo_price,qty,emoji,available,created_at) VALUES(?,?,?,?,?,?,?,?,?,?) RETURNING *',
-    [store.id, String(name).trim(), String(category), String(description), round2(parseFloat(price)), promo, qty, String(emoji).slice(0, 4), available ? 1 : 0, Date.now()]);
+    [store.id, String(name).trim(), String(category), String(description), basePrice, promo, qty, String(emoji).slice(0, 4), available ? 1 : 0, Date.now()]);
   await saveVariants(p.id, req.body.sizes, req.body.colors);   // 👕🎨 tailles + couleurs
   res.json({ product: (await withVariants([p]))[0] });
 }));

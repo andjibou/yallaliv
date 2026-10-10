@@ -176,7 +176,7 @@ const PFAV_KEY = 'yl_pfavs';
 const loadPFavs = () => { try { return JSON.parse(localStorage.getItem(PFAV_KEY) || '{}'); } catch { return {}; } };
 const HEART_PATH = 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z';
 
-function PgCard({ p, rating, fav, onFav, onOpen, onAdd, bare }) {
+function PgCard({ p, rating, fav, onFav, onOpen, onAdd }) {
   const t = useT();   // 👕 v2026.10.08.12 : libellé « Taille » sur les cartes vêtements
   const [pi, setPi] = useState(0);   // photo affichée (navigation ‹ › sans ouvrir le produit)
   const gal = (p.gallery || (p.photos || []).map((x) => x && x.photo) || []).filter(Boolean);
@@ -186,7 +186,7 @@ function PgCard({ p, rating, fav, onFav, onOpen, onAdd, bare }) {
   const sp = (p.sizes || []).map((z) => z.price);   // 💰 v2026.10.08.13 : fourchette min-max (le prix reste TOUJOURS visible)
   const pmm = sp.length ? { min: Math.min(...sp), max: Math.max(...sp) } : { min: p.price, max: p.price };   // que les PRIX DE TAILLES (toujours explicites)
   return (
-    <div className={'pg-card' + (hasVars ? ' v-pr' : '') + (bare ? ' pg-bare' : '')}>   {/* 🖼️ bare : cadre TRANSPARENT (suggestions restaurant) */}
+    <div className={'pg-card' + (hasVars ? ' v-pr' : '')}>
       <button type="button" className={'pg-heart' + (fav ? ' on' : '')} aria-label="favori"
         onClick={(e) => { e.stopPropagation(); onFav(p.id); }}>
         <svg viewBox="0 0 24 24"><path d={HEART_PATH} /></svg>
@@ -228,7 +228,7 @@ function PgCard({ p, rating, fav, onFav, onOpen, onAdd, bare }) {
 
 /* ↔️ v2026.10.04.5 : les produits s'affichent en LIGNES HORORALES DÉROULANTES
    (accueil = une seule ligne · catégories/magasins = une ligne par section) */
-function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd, grid, bare }) {   // bare = v2026.10.08.16 : cartes SANS cadre (suggestions restaurant)
+function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd, grid }) {
   if (!prods || !prods.length) return null;
   return (
     <>
@@ -237,7 +237,7 @@ function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd, grid, b
           uniquement) ; sans grid → ligne horizontale déroulante (🏆/✨, accueil : inchangées) */}
       <div className={grid ? 'pg-grid' : 'pg-scroll'}>
         {prods.map((p) => (
-          <PgCard key={p.id} p={p} rating={rating} fav={!!favs[p.id]} onFav={onFav} onOpen={onOpen} onAdd={onAdd} bare={bare} />
+          <PgCard key={p.id} p={p} rating={rating} fav={!!favs[p.id]} onFav={onFav} onOpen={onOpen} onAdd={onAdd} />
         ))}
       </div>
     </>
@@ -304,9 +304,10 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
           les cartes standard parlent d'elles-mêmes). Défilement indépendant : le
           cadre produit en dessous ne bouge JAMAIS. */}
       {sibs.length > 0 && (
-        <div className="pd-sibs-zone">
-          {/* 🖼️ v2026.10.08.16 — RESTAURANT : les produits de suggestion PERDENT leur cadre (transparent) */}
-          <ProductGrid prods={sibs} rating={sibRating} favs={sibFavs || {}} onFav={sibOnFav || (() => {})} onOpen={(p) => onPick?.(p)} onAdd={sibOnAdd || (() => {})} bare={isRestaurantType(storeType)} />
+        <div className={'pd-sibs-zone' + (isRestaurantType(storeType) ? ' pd-sibs-bare' : '')}>
+          {/* 🖼️ v2026.10.08.17 — RESTAURANT : le GRAND cadre (la bande) devient TRANSPARENT ;
+              les PETITES cartes produits gardent leur cadre blanc */}
+          <ProductGrid prods={sibs} rating={sibRating} favs={sibFavs || {}} onFav={sibOnFav || (() => {})} onOpen={(p) => onPick?.(p)} onAdd={sibOnAdd || (() => {})} />
         </div>
       )}
       {/* 📌 v2026.10.08.10 — CADRE PRODUIT FIXE : photo 4:5, nom, description, bouton
@@ -328,13 +329,16 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
           </button>
         )}
       </div>
-      {/* 👕 v2026.10.08.14 — TAILLES visibles DIRECTEMENT sous la photo, NON CLIQUABLES
-          (informatives). Le choix se fait dans le panneau du bas ouvert par 🛒. */}
+      {/* 👕 v2026.10.08.17 — TAILLES visibles DIRECTEMENT sous la photo et CLIQUABLES :
+          un tap sur une taille → SON prix s'affiche dans le bouton « ajouter au panier ».
+          La description reste plus bas (on la voit en faisant défiler). */}
       {hasSizes && !varsOpen && (
         <div className="pd-sizes-view">
-          <div className="pd-vars-l">📏 {t('size')}</div>
+          <div className="pd-vars-l">📏 {t('size')} <span className="muted small">— {t('pick_size_price')}</span></div>
           <div className="row wrap" style={{ gap: 6 }}>
-            {product.sizes.map((z) => <span key={z.size} className="pd-size-tag">{z.size}</span>)}
+            {product.sizes.map((z) => (
+              <button key={z.size} type="button" className={'pd-size-tag' + (selSize === z.size ? ' on' : '')} onClick={() => setSelSize(z.size)}>{z.size}</button>
+            ))}
           </div>
         </div>
       )}
@@ -422,7 +426,7 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
               setCartPop(true);   // 🛒 v2026.10.08.14 : le PANIER s'affiche au MILIEU de l'écran
             }}>
             <span className="pd-add-l1">🛒 {!varsOpen ? t('add_to_cart') : (hasSizes && !selSize) || (hasColors && !selColor) ? t('pick_variant') : '✓ ' + t('confirm')}</span>
-            <span className="pd-add-l2">{!varsOpen ? (hasSizes ? fmtMoney2(pmin, pmax) : product.promo_price != null ? fmtMoney(product.promo_price) : fmtMoney(product.price)) : (unitPrice() != null ? fmtMoney(unitPrice() * qty) : '—')}</span>
+            <span className="pd-add-l2">{!varsOpen ? (hasSizes ? (selSize ? fmtMoney(unitPrice() * qty) : fmtMoney2(pmin, pmax)) : product.promo_price != null ? fmtMoney(product.promo_price) : fmtMoney(product.price)) : (unitPrice() != null ? fmtMoney(unitPrice() * qty) : '—')}</span>   {/* 👕 v2026.10.08.17 : taille choisie sous la photo → SON prix ici */}
           </button>
         </div>
       ) : (
