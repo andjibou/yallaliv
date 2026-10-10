@@ -1298,6 +1298,10 @@ app.put('/api/merchant/products/:id', auth, requireRole('merchant'), h(async (re
   const { name, category, description, price, emoji, available } = req.body;
   const qty = (req.body.qty === '' || req.body.qty == null || isNaN(parseInt(req.body.qty))) ? null : Math.max(0, parseInt(req.body.qty));
   const promo = req.body.promo_price === undefined ? p.promo_price : (req.body.promo_price === '' || req.body.promo_price == null || isNaN(parseFloat(req.body.promo_price)) ? null : round2(parseFloat(req.body.promo_price)));   // 🏷️ v2026.10.08.12
+  if (req.body.photo !== undefined) {   // 🖼️ v2026.10.08.15 — toutes les photos sont ÉGALES : la 1re de la grille = photo principale (par chemin)
+    const np = req.body.photo == null ? null : String(req.body.photo).slice(0, 300);
+    if (np === null || /^\/\S{1,299}$/.test(np)) await run('UPDATE products SET photo=? WHERE id=?', [np, p.id]);
+  }
   const out = await get('UPDATE products SET name=?, category=?, description=?, price=?, promo_price=?, qty=?, emoji=?, available=? WHERE id=? RETURNING *',
     [String(name ?? p.name).trim(), String(category ?? p.category), String(description ?? p.description),
       price !== undefined ? round2(parseFloat(price) || p.price) : p.price,

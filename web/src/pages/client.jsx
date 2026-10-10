@@ -417,7 +417,7 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
             disabled={varsOpen && ((hasSizes && !selSize) || (hasColors && !selColor))}
             onClick={() => {
               if (!varsOpen) { setVarsOpen(true); return; }   // ① le clic OUVRE les champs taille + couleur (en bas)
-              onAdd({ size: selSize, color: selColor, price: unitPrice() });   // ② confirmation → ajout de LA variante choisie
+              onAdd({ size: selSize, color: selColor, price: unitPrice(), photo: (colList.find((x) => x.color === selColor) || {}).photo || null });   // ② confirmation → LA variante choisie + SA photo (panier exact)
               setCartPop(true);   // 🛒 v2026.10.08.14 : le PANIER s'affiche au MILIEU de l'écran
             }}>
             <span className="pd-add-l1">🛒 {!varsOpen ? t('add_to_cart') : (hasSizes && !selSize) || (hasColors && !selColor) ? t('pick_variant') : '✓ ' + t('confirm')}</span>
@@ -474,7 +474,10 @@ function CartPopup({ onClose }) {   // 🛒 v2026.10.08.14 : le panier apparaît
                 ? <img src={photoUrl(i.photo, 'thumb')} alt="" style={{ width: 40, height: 40, borderRadius: 9, objectFit: 'cover', flex: 'none' }} />
                 : <NoPhoto w={40} h={40} radius={9} />}
               <div className="grow" style={{ minWidth: 0 }}>
-                <div className="ellipsis" style={{ fontWeight: 700, fontSize: 13 }}>{i.name}</div>
+                <div className="ellipsis" style={{ fontWeight: 700, fontSize: 13 }}>
+                  {i.color && <i className="cp-dot" style={{ background: COLOR_HEX[i.color] || COLOR_HEX[String(i.color).split(' ')[0]] || '#cbd5e1' }} />}   {/* 🎨 couleur EXACTE choisie */}
+                  {i.name}
+                </div>
                 <div className="muted small">{fmtMoney(i.price)} × {i.qty}</div>
               </div>
               <div className="qty-stepper" style={{ padding: '4px 6px' }}>
@@ -482,6 +485,7 @@ function CartPopup({ onClose }) {   // 🛒 v2026.10.08.14 : le panier apparaît
                 <span style={{ minWidth: 16, textAlign: 'center', fontSize: 13 }}>{i.qty}</span>
                 <button className="qs-btn" onClick={() => setQty(i.vkey ?? i.product_id, i.qty + 1)}>+</button>
               </div>
+              <button className="qs-btn cp-del" onClick={() => setQty(i.vkey ?? i.product_id, 0)} title="Retirer">🗑</button>   {/* 🗑 v2026.10.08.15 : retire CET article, les autres intacts */}
             </div>
           ))}
         </div>
@@ -759,7 +763,7 @@ export function ClientHome() {
     const { store, product } = gDetail;
     if (variant && variant.price != null) {   // 👕 v2026.10.08.12 : variante confirmée (taille/couleur)
       const label = [variant.size, variant.color].filter(Boolean).join(' · ');
-      add(product, store, { label, size: variant.size, color: variant.color, price: variant.price }, gQty);
+      add(product, store, { label, size: variant.size, color: variant.color, price: variant.price, photo: variant.photo || null }, gQty);   // 🖼️ v2026.10.08.15 : photo EXACTE de la couleur choisie
       toast(t('added'));
       return;
     }
@@ -989,7 +993,7 @@ export function StorePage() {
   const addFromDetail = (variant) => {
     if (variant && variant.price != null) {   // 👕 v2026.10.08.12 : variante confirmée (taille/couleur) → ligne dédiée au panier
       const label = [variant.size, variant.color].filter(Boolean).join(' · ');
-      add(detail, store, { label, size: variant.size, color: variant.color, price: variant.price }, dQty);
+      add(detail, store, { label, size: variant.size, color: variant.color, price: variant.price, photo: variant.photo || null }, dQty);   // 🖼️ v2026.10.08.15 : photo EXACTE de la couleur choisie
       toast(t('added'));
       return;
     }
@@ -1349,18 +1353,22 @@ export function CartPage() {
 
       <div className="card mb12">
         {items.map((i) => (
-          <div key={i.product_id} className="product-row">
+          <div key={i.vkey ?? i.product_id} className="product-row">
             {i.photo
               ? <img src={photoUrl(i.photo, 'thumb')} alt="" style={{ width: 46, height: 46, borderRadius: 12, objectFit: 'cover' }} />
               : <NoPhoto w={46} h={46} />}
             <div className="grow">
-              <div style={{ fontWeight: 700 }}>{i.name}</div>
+              <div style={{ fontWeight: 700 }}>
+                {i.color && <i className="cp-dot" style={{ background: COLOR_HEX[i.color] || COLOR_HEX[String(i.color).split(' ')[0]] || '#cbd5e1' }} />}   {/* 🎨 couleur EXACTE de la variante */}
+                {i.name}
+              </div>
               <div className="small" style={{ color: 'var(--brand-dark)', fontWeight: 800 }}>{fmtMoney(i.price)}</div>
             </div>
             <div className="qty-stepper">
-              <button className="qs-btn" onClick={() => setQty(i.product_id, i.qty - 1)}>−</button>
+              <button className="qs-btn" onClick={() => setQty(i.vkey ?? i.product_id, i.qty - 1)}>−</button>
               <span>{i.qty}</span>
               <button className="qs-btn" onClick={() => setQty(i.vkey ?? i.product_id, i.qty + 1)}>+</button>
+              <button className="qs-btn cp-del" onClick={() => setQty(i.vkey ?? i.product_id, 0)} title="Retirer">🗑</button>   {/* 🗑 retire CET article, les autres intacts */}
             </div>
           </div>
         ))}
@@ -2974,7 +2982,7 @@ export function StoresByTypePage() {
     const { store, product } = gDetail;
     if (variant && variant.price != null) {   // 👕 v2026.10.08.12 : variante confirmée (taille/couleur)
       const label = [variant.size, variant.color].filter(Boolean).join(' · ');
-      add(product, store, { label, size: variant.size, color: variant.color, price: variant.price }, gQty);
+      add(product, store, { label, size: variant.size, color: variant.color, price: variant.price, photo: variant.photo || null }, gQty);   // 🖼️ v2026.10.08.15 : photo EXACTE de la couleur choisie
       toast(t('added'));
       return;
     }

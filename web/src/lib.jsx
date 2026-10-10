@@ -279,8 +279,8 @@ const DICT = {
     tour_title: 'Itinéraire optimisé', tour_pickup: 'À récupérer', tour_deliver: 'À livrer', pub_private: 'Mes livreurs', pub_public: 'Espace public',
     general_drivers: 'Livreurs généraux', create_gdriver: 'Créer un livreur général', gdriver_created: 'Livreur général créé ✓',
     gdriver_badge: 'Général', gdriver_note: 'Ces livreurs sont créés par vous seul et voient uniquement les livraisons publiées dans l\u2019espace public. Les boutiques ne voient leurs coordonnées que s\u2019ils prennent une livraison chez elles.',
-    main_photo: 'Photo principale', more_photos: 'Autres photos', gallery_hint: 'Le client les verra dans la fiche produit',
-    max_photos: 'Maximum 5 photos par produit', save_first_photos: 'Enregistrez d\u2019abord le produit pour ajouter des photos', gallery_pending_hint: 'Ajoutées automatiquement à l\u2019enregistrement du produit', photo_added: 'Photo ajoutée ✓', photo_removed: 'Photo supprimée', driver_suspended_ok: 'Livreur suspendu', driver_delete_q: 'Supprimer ce livreur ?',
+    main_photo: 'Photo principale', more_photos: 'Autres photos', photos: 'Photos', gallery_hint: 'Le client les verra dans la fiche produit',
+    max_photos: 'Maximum 6 photos par produit', save_first_photos: 'Enregistrez d\u2019abord le produit pour ajouter des photos', gallery_pending_hint: 'Ajoutées automatiquement à l\u2019enregistrement du produit', photo_added: 'Photo ajoutée ✓', photo_removed: 'Photo supprimée', driver_suspended_ok: 'Livreur suspendu', driver_delete_q: 'Supprimer ce livreur ?',
     retry_in: 'Trop de tentatives — réessayez dans', offline_route: 'ligne directe (itinéraire routier indisponible hors ligne)',
     address_ph: 'Rue, quartier, étage...', guest_order_title: 'Créez votre compte pour finaliser',
     partner_title: 'Devenir partenaire', partner_desc: 'Ouvrez votre magasin sur YallaLiv : vos produits, vos livraisons, vos clients.',
@@ -462,8 +462,8 @@ const DICT = {
     tour_title: 'المسار الأمثل', tour_pickup: 'للاستلام', tour_deliver: 'للتسليم', pub_private: 'سائقوّي', pub_public: 'الفضاء العام',
     general_drivers: 'السائقون العامون', create_gdriver: 'إنشاء سائق عام', gdriver_created: 'تم إنشاء السائق العام ✓',
     gdriver_badge: 'عام', gdriver_note: 'هؤلاء السائقون ينشئهم المدير العام وحده، ويرون الطلبات المنشورة في الفضاء العام فقط. المتاجر لا ترى بياناتهم إلا إذا أخذوا توصيلة منها.',
-    main_photo: 'الصورة الرئيسية', more_photos: 'صور أخرى', gallery_hint: 'سيراها العميل في صفحة المنتج',
-    max_photos: 'بحد أقصى 5 صور لكل منتج', save_first_photos: 'احفظ المنتج أولاً ثم أضف الصور', gallery_pending_hint: 'ستُضاف تلقائياً عند حفظ المنتج', photo_added: 'تمت إضافة الصورة ✓', photo_removed: 'تم حذف الصورة', driver_suspended_ok: 'تم إيقاف السائق', driver_delete_q: 'حذف هذا السائق؟',
+    main_photo: 'الصورة الرئيسية', more_photos: 'صور أخرى', photos: 'الصور', gallery_hint: 'سيراها العميل في صفحة المنتج',
+    max_photos: 'بحد أقصى 6 صور لكل منتج', save_first_photos: 'احفظ المنتج أولاً ثم أضف الصور', gallery_pending_hint: 'ستُضاف تلقائياً عند حفظ المنتج', photo_added: 'تمت إضافة الصورة ✓', photo_removed: 'تم حذف الصورة', driver_suspended_ok: 'تم إيقاف السائق', driver_delete_q: 'حذف هذا السائق؟',
     retry_in: 'محاولات كثيرة — أعد المحاولة خلال', offline_route: 'خط مباشر (المسار الطرقي غير متاح دون اتصال)',
     address_ph: 'الشارع، الحي، الطابق...', guest_order_title: 'أنشئ حسابك لإتمام الطلب',
     partner_title: 'كن شريكاً', partner_desc: 'افتح متجرك على يلا ليف: منتجاتك، توصيلاتك، عملاؤك.',
@@ -644,8 +644,8 @@ const DICT = {
     tour_title: 'Optimized route', tour_pickup: 'To pick up', tour_deliver: 'To deliver', pub_private: 'My drivers', pub_public: 'Public space',
     general_drivers: 'General drivers', create_gdriver: 'Create general driver', gdriver_created: 'General driver created ✓',
     gdriver_badge: 'General', gdriver_note: 'These drivers are created by you only and see only deliveries published in the public space. Stores see their contact details only if they pick up one of their deliveries.',
-    main_photo: 'Main photo', more_photos: 'More photos', gallery_hint: 'Customers will see them on the product page',
-    max_photos: 'Maximum 5 photos per product', save_first_photos: 'Save the product first to add photos', gallery_pending_hint: 'Added automatically when you save the product', photo_added: 'Photo added ✓', photo_removed: 'Photo removed', driver_suspended_ok: 'Driver suspended', driver_delete_q: 'Delete this driver?',
+    main_photo: 'Main photo', more_photos: 'More photos', photos: 'Photos', gallery_hint: 'Customers will see them on the product page',
+    max_photos: 'Maximum 6 photos per product', save_first_photos: 'Save the product first to add photos', gallery_pending_hint: 'Added automatically when you save the product', photo_added: 'Photo added ✓', photo_removed: 'Photo removed', driver_suspended_ok: 'Driver suspended', driver_delete_q: 'Delete this driver?',
     retry_in: 'Too many attempts — retry in', offline_route: 'direct line (road route unavailable offline)',
     address_ph: 'Street, area, floor...', guest_order_title: 'Create your account to finish',
     partner_title: 'Become a partner', partner_desc: 'Open your store on YallaLiv: your products, your deliveries, your customers.',
@@ -738,7 +738,7 @@ const CartCtx = createContext(null);
 const cartItem = (product, store, qty, variant) => ({   // 👕 v2026.10.08.12 : variante = { label: 'M · Rouge', price } — ligne distincte dans le panier
   product_id: product.id, vkey: variant ? product.id + '|' + variant.label : product.id,
   name: variant ? product.name + ' (' + variant.label + ')' : product.name,
-  emoji: product.emoji, photo: product.photo || null, price: variant ? variant.price : product.price, qty,
+  emoji: product.emoji, photo: variant?.photo || product.photo || null, price: variant ? variant.price : product.price, qty,   // 🖼️ v2026.10.08.15 : photo EXACTE de la couleur choisie
   variant: variant ? variant.label : null, size: variant?.size || null, color: variant?.color || null,
   store_id: store.id, store_name: store.name, store_lat: store.lat ?? null, store_lng: store.lng ?? null, delivery_fee: store.delivery_fee, min_order: store.min_order || 0
 });
@@ -761,8 +761,8 @@ export function CartProvider({ children }) {
     setSwap(null);
     setItems([cartItem(product, store, qty || 1, variant)]);
   };
-  const setQty = (vkey, qty) =>   // 👕 v2026.10.08.12 : clé = id produit OU id|variante (les articles sans variante gardent l'id)
-    setItems((its) => (qty <= 0 ? its.filter((i) => (i.vkey ?? i.product_id) === vkey) : its.map((i) => ((i.vkey ?? i.product_id) === vkey ? { ...i, qty } : i))));
+  const setQty = (vkey, qty) =>   // 👕 clé = id produit OU id|variante · 🗑 v2026.10.08.15 : qty 0 RETIRE cet article SEUL (les autres restent intacts)
+    setItems((its) => (qty <= 0 ? its.filter((i) => (i.vkey ?? i.product_id) !== vkey) : its.map((i) => ((i.vkey ?? i.product_id) === vkey ? { ...i, qty } : i))));
   const clear = () => setItems([]);
   const count = items.reduce((s, i) => s + i.qty, 0);
   const subtotal = items.reduce((s, i) => s + i.qty * i.price, 0);

@@ -343,14 +343,14 @@ function Products() {
   const [data, setData] = useState(null);
   const [edit, setEdit] = useState(null); // null | {..product} | EMPTY_P
   const [pErr, setPErr] = useState({});   // erreurs par champ produit
-  const [pendGal, setPendGal] = useState([]);   // 🖼️ galerie en attente (nouveau produit : envoyée à l'enregistrement)
+  const [pendPhotos, setPendPhotos] = useState([]);   // 🖼️ v2026.10.08.15 : TOUTES les photos du produit, ÉGALES, en UNE SEULE grille (nouveau produit : envoyées à l'enregistrement)
+  const detUid = useRef(0);   // 🎨 clé stable « n1, n2… » pour la couleur de chaque photo en attente
   const [xl, setXl] = useState(null);   // 📥 import Excel : {rows, replace, cols, name, price, qty, header}
   const fileXl = useRef(null);
   const xlMode = useRef(false);   // false = premier import · true = mise à jour (remplace les produits Excel)
-  const [photo, setPhoto] = useState(null); // dataURL en attente d'envoi
-  // 🎨 v2026.10.08.13 — UNE SEULE couleur par photo, LA dominante du vêtement (pas le fond).
-  // det[clé] = { name, rejected, photo } · clés : 'main' (photo principale), 'g'+i (file d'attente
-  // nouveau produit), 'p'+id (photo galerie enregistrée), 'x'+i (couleur héritée sans photo).
+  // 🎨 v2026.10.08.15 — UNE SEULE couleur par photo, LA dominante du vêtement (pas le fond).
+  // det[clé] = { name, rejected, photo } · clés : 'main' (photo principale enregistrée), 'n'+uid
+  // (photo en attente), 'p'+id (photo enregistrée), 'x'+i (couleur héritée sans photo).
   // ✕ sous une photo = couleur fausse → RE-DÉTECTION en excluant les rejetées (l'algo « apprend »).
   const [det, setDet] = useState({});
   const [busy, setBusy] = useState(false);
@@ -363,22 +363,9 @@ function Products() {
   usePoll(() => { if (!edit) refresh(); }, 8000);
   if (!data) return <Spinner />;
 
-  const pickPhoto = async (file) => {
-    if (!file) return;
-    const r = await processImage(file); // tout format lisible -> JPEG/PNG optimise (ou GIF tel quel)
-    if (r.error === 'format') return toast(t('img_err_format'), 'err');
-    if (r.error === 'too_big') return toast(t('img_err_big'), 'err');
-    setPhoto(r);   // { thumb, display }
-    // 🎨 v2026.10.08.13 : LA couleur dominante du vêtement, détectée automatiquement sous la photo
-    if (isClothingType(data?.store?.type)) {
-      const found = await detectColors(r.display);
-      setDet((d) => ({ ...d, main: { name: found[0] || null, rejected: [], photo: null } }));
-    }
-  };
-
   const addGallery = async (files) => {
     if (!edit?.id) return toast(t('save_first_photos'), 'err');
-    const room = 5 - (edit.photos || []).length;   // 🖼️ limite : 5 photos max par produit
+    const room = 6 - ((edit.photo ? 1 : 0) + (edit.photos || []).length);   // 🖼️ v2026.10.08.15 : 6 photos max, TOUTES égales (grille unique)
     if (room <= 0) return toast(t('max_photos'), 'err');
     const list = [...files].slice(0, room);
     if (!list.length) return;
@@ -396,7 +383,7 @@ function Products() {
           if (found[0] && rr?.photo?.id) {
             const nd = { ...det, ['p' + rr.photo.id]: { name: found[0], rejected: [], photo: rr.photo.photo } };
             setDet(nd);
-            try { await api(`/merchant/products/${edit.id}`, { method: 'PUT', body: { colors: buildColorsFrom(nd, edit.photo || null, []) } }); } catch {}
+            try { await api(`/merchant/products/${edit.id}`, { method: 'PUT', body: { colors: buildColorsFrom(nd, edit.photo || null, [], []) } }); } catch {}
           }
         }
       }
@@ -406,13 +393,14 @@ function Products() {
     if (ok > 0) toast(ok === 1 ? t('photo_added') : t('photos_n_added').replace('{n}', ok));
     refresh();
   };
-  // 🖼️ Choix de photos de galerie : produit DÉJÀ SAUVÉ → envoi immédiat (comportement actuel)
-  // produit NOUVEAU → file d'attente locale avec aperçu, envoyée automatiquement à l'enregistrement
-  const onGalleryPick = async (files) => {
+  // 🖼️ v2026.10.08.15 — UNE SEULE GRILLE : plus de « photo principale » à part, TOUTES les
+  // photos sont ÉGALES. Ajout MULTIPLE d'un coup : CHAQUE photo reçoit SA couleur détectée dessous.
+  // produit DÉJÀ SAUVÉ → envoi immédiat · produit NOUVEAU → file locale envoyée à l'enregistrement
+  const onPhotosPick = async (files) => {
     const list = [...files];
     if (!list.length) return;
     if (edit?.id) return addGallery(files);
-    const room = 5 - pendGal.length;   // 🖼️ limite : 5 photos max par produit
+    const room = 6 - pendPhotos.length;   // 🖼️ limite : 6 photos max par produit (toutes égales)
     if (room <= 0) return toast(t('max_photos'), 'err');
     const roomList = list.slice(0, room);
     if (list.length > room) toast(t('max_photos'), 'err');
@@ -421,15 +409,15 @@ function Products() {
     for (const f of roomList) {
       const r = await processImage(f);
       if (r.error) { toast((r.error === 'too_big' ? t('img_err_big') : t('img_err_format')) + ' · ' + f.name, 'err'); continue; }
-      add.push(r);
+      add.push({ k: 'n' + (++detUid.current), ...r });
     }
     setGalleryBusy(false);
     if (add.length) {
-      setPendGal((g) => [...g, ...add]);
-      if (isClothingType(data?.store?.type)) {   // 🎨 v2026.10.08.13 : UNE couleur par photo ajoutée
-        for (let i = 0; i < add.length; i++) {
-          const found = await detectColors(add[i].display);
-          setDet((d) => ({ ...d, ['g' + (pendGal.length + i + 1)]: { name: found[0] || null, rejected: [], photo: null } }));
+      setPendPhotos((g) => [...g, ...add]);
+      if (isClothingType(data?.store?.type)) {   // 🎨 une couleur par photo, SOUS chaque photo
+        for (const it of add) {
+          const found = await detectColors(it.display);
+          setDet((d) => ({ ...d, [it.k]: { name: found[0] || null, rejected: [], photo: null } }));
         }
       }
     }
@@ -472,15 +460,36 @@ function Products() {
     catch (ex) { toast(ex.message, 'err'); }
   };
 
+  // 🖼️ v2026.10.08.15 — retirer la photo principale enregistrée : la 1re photo restante
+  // devient la photo principale (elle sort de la galerie) — toutes les photos sont ÉGALES.
+  const removeMainSaved = async () => {
+    const rest = edit.photos || [];
+    try {
+      if (rest.length) {
+        await api(`/merchant/products/${edit.id}/photos/${rest[0].id}`, { method: 'DELETE' });
+        await api(`/merchant/products/${edit.id}`, { method: 'PUT', body: { photo: rest[0].photo } });
+      } else {
+        await api(`/merchant/products/${edit.id}`, { method: 'PUT', body: { photo: null } });
+      }
+      const nd = { ...det }; delete nd.main;
+      // la couleur de la photo promue « principale » migre vers la clé 'main' (affichée sous elle)
+      if (rest.length && nd['p' + rest[0].id]?.name) { nd.main = { ...nd['p' + rest[0].id] }; delete nd['p' + rest[0].id]; }
+      setDet(nd);
+      try { await api(`/merchant/products/${edit.id}`, { method: 'PUT', body: { colors: buildColorsFrom(nd, null, [], []) } }); } catch {}
+      toast(t('photo_removed'));
+      refresh();
+    } catch (ex) { toast(ex.message, 'err'); }
+  };
+
   // 🎨 v2026.10.08.13 — construit la liste [{ color, photo }] depuis les détections :
-  // 'main' → chemin de la photo principale, 'g'+i → chemin de la i-ème photo de la file,
+  // 'main' → chemin de la photo principale, 'n'+uid → chemin de la photo en attente (galPaths[i]),
   // 'p'+id → chemin connu, 'x' → héritée. Une couleur = une ligne (doublons fusionnés).
-  const buildColorsFrom = (detObj, mainPath, galPaths) => {
+  const buildColorsFrom = (detObj, mainPath, pendList, galPaths) => {
     const cols = []; const seen = new Set();
     const push = (name, ph) => { const k = String(name || '').toLowerCase(); if (name && !seen.has(k)) { seen.add(k); cols.push({ color: name, photo: ph || null }); } };
-    if (detObj.main?.name) push(detObj.main.name, mainPath);
-    (pendGal || []).forEach((r, i) => { const e = detObj['g' + (i + 1)]; if (e?.name) push(e.name, (galPaths || [])[i] || null); });
-    for (const k of Object.keys(detObj)) { if (k !== 'main' && !/^g\d+$/.test(k)) { const e = detObj[k]; if (e?.name) push(e.name, e.photo || null); } }
+    if (detObj.main?.name) push(detObj.main.name, mainPath || detObj.main.photo || null);   // 🖼️ v2026.10.08.15 : couleur migrée → SA photo conservée
+    (pendList || []).forEach((it, i) => { const e = detObj[it?.k]; if (e?.name) push(e.name, (galPaths || [])[i] || null); });
+    for (const k of Object.keys(detObj)) { if (k !== 'main' && !/^n\d+$/.test(k)) { const e = detObj[k]; if (e?.name) push(e.name, e.photo || null); } }
     return cols;
   };
   // ✕ la couleur n'est PAS la bonne → RE-DÉTECTE en excluant les rejetées → la vraie couleur
@@ -522,26 +531,25 @@ function Products() {
       if (edit.id) saved = (await api('/merchant/products/' + edit.id, { method: 'PUT', body })).product;
       else saved = (await api('/merchant/products', { method: 'POST', body })).product;
       let mainPath = edit.photo || null;
-      if (photo) {
-        try { const r2 = await api(`/merchant/products/${saved.id}/photo`, { method: 'PUT', body: { thumb: photo.thumb, display: photo.display } }); mainPath = r2?.product?.photo || mainPath; }
-        catch (ex) { toast(ex.message, 'err'); }
-      }
       const galPaths = [];
-      if (!edit.id && pendGal.length) {
+      if (!edit.id && pendPhotos.length) {   // 🖼️ v2026.10.08.15 : grille unique — la 1re photo = photo principale, les autres = galerie
+        const [first, ...rest] = pendPhotos;
+        try { const r2 = await api(`/merchant/products/${saved.id}/photo`, { method: 'PUT', body: { thumb: first.thumb, display: first.display } }); mainPath = r2?.product?.photo || mainPath; }
+        catch (ex) { toast(ex.message, 'err'); }
+        galPaths[0] = mainPath;   // galPaths[i] ↔ pendPhotos[i] (couleur ↔ SA photo)
         let ok = 0;
-        for (const r of pendGal) {
+        for (const r of rest) {
           try { const rr = await api(`/merchant/products/${saved.id}/photos`, { method: 'POST', body: { thumb: r.thumb, display: r.display } }); galPaths.push(rr?.photo?.photo || null); ok++; }
           catch (ex) { galPaths.push(null); toast(ex.message, 'err'); }
         }
         if (ok > 0) toast(ok === 1 ? t('photo_added') : t('photos_n_added').replace('{n}', ok));
       }
-      if (isClothing) {   // 🎨 v2026.10.08.13 : une couleur par photo, associée à son chemin (clic pastille client → photo)
-        try { await api('/merchant/products/' + saved.id, { method: 'PUT', body: { colors: buildColorsFrom(det, mainPath, galPaths) } }); }
+      if (isClothing) {   // 🎨 v2026.10.08.15 : une couleur par photo, associée à SON chemin (panier client → photo EXACTE)
+        try { await api('/merchant/products/' + saved.id, { method: 'PUT', body: { colors: buildColorsFrom(det, mainPath, pendPhotos, galPaths) } }); }
         catch (ex) { toast(ex.message, 'err'); }
       }
       toast(t('saved'));
-      setPhoto(null);
-      setPendGal([]);
+      setPendPhotos([]);
       setEdit(null);
       refresh();
     } catch (ex) { toast(ex.message, 'err'); }
@@ -557,7 +565,7 @@ function Products() {
       <div className="row spread mb12">
         <div className="h2">📦 {t('products')} ({data.products.length})</div>
         <div className="row wrap" style={{ gap: 6 }}>
-          <button className="btn primary sm" onClick={() => { setEdit({ ...EMPTY_P }); setPhoto(null); setPendGal([]); setDet({}); }}>＋ {t('add_product')}</button>
+          <button className="btn primary sm" onClick={() => { setEdit({ ...EMPTY_P }); setPendPhotos([]); setDet({}); detUid.current = 0; }}>＋ {t('add_product')}</button>
           <button className="btn blue sm" onClick={() => { xlMode.current = false; fileXl.current?.click(); }}>📥 Excel</button>
           <button className="btn amber sm" onClick={() => { xlMode.current = true; fileXl.current?.click(); }}>🔄 Mettre à jour (Excel)</button>
           <input ref={fileXl} type="file" accept=".xlsx,.xls,.csv" hidden onChange={(e) => { onXlFile(e.target.files[0], xlMode.current); e.target.value = ''; }} />
@@ -645,65 +653,59 @@ function Products() {
         )}
       </Modal>
 
-      <Modal open={!!edit} onClose={() => { setEdit(null); setPhoto(null); setPendGal([]); }} title={edit?.id ? t('edit') : t('add_product')}>
+      <Modal open={!!edit} onClose={() => { setEdit(null); setPendPhotos([]); setDet({}); }} title={edit?.id ? t('edit') : t('add_product')}>
         {edit && (
           <>
-            <div className="label mb8">🖼️ {t('main_photo')}</div>
-            <div className="row mb12" style={{ gap: 14, alignItems: 'flex-start' }}>
-              {/* 🎨 v2026.10.08.14 — la couleur dominante s'affiche DIRECTEMENT SOUS la
-                  photo (pas à côté, pas de récapitulatif en bas de page). ✕ = l'algo
-                  propose une couleur PLUS PRÉCISE, autant de fois qu'on clique. */}
-              <div className="col m-photo-col" style={{ gap: 6 }}>
-                {photo
-                  ? <img className="p-photo lg" src={photo?.display} alt="" />
-                  : edit.photo
-                    ? <img className="p-photo lg" src={photoUrl(edit.photo)} alt="" />
-                    : <NoPhoto w={76} h={76} radius={15} />}
-                {det.main?.name && (
-                  <ColorChip name={det.main.name} onRemove={() => rejectColor('main', photo?.display || (edit.photo ? photoUrl(edit.photo, 'full') : null))} />
-                )}
-              </div>
-              <div className="grow col">
-                <label className="btn ghost sm" style={{ display: 'inline-flex', width: 'fit-content' }}>
-                  📷 {t('upload_photo')}
-                  <input type="file" accept="image/*" hidden onChange={(e) => { pickPhoto(e.target.files[0]); e.target.value = ''; }} />
-                </label>
-                <span className="muted small">{t('photo_hint')}</span>
-                {isClothingType(data?.store?.type) && <span className="muted small">✕ sous la photo = couleur fausse → proposition plus précise</span>}
-              </div>
+            {/* 🖼️ v2026.10.08.15 — UNE SEULE GRILLE : plus de « photo principale » à part,
+                TOUTES les photos sont ÉGALES. La couleur de CHAQUE photo apparaît SOUS elle,
+                y compris lors d'un ajout MULTIPLE d'un coup. La 1re photo de la grille est
+                simplement celle que le client voit en premier. */}
+            <div className="label mb8">🖼️ {t('photos')} ({edit.id ? ((edit.photo ? 1 : 0) + (edit.photos || []).length) : pendPhotos.length})</div>
+            <div className="row wrap mb12" style={{ gap: 10 }}>
+              {edit.id && edit.photo && (
+                <div className="col" style={{ gap: 6 }}>
+                  <div style={{ position: 'relative' }}>
+                    <img className="p-photo" src={photoUrl(edit.photo)} alt="" />
+                    <button className="btn danger sm" style={{ position: 'absolute', top: -7, insetInlineEnd: -7, padding: '2px 7px', minWidth: 0 }}
+                      onClick={removeMainSaved}>✕</button>
+                  </div>
+                  {det.main?.name && (
+                    <ColorChip small name={det.main.name} onRemove={() => rejectColor('main', photoUrl(edit.photo, 'full'))} />
+                  )}
+                </div>
+              )}
+              {edit.id && (edit.photos || []).map((ph) => (
+                <div key={ph.id} className="col" style={{ gap: 6 }}>
+                  <div style={{ position: 'relative' }}>
+                    <img className="p-photo" src={photoUrl(ph.photo, 'thumb')} alt="" />
+                    <button className="btn danger sm" style={{ position: 'absolute', top: -7, insetInlineEnd: -7, padding: '2px 7px', minWidth: 0 }}
+                      onClick={() => delGallery(ph)}>✕</button>
+                  </div>
+                  {(det['p' + ph.id] || {}).name && (
+                    <ColorChip small name={det['p' + ph.id].name} onRemove={() => rejectColor('p' + ph.id, photoUrl(ph.photo, 'full'))} />
+                  )}
+                </div>
+              ))}
+              {!edit.id && pendPhotos.map((it) => (
+                <div key={it.k} className="col" style={{ gap: 6 }}>
+                  <div style={{ position: 'relative' }}>
+                    <img className="p-photo" src={it.display} alt="" />
+                    <button className="btn danger sm" style={{ position: 'absolute', top: -7, insetInlineEnd: -7, padding: '2px 7px', minWidth: 0 }}
+                      onClick={() => setPendPhotos((g) => g.filter((x) => x.k !== it.k))}>✕</button>
+                  </div>
+                  {(det[it.k] || {}).name && (
+                    <ColorChip small name={det[it.k].name} onRemove={() => rejectColor(it.k, it.display)} />
+                  )}
+                </div>
+              ))}
+              <label className={'btn blue sm' + (galleryBusy ? ' soft' : '')} style={{ width: 48, height: 48, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 12, pointerEvents: galleryBusy ? 'none' : 'auto' }}>
+                {galleryBusy ? '⏳' : '＋'}
+                <input type="file" accept="image/*" multiple hidden onChange={(e) => { onPhotosPick(e.target.files); e.target.value = ''; }} />
+              </label>
             </div>
-
-            <div className="mb12">
-              <div className="label mb8">🖼️ {t('more_photos')} ({edit.id ? (edit.photos || []).length : pendGal.length})</div>
-              <div className="row wrap" style={{ gap: 10 }}>
-                {edit.id
-                  ? (edit.photos || []).map((ph) => (
-                    <div key={ph.id} style={{ position: 'relative' }}>
-                      <img className="p-photo" src={photoUrl(ph.photo, 'thumb')} alt="" />
-                      <button className="btn danger sm" style={{ position: 'absolute', top: -7, insetInlineEnd: -7, padding: '2px 7px', minWidth: 0 }}
-                        onClick={() => delGallery(ph)}>✕</button>
-                      {(det['p' + ph.id] || {}).name && (
-                        <ColorChip small name={det['p' + ph.id].name} onRemove={() => rejectColor('p' + ph.id, photoUrl(ph.photo, 'full'))} />
-                      )}
-                    </div>
-                  ))
-                  : pendGal.map((r, i) => (
-                    <div key={i} style={{ position: 'relative' }}>
-                      <img className="p-photo" src={r.display} alt="" />
-                      <button className="btn danger sm" style={{ position: 'absolute', top: -7, insetInlineEnd: -7, padding: '2px 7px', minWidth: 0 }}
-                        onClick={() => setPendGal((g) => g.filter((_, x) => x !== i))}>✕</button>
-                      {(det['g' + (i + 1)] || {}).name && (
-                        <ColorChip small name={det['g' + (i + 1)].name} onRemove={() => rejectColor('g' + (i + 1), r.display)} />
-                      )}
-                    </div>
-                  ))}
-                <label className={'btn blue sm' + (galleryBusy ? ' soft' : '')} style={{ width: 48, height: 48, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 12, pointerEvents: galleryBusy ? 'none' : 'auto' }}>
-                  {galleryBusy ? '⏳' : '＋'}
-                  <input type="file" accept="image/*" multiple hidden onChange={(e) => { onGalleryPick(e.target.files); e.target.value = ''; }} />
-                </label>
-              </div>
-              <span className="muted small">{edit.id ? t('gallery_hint') : t('gallery_pending_hint')}</span>
-            </div>
+            <span className="muted small mb12" style={{ display: 'block' }}>
+              {edit.id ? t('gallery_hint') : t('gallery_pending_hint')}{isClothingType(data?.store?.type) ? ' · ✕ sous une photo = couleur fausse → proposition plus précise' : ''}
+            </span>
             <div className="row">
               <div className="field grow">
                 <label className="label">{t('product_name')}</label>
