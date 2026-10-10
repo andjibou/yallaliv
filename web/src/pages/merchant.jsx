@@ -330,7 +330,7 @@ const EMPTY_P = { name: '', category: '', price: '', emoji: '📦', description:
 
 function ColorChip({ name, onRemove, small }) {   // 🎨 pastille couleur détectée (avec ✕ pour retirer une fausse détection)
   return (
-    <span className={'badge' + (small ? '' : ' pd-color-chip')} style={{ background: '#f1f5f9', color: '#1e293b', display: 'inline-flex', alignItems: 'center', gap: 5, padding: small ? '2px 6px' : '4px 9px' }}>
+    <span className={'badge pd-color-chip' + (small ? ' sm' : '')} style={{ background: '#f1f5f9', color: '#1e293b', display: 'inline-flex', alignItems: 'center', gap: 5, padding: small ? '2px 6px' : '4px 9px' }}>
       <i style={{ width: 12, height: 12, borderRadius: '50%', background: COLOR_HEX[name] || '#cbd5e1', border: '1px solid rgba(15,23,42,.25)', display: 'inline-block' }} />
       <b style={{ fontSize: 11.5 }}>{name}</b>
       {onRemove && <button type="button" onClick={onRemove} aria-label={'retirer ' + name} style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 0, fontSize: 11, lineHeight: 1, color: '#ef4444' }}>✕</button>}
@@ -649,27 +649,29 @@ function Products() {
         {edit && (
           <>
             <div className="label mb8">🖼️ {t('main_photo')}</div>
-            <div className="row mb12" style={{ gap: 14 }}>
-              {photo
-                ? <img className="p-photo lg" src={photo?.display} alt="" />
-                : edit.photo
-                  ? <img className="p-photo lg" src={photoUrl(edit.photo)} alt="" />
-                  : <NoPhoto w={76} h={76} radius={15} />}
+            <div className="row mb12" style={{ gap: 14, alignItems: 'flex-start' }}>
+              {/* 🎨 v2026.10.08.14 — la couleur dominante s'affiche DIRECTEMENT SOUS la
+                  photo (pas à côté, pas de récapitulatif en bas de page). ✕ = l'algo
+                  propose une couleur PLUS PRÉCISE, autant de fois qu'on clique. */}
+              <div className="col m-photo-col" style={{ gap: 6 }}>
+                {photo
+                  ? <img className="p-photo lg" src={photo?.display} alt="" />
+                  : edit.photo
+                    ? <img className="p-photo lg" src={photoUrl(edit.photo)} alt="" />
+                    : <NoPhoto w={76} h={76} radius={15} />}
+                {det.main?.name && (
+                  <ColorChip name={det.main.name} onRemove={() => rejectColor('main', photo?.display || (edit.photo ? photoUrl(edit.photo, 'full') : null))} />
+                )}
+              </div>
               <div className="grow col">
                 <label className="btn ghost sm" style={{ display: 'inline-flex', width: 'fit-content' }}>
                   📷 {t('upload_photo')}
                   <input type="file" accept="image/*" hidden onChange={(e) => { pickPhoto(e.target.files[0]); e.target.value = ''; }} />
                 </label>
                 <span className="muted small">{t('photo_hint')}</span>
+                {isClothingType(data?.store?.type) && <span className="muted small">✕ sous la photo = couleur fausse → proposition plus précise</span>}
               </div>
             </div>
-            {det.main?.name && (
-              <div className="row wrap mb12" style={{ gap: 6 }}>
-                <span className="muted small">🎨 Couleur du vêtement :</span>
-                <ColorChip name={det.main.name} onRemove={() => rejectColor('main', photo?.display || (edit.photo ? photoUrl(edit.photo, 'full') : null))} />
-                <span className="muted small">✕ = mauvaise couleur → re-analyse</span>
-              </div>
-            )}
 
             <div className="mb12">
               <div className="label mb8">🖼️ {t('more_photos')} ({edit.id ? (edit.photos || []).length : pendGal.length})</div>
@@ -763,17 +765,11 @@ function Products() {
                 <div className="row" style={{ gap: 6 }}>
                   <button type="button" className="btn blue sm" onClick={() => setEdit((ed) => ({ ...ed, sizes: [...(ed.sizes || []), { size: '', price: '' }] }))}>＋ Taille personnalisée</button>
                 </div>
-                <div className="field mt8">
-                  <label className="label">🎨 Couleurs du vêtement (une par photo, détectées automatiquement)</label>
-                  {buildColorsFrom(det, edit?.photo || null, []).length > 0
-                    ? <div className="row wrap" style={{ gap: 6 }}>{buildColorsFrom(det, edit?.photo || null, []).map((c) => <ColorChip key={c.color} name={c.color} />)}</div>
-                    : <span className="muted small">Ajoute une photo : sa couleur dominante apparaîtra ici. ✕ sous une photo = couleur fausse → re-analyse automatique.</span>}
-                </div>
               </>
             )}
             <div className="field">
               <label className="label">{t('description')}</label>
-              <input className="input" value={edit.description || ''} onChange={(e) => setEdit({ ...edit, description: e.target.value })} />
+              <textarea className="input" rows={3} style={{ resize: 'vertical', minHeight: 74 }} value={edit.description || ''} onChange={(e) => setEdit({ ...edit, description: e.target.value })} />
             </div>
             <label className="check mb12">
               <input type="checkbox" checked={!!edit.available} onChange={(e) => setEdit({ ...edit, available: e.target.checked })} />

@@ -204,7 +204,7 @@ function PgCard({ p, rating, fav, onFav, onOpen, onAdd }) {
         </>)}
       </div>
       {(p.colors || []).length > 0 && (   // 🎨 couleurs disponibles : justes sous la photo, AU-DESSUS du prix
-        <div className="pg-colors">{p.colors.map((c) => <i key={colName(c)} title={colName(c)} style={{ background: COLOR_HEX[colName(c)] || '#cbd5e1' }} />)}</div>
+        <div className="pg-colors">{p.colors.map((c) => <i key={colName(c)} title={colName(c)} style={{ background: COLOR_HEX[colName(c)] || COLOR_HEX[String(colName(c)).split(' ')[0]] || '#cbd5e1' }} />)}</div>
       )}
       <div className="pg-foot" onClick={() => onOpen(p)}>
         <div className="pg-info">
@@ -255,8 +255,11 @@ function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd, grid })
      retourne de l'autre côté quand toutes les photos ont été défilées
    • la description défile dans sa PROPRE boîte verticale (v2026.10.08.9) — tout le
      reste est visible directement · le bouton panier ne déborde JAMAIS */
-function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, onPick, sibFavs, sibOnFav, sibOnAdd, sibRating, storeType, autoVars }) {   // 👕🎨 v2026.10.08.12 : tailles/couleurs à confirmer avant l'ajout au panier
+function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, onPick, sibFavs, sibOnFav, sibOnAdd, sibRating, storeType, autoVars }) {   // 👕🎨🛒 v2026.10.08.14 : tailles visibles sous la photo, pastilles descendent au 🛒, panier au MILIEU après ajout
   const t = useT();
+  const nav = useNavigate();
+  const cart = useCart();   // 🛒 v2026.10.08.14 : après l'ajout, le PANIER s'affiche au milieu de l'écran
+  const [cartPop, setCartPop] = useState(false);
   const galRef = useRef(null);
   const [atEnd, setAtEnd] = useState(false);
   const [zoom, setZoom] = useState(false);   // 🔍 v2026.10.08.9 : visionneuse PLEIN ÉCRAN ouverte ?
@@ -324,9 +327,21 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
           </button>
         )}
       </div>
+      {/* 👕 v2026.10.08.14 — TAILLES visibles DIRECTEMENT sous la photo, NON CLIQUABLES
+          (informatives). Le choix se fait dans le panneau du bas ouvert par 🛒. */}
+      {hasSizes && !varsOpen && (
+        <div className="pd-sizes-view">
+          <div className="pd-vars-l">📏 {t('size')}</div>
+          <div className="row wrap" style={{ gap: 6 }}>
+            {product.sizes.map((z) => <span key={z.size} className="pd-size-tag">{z.size}</span>)}
+          </div>
+        </div>
+      )}
       {/* 🎨 v2026.10.08.13 — PASTILLES COULEURS visibles DÈS L'OUVERTURE (comme sur la
-          carte) : un tap SÉLECTIONNE la couleur ET montre la PHOTO correspondante. */}
-      {hasColors && (
+          carte) : un tap SÉLECTIONNE la couleur ET montre la PHOTO correspondante.
+          v2026.10.08.14 : au 🛒 elles DISPARAISSENT d'ici et DESCENDENT dans le panneau
+          de choix (avec les tailles). */}
+      {hasColors && !varsOpen && (
         <div className="pd-colors">
           <div className="pd-vars-l">🎨 {t('color')}</div>
           <div className="row wrap" style={{ gap: 6 }}>
@@ -337,7 +352,7 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
                   const pi = c.photo ? pics.findIndex((x) => x === c.photo) : -1;
                   if (pi >= 0 && galRef.current) galRef.current.scrollTo({ left: pi * galRef.current.clientWidth, behavior: 'smooth' });
                 }}>
-                <i style={{ background: COLOR_HEX[c.color] || '#cbd5e1' }} />{c.color}
+                <i style={{ background: COLOR_HEX[c.color] || COLOR_HEX[String(c.color).split(' ')[0]] || '#cbd5e1' }} />{c.color}
               </button>
             ))}
           </div>
@@ -366,9 +381,21 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
               ? '💰 ' + fmtMoney(product.sizes.find((z) => z.size === selSize)?.price ?? product.price)
               : <span className="muted small">👆 {t('pick_size_price')}</span>}</div>
           </>)}
-          {hasColors && (
-            <div className="pd-vars-l">{selColor ? '✅ ' + t('color') + ' : ' + selColor : '👆 ' + t('color') + ' — pastilles ci-dessus'}</div>
-          )}
+          {hasColors && (<>
+            <div className="pd-vars-l">🎨 {t('color')}</div>
+            <div className="row wrap" style={{ gap: 6 }}>
+              {colList.map((c) => (
+                <button key={c.color} type="button" className={'pd-var pd-var-c' + (selColor === c.color ? ' on' : '')}
+                  onClick={() => {
+                    setSelColor(c.color);
+                    const pi = c.photo ? pics.findIndex((x) => x === c.photo) : -1;
+                    if (pi >= 0 && galRef.current) galRef.current.scrollTo({ left: pi * galRef.current.clientWidth, behavior: 'smooth' });
+                  }}>
+                  <i style={{ background: COLOR_HEX[c.color] || COLOR_HEX[String(c.color).split(' ')[0]] || '#cbd5e1' }} />{c.color}
+                </button>
+              ))}
+            </div>
+          </>)}
         </div>
       )}
       {/* 📜 v2026.10.08.9 — la description défile dans sa PROPRE boîte VERTICALE
@@ -389,8 +416,9 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
           <button type="button" className="btn primary grow pd-add"
             disabled={varsOpen && ((hasSizes && !selSize) || (hasColors && !selColor))}
             onClick={() => {
-              if (!varsOpen) { setVarsOpen(true); return; }   // ① le clic OUVRE les champs taille + couleur
+              if (!varsOpen) { setVarsOpen(true); return; }   // ① le clic OUVRE les champs taille + couleur (en bas)
               onAdd({ size: selSize, color: selColor, price: unitPrice() });   // ② confirmation → ajout de LA variante choisie
+              setCartPop(true);   // 🛒 v2026.10.08.14 : le PANIER s'affiche au MILIEU de l'écran
             }}>
             <span className="pd-add-l1">🛒 {!varsOpen ? t('add_to_cart') : (hasSizes && !selSize) || (hasColors && !selColor) ? t('pick_variant') : '✓ ' + t('confirm')}</span>
             <span className="pd-add-l2">{!varsOpen ? (hasSizes ? fmtMoney2(pmin, pmax) : product.promo_price != null ? fmtMoney(product.promo_price) : fmtMoney(product.price)) : (unitPrice() != null ? fmtMoney(unitPrice() * qty) : '—')}</span>
@@ -403,13 +431,15 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
             <span style={{ minWidth: 20, textAlign: 'center' }}>{qty}</span>
             <button className="qs-btn" onClick={() => setQty((q) => Math.min(99, q + 1))}>+</button>
           </div>
-          <button className="btn primary grow pd-add" onClick={() => onAdd()}>
+          <button className="btn primary grow pd-add" onClick={() => { onAdd(); setCartPop(true); }}>
             <span className="pd-add-l1">🛒 {t('add_to_cart')}</span>
             <span className="pd-add-l2">{fmtMoney((product.promo_price != null ? product.promo_price : product.price) * qty)}</span>
           </button>
         </div>
       )}
       </div>
+      {/* 🛒 v2026.10.08.14 — après l'ajout, le PANIER s'affiche AU MILIEU de l'écran */}
+      {cartPop && <CartPopup onClose={() => setCartPop(false)} />}
       {/* 🔍 v2026.10.08.9 — VISIONNEUSE PLEIN ÉCRAN : fond noir, la photo ENTIÈRE est
           visible (contain). Glisser = photo suivante · tap n'importe où = fermer. */}
       {zoom && (
@@ -421,6 +451,49 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
           {pics.length > 1 && <span className="pd-zoom-count">{zc + 1} / {pics.length}</span>}
         </div>
       )}
+    </div>
+  );
+}
+
+function CartPopup({ onClose }) {   // 🛒 v2026.10.08.14 : le panier apparaît AU MILIEU de l'écran après un ajout
+  const t = useT();
+  const nav = useNavigate();
+  const { items, setQty, subtotal, store } = useCart();
+  if (!items.length) return null;
+  return (
+    <div className="cart-pop" onClick={onClose}>
+      <div className="cart-pop-card" onClick={(e) => e.stopPropagation()}>
+        <div className="row spread" style={{ alignItems: 'center' }}>
+          <div className="h2">🛒 {t('cart_title')}</div>
+          <button className="icon-btn" onClick={onClose} aria-label="fermer">✕</button>
+        </div>
+        <div className="cart-pop-items">
+          {items.map((i) => (
+            <div key={i.vkey ?? i.product_id} className="row" style={{ gap: 8, alignItems: 'center' }}>
+              {i.photo
+                ? <img src={photoUrl(i.photo, 'thumb')} alt="" style={{ width: 40, height: 40, borderRadius: 9, objectFit: 'cover', flex: 'none' }} />
+                : <NoPhoto w={40} h={40} radius={9} />}
+              <div className="grow" style={{ minWidth: 0 }}>
+                <div className="ellipsis" style={{ fontWeight: 700, fontSize: 13 }}>{i.name}</div>
+                <div className="muted small">{fmtMoney(i.price)} × {i.qty}</div>
+              </div>
+              <div className="qty-stepper" style={{ padding: '4px 6px' }}>
+                <button className="qs-btn" onClick={() => setQty(i.vkey ?? i.product_id, i.qty - 1)}>−</button>
+                <span style={{ minWidth: 16, textAlign: 'center', fontSize: 13 }}>{i.qty}</span>
+                <button className="qs-btn" onClick={() => setQty(i.vkey ?? i.product_id, i.qty + 1)}>+</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="row spread" style={{ marginBottom: 10 }}>
+          <span className="muted small ellipsis">{store?.name}</span>
+          <b>{fmtMoney(subtotal)}</b>
+        </div>
+        <div className="row" style={{ gap: 8 }}>
+          <button className="btn ghost grow" onClick={onClose}>↩️ {t('continue_shopping')}</button>
+          <button className="btn primary grow" onClick={() => nav('/app/cart')}>✅ {t('checkout')}</button>
+        </div>
+      </div>
     </div>
   );
 }

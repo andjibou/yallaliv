@@ -266,7 +266,7 @@ const DICT = {
     route: 'Trajet', view_route: 'Voir le trajet',
     choose_on_map: 'Choisir sur la carte', pin_hint: 'L\u2019épingle est fixe : déplacez la carte jusqu\u2019à ce que le centre soit exactement votre adresse',
     confirm_location: 'Confirmer cette position', locating: 'Recherche de l\u2019adresse…', address_updated: 'Adresse mise à jour 📍',
-    loc_defined: 'Position précise définie', product_details: 'Détail du produit', color: 'Couleur', pick_size_price: 'Choisis une taille pour voir le prix', pick_variant: 'Choisis taille et couleur', confirm: 'Confirmer', same_cat: 'Dans la même catégorie', add_to_cart: 'Ajouter au panier',
+    loc_defined: 'Position précise définie', product_details: 'Détail du produit', cart_title: 'Panier', continue_shopping: 'Continuer mes achats', checkout: 'Commander', color: 'Couleur', pick_size_price: 'Choisis une taille pour voir le prix', pick_variant: 'Choisis taille et couleur', confirm: 'Confirmer', same_cat: 'Dans la même catégorie', add_to_cart: 'Ajouter au panier',
     tab_active: 'En cours', tab_new: 'Nouvelles', tab_done: 'Terminées',
     drivers_team: 'Mes livreurs', add_driver: 'Ajouter un livreur', no_drivers: 'Aucun livreur pour le moment — ajoutez votre premier livreur 🛵',
     driver_created: 'Livreur créé ✓', login_note: 'Identifiant à communiquer au livreur :', live_positions: 'Positions en direct',
@@ -449,7 +449,7 @@ const DICT = {
     route: 'المسار', view_route: 'عرض المسار',
     choose_on_map: 'اختر على الخريطة', pin_hint: 'الدبوس ثابت: حرّك الخريطة حتى يصبح المركز هو عنوانك بالضبط',
     confirm_location: 'تأكيد هذا الموقع', locating: 'جارٍ البحث عن العنوان…', address_updated: 'تم تحديث العنوان 📍',
-    loc_defined: 'تم تحديد الموقع بدقة', product_details: 'تفاصيل المنتج', color: 'اللون', pick_size_price: 'اختر المقاس لرؤية السعر', pick_variant: 'اختر المقاس واللون', confirm: 'تأكيد', same_cat: 'من نفس الفئة', add_to_cart: 'أضف إلى السلة',
+    loc_defined: 'تم تحديد الموقع بدقة', product_details: 'تفاصيل المنتج', cart_title: 'السلة', continue_shopping: 'متابعة التسوق', checkout: 'إتمام الطلب', color: 'اللون', pick_size_price: 'اختر المقاس لرؤية السعر', pick_variant: 'اختر المقاس واللون', confirm: 'تأكيد', same_cat: 'من نفس الفئة', add_to_cart: 'أضف إلى السلة',
     tab_active: 'جارية', tab_new: 'جديدة', tab_done: 'منتهية',
     drivers_team: 'سائقوّي', add_driver: 'إضافة سائق', no_drivers: 'لا يوجد سائقون — أضف أول سائق 🛵',
     driver_created: 'تم إنشاء السائق ✓', login_note: 'المعرف الذي يجب إبلاغه للسائق:', live_positions: 'المواقع المباشرة',
@@ -631,7 +631,7 @@ const DICT = {
     route: 'Route', view_route: 'View route',
     choose_on_map: 'Choose on the map', pin_hint: 'The pin is fixed: move the map until the center is exactly your address',
     confirm_location: 'Confirm this position', locating: 'Locating address…', address_updated: 'Address updated 📍',
-    loc_defined: 'Precise position set', product_details: 'Product details', color: 'Color', pick_size_price: 'Pick a size to see the price', pick_variant: 'Pick size and color', confirm: 'Confirm', same_cat: 'In the same category', add_to_cart: 'Add to cart',
+    loc_defined: 'Precise position set', product_details: 'Product details', cart_title: 'Cart', continue_shopping: 'Continue shopping', checkout: 'Checkout', color: 'Color', pick_size_price: 'Pick a size to see the price', pick_variant: 'Pick size and color', confirm: 'Confirm', same_cat: 'In the same category', add_to_cart: 'Add to cart',
     tab_active: 'Active', tab_new: 'New', tab_done: 'Done',
     drivers_team: 'My drivers', add_driver: 'Add driver', no_drivers: 'No drivers yet — add your first driver 🛵',
     driver_created: 'Driver created ✓', login_note: 'Login to give to the driver:', live_positions: 'Live positions',
@@ -903,13 +903,15 @@ const hslName = (h, sat, lig) => {
   if (h < 300) return 'violet';
   return 'rose';
 };
-// 🧠 v2026.10.08.13 — détecteur de la couleur DOMINANTE DU VÊTEMENT (une seule) :
+// 🧠 v2026.10.08.14 — détecteur de la couleur DOMINANTE DU VÊTEMENT (une seule) :
 // ① le FOND est estimé par la médiane des bords de l'image et ÉLIMINÉ ;
-// ② les pixels restants de la zone centrale sont regroupés par k-means (mini-IA
-//    statistique, apprentissage non supervisé) ;
-// ③ le cluster le plus lourd = la couleur du vêtement.
-// opts.exclude = couleurs rejetées par le marchand (✕) → l'algo « apprend » et
-// propose le cluster suivant (la vraie couleur quand la 1ʳᵉ détection se trompait).
+// ② les pixels restants de la zone centrale sont classés par couleur nommée (teinte,
+//    saturation, luminosité) et pondérés ;
+// ③ la couleur la plus lourde = celle du vêtement.
+// opts.exclude = couleurs rejetées par le marchand (✕). CHAQUE ✕ relance l'analyse en
+// excluant les rejetées → proposition TOUJOURS PLUS PRÉCISE, sans limite :
+// couleurs nommées de l'image → nuances « foncé / clair » de la dominante → couleurs
+// les plus proches en teinte → retour au début. Le ✕ ne s'arrête JAMAIS.
 export function detectColors(src, opts = {}) {
   const exclude = opts.exclude || [];
   const max = opts.max || 1;
@@ -917,7 +919,6 @@ export function detectColors(src, opts = {}) {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
-      const K = 3;   // ⚠️ portée : doit vivre ICI (hors try) pour être visible dans sumsWeights
       try {
         const W = 48, H = 48;
         const cv = document.createElement('canvas');
@@ -933,7 +934,7 @@ export function detectColors(src, opts = {}) {
         }
         const med = (arr) => arr.sort((a, b) => a - b)[Math.floor(arr.length / 2)] || 0;
         const bgC = [med(bg.map((c) => c[0])), med(bg.map((c) => c[1])), med(bg.map((c) => c[2]))];
-        // pixels du VÊTEMENT : différents du fond + dans l'ellipse centrale (±75 %)
+        // pixels du VÊTEMENT : différents du fond + dans l'ellipse centrale
         const pool = [];
         for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
           const c = at(x, y); if (!c) continue;
@@ -942,33 +943,37 @@ export function detectColors(src, opts = {}) {
           if (dBg > 48 && dC < 0.42) pool.push(c);
         }
         const use = pool.length >= 40 ? pool : pool.length ? pool : bg.length ? bg : [[128, 128, 128]];
-        // k-means (k=3, 10 itérations) — initialisation aux quartiles pour être stable
-        let cents = [use[0], use[Math.floor(use.length / 2)], use[use.length - 1]];
-        for (let it = 0; it < 10; it++) {
-          const sums = Array.from({ length: K }, () => [0, 0, 0, 0]);
-          for (const [r, g, b] of use) {
-            let bi = 0, bd = Infinity;
-            for (let k = 0; k < K; k++) { const dd = (r - cents[k][0]) ** 2 + (g - cents[k][1]) ** 2 + (b - cents[k][2]) ** 2; if (dd < bd) { bd = dd; bi = k; } }
-            const sm = sums[bi]; sm[0] += r; sm[1] += g; sm[2] += b; sm[3]++;
-          }
-          cents = sums.map((sm, k) => (sm[3] ? [sm[0] / sm[3], sm[1] / sm[3], sm[2] / sm[3]] : cents[k]));
+        // classement par couleur nommée, pondéré (dominante = le plus lourd)
+        const buckets = {};
+        for (const c of use) {
+          const [h, sat, lig] = rgb2hsl(c);
+          const nm = hslName(h, sat, lig);
+          const b = (buckets[nm] = buckets[nm] || { w: 0, l: 0, h: 0 });
+          b.w++; b.l += lig; b.h = h;
         }
-        // clusters triés par poids → noms de couleurs → exclusion de celles rejetées (✕)
-        const names = sumsWeights(cents, use, exclude).map((x) => x.name);
-        resolve(names.slice(0, max));
+        const tot = use.length || 1;
+        const ranked = Object.entries(buckets)
+          .map(([nm, v]) => ({ name: nm, w: v.w / tot, l: v.l / v.w, h: v.h }))
+          .filter((x) => x.w >= 0.02)
+          .sort((a, b) => b.w - a.w);
+        resolve([pickCandidate(ranked, exclude)].filter(Boolean).slice(0, max));
       } catch { resolve([]); }
-      function sumsWeights(cs, pxs, ex) {
-        const w = cs.map(() => 0);
-        for (const [r, g, b] of pxs) {
-          let bi = 0, bd = Infinity;
-          for (let k = 0; k < K; k++) { const dd = (r - cs[k][0]) ** 2 + (g - cs[k][1]) ** 2 + (b - cs[k][2]) ** 2; if (dd < bd) { bd = dd; bi = k; } }
-          w[bi]++;
-        }
-        return cs
-          .map((c, k) => ({ name: hslName(...rgb2hsl(c)), weight: w[k] }))
-          .filter((x) => x.weight > 0 && !ex.includes(x.name))
-          .sort((a, b) => b.weight - a.weight);
+      function pickCandidate(rk, ex) {
+        if (!rk.length) return null;
+        const c1 = rk.find((x) => !ex.includes(x.name));
+        if (c1) return c1.name;
+        // nuances de la dominante (plus précis : foncé / clair)
+        const top = rk[0];
+        for (const sh of [top.name + ' foncé', top.name + ' clair']) if (!ex.includes(sh)) return sh;
+        // couleurs de la palette les plus proches en TEINTE
+        const near = Object.keys(COLOR_HEX)
+          .map((nm) => ({ nm, dh: Math.abs(hexHue(COLOR_HEX[nm]) - top.h) }))
+          .filter((x) => !ex.includes(x.nm))
+          .sort((a, b) => a.dh - b.dh);
+        if (near.length) return near[0].nm;
+        return rk[0].name;   // tout épuisé → on repart du début : le ✕ répond TOUJOURS
       }
+      function hexHue(hex) { const n = parseInt(hex.slice(1), 16); return rgb2hsl([(n >> 16) & 255, (n >> 8) & 255, n & 255])[0]; }
       function rgb2hsl([r, g, b]) {
         const R = r / 255, G = g / 255, B = b / 255;
         const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
