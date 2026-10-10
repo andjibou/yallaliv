@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useNavigate, useParams, useLocation, Outlet, useSearchParams } from 'react-router-dom';
 import TrackMap from '../TrackMap.jsx';
-import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage, gmapsNavUrl, gmapsSearchUrl, COLOR_HEX } from '../lib.jsx';
+import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage, gmapsNavUrl, gmapsSearchUrl, COLOR_HEX, fmtMoney2, fmtMoneyN } from '../lib.jsx';
 import { BottomNav, CartBar, StatusBadge, PayBadge, Stepper, Empty, Spinner, BackBtn, LangSwitch, Modal, Stars, SuggestBox, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import PickMap, { reverseGeocode, geocodeSearch } from '../PickMap.jsx';
@@ -10,6 +10,8 @@ import { StoresMap } from '../RouteMap.jsx';
 
 const TYPE_META = { restaurant: { e: '🍽️', c: '#ef6c4d' }, market: { e: '🛒', c: '#3b82f6' }, pharmacy: { e: '💊', c: '#14b8a6' }, clothing: { e: '👕', c: '#8b5cf6' }, clothes: { e: '👕', c: '#8b5cf6' }, home: { e: '🛋️', c: '#f59e0b' } };   // 👕 v2026.10.08.12 : clothes = valeur RÉELLE du formulaire partenaire
 const SIB_TYPES = ['restaurant', 'market', 'pharmacy'];   // 🧲 v2026.10.08.11 : bande « même catégorie » réservée à ces types de magasins
+const colName = (c) => (typeof c === 'string' ? c : c?.color);   // 🎨 v2026.10.08.13 : couleurs = {color, photo}
+const colPhoto = (c) => (typeof c === 'string' ? null : (c?.photo || null));
 // 🖼️ v2026.10.08.8 — couverture des magasins SANS photo : image de l'activité
 const COVER_IMG = { restaurant: '/stores/restaurant.jpg', market: '/stores/supermarket.jpg', pharmacy: '/stores/pharmacy.jpg', electronics: '/stores/electronics.jpg', appliance: '/stores/appliance.jpg', clothing: '/market/fashion.jpg', clothes: '/market/fashion.jpg', home: '/market/home.jpg' };
 // 🏪 v2026.09.27.1 — cartes magasins de l'accueil (photos réalistes) + départements
@@ -181,6 +183,8 @@ function PgCard({ p, rating, fav, onFav, onOpen, onAdd }) {
   const pics = [p.photo, ...gal].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
   const r = rating ?? p.store_rating ?? p.rating;
   const hasVars = (p.sizes || []).length > 0 || (p.colors || []).length > 0;   // 👕🎨 v2026.10.08.12
+  const sp = (p.sizes || []).map((z) => z.price);   // 💰 v2026.10.08.13 : fourchette min-max (le prix reste TOUJOURS visible)
+  const pmm = sp.length ? { min: Math.min(...sp), max: Math.max(...sp) } : { min: p.price, max: p.price };   // que les PRIX DE TAILLES (toujours explicites)
   return (
     <div className={'pg-card' + (hasVars ? ' v-pr' : '')}>
       <button type="button" className={'pg-heart' + (fav ? ' on' : '')} aria-label="favori"
@@ -200,16 +204,16 @@ function PgCard({ p, rating, fav, onFav, onOpen, onAdd }) {
         </>)}
       </div>
       {(p.colors || []).length > 0 && (   // 🎨 couleurs disponibles : justes sous la photo, AU-DESSUS du prix
-        <div className="pg-colors">{p.colors.map((c) => <i key={c} title={c} style={{ background: COLOR_HEX[c] || '#cbd5e1' }} />)}</div>
+        <div className="pg-colors">{p.colors.map((c) => <i key={colName(c)} title={colName(c)} style={{ background: COLOR_HEX[colName(c)] || '#cbd5e1' }} />)}</div>
       )}
       <div className="pg-foot" onClick={() => onOpen(p)}>
         <div className="pg-info">
           <div className="pg-price">
             {p.has_sizes
-              /* 👕 prix visible seulement après choix de la taille dans la fiche */
-              ? <span className="pg-sizes-hint">📏 {t('size')}</span>
+              /* 💰 v2026.10.08.13 : prix TOUJOURS visible — fourchette min-max, UN SEUL devise à la fin */
+              ? (pmm.min === pmm.max ? fmtMoney(pmm.min) : fmtMoney2(pmm.min, pmm.max))
               : p.promo_price != null
-                ? <><s className="pg-old">{fmtMoney(p.price)}</s> <span className="pg-promo">{fmtMoney(p.promo_price)}</span></>
+                ? <><s className="pg-old">{fmtMoneyN(p.price)}</s> <span className="pg-promo">{fmtMoney(p.promo_price)}</span></>
                 : fmtMoney(p.price)}
           </div>
           <div className="pg-name">{p.name}</div>
@@ -258,10 +262,15 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
   const [zoom, setZoom] = useState(false);   // 🔍 v2026.10.08.9 : visionneuse PLEIN ÉCRAN ouverte ?
   const [zc, setZc] = useState(0);           // photo affichée dans la visionneuse
   const zRef = useRef(null);
-  // 👕🎨 v2026.10.08.12 — variante sélectionnée : le panneau s'ouvre via 🛒/＋ (autoVars si
-  // arrivé par le ＋ d'une carte). Le prix n'apparaît qu'après le choix de la taille.
+  // 👕🎨 v2026.10.08.13 — pastilles couleurs TOUJOURS visibles (clic = sélection + photo
+  // correspondante) ; tailles dans le panneau ouvert par 🛒/＋. Le prix est TOUJOURS
+  // visible : fourchette min-max (tailles), promo barrée, ou simple — un seul devise.
   const hasSizes = (product.sizes || []).length > 0;
-  const hasColors = (product.colors || []).length > 0;
+  const colList = (product.colors || []).map((c) => (typeof c === 'string' ? { color: c, photo: null } : c));
+  const hasColors = colList.length > 0;
+  const sp2 = (product.sizes || []).map((z) => z.price);
+  const pmin = sp2.length ? Math.min(...sp2) : product.price;
+  const pmax = sp2.length ? Math.max(...sp2) : product.price;
   const needVars = hasSizes || hasColors;
   const [varsOpen, setVarsOpen] = useState(!!autoVars);
   const [selSize, setSelSize] = useState(null);
@@ -315,12 +324,35 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
           </button>
         )}
       </div>
-      <div className="pd-name">{product.name}</div>
-      {!needVars && product.promo_price != null && (   // 🏷️ prix promo (produit SANS tailles) : ancien prix barré
-        <div className="pd-price-row"><s>{fmtMoney(product.price)}</s> <b>🏷️ {fmtMoney(product.promo_price)}</b></div>
+      {/* 🎨 v2026.10.08.13 — PASTILLES COULEURS visibles DÈS L'OUVERTURE (comme sur la
+          carte) : un tap SÉLECTIONNE la couleur ET montre la PHOTO correspondante. */}
+      {hasColors && (
+        <div className="pd-colors">
+          <div className="pd-vars-l">🎨 {t('color')}</div>
+          <div className="row wrap" style={{ gap: 6 }}>
+            {colList.map((c) => (
+              <button key={c.color} type="button" className={'pd-var pd-var-c' + (selColor === c.color ? ' on' : '')}
+                onClick={() => {
+                  setSelColor(c.color);
+                  const pi = c.photo ? pics.findIndex((x) => x === c.photo) : -1;
+                  if (pi >= 0 && galRef.current) galRef.current.scrollTo({ left: pi * galRef.current.clientWidth, behavior: 'smooth' });
+                }}>
+                <i style={{ background: COLOR_HEX[c.color] || '#cbd5e1' }} />{c.color}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
-      {/* 👕🎨 v2026.10.08.12 — CHAMPS TAILLE + COULEUR (ouverts par 🛒 / ＋) : le prix se
-          révèle après le choix de la taille. Confirmer ajoute la variante au panier. */}
+      <div className="pd-name">{product.name}</div>
+      {/* 💰 v2026.10.08.13 — prix TOUJOURS visible dès l'ouverture : fourchette min-max
+          (tailles, un seul devise), promo barrée, ou rien (produit simple l'ayant déjà sur le bouton). */}
+      {hasSizes
+        ? <div className="pd-price-row"><b>{pmin === pmax ? fmtMoney(pmin) : fmtMoney2(pmin, pmax)}</b></div>
+        : product.promo_price != null
+          ? <div className="pd-price-row"><s>{fmtMoneyN(product.price)}</s> <b>🏷️ {fmtMoney(product.promo_price)}</b></div>
+          : null}
+      {/* 👕 v2026.10.08.13 — TAILLES (panneau ouvert par 🛒 / ＋) ; la couleur se choisit
+          avec les pastilles ci-dessus. Confirmer ajoute la variante choisie au panier. */}
       {needVars && varsOpen && (
         <div className="pd-vars">
           {hasSizes && (<>
@@ -334,16 +366,9 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
               ? '💰 ' + fmtMoney(product.sizes.find((z) => z.size === selSize)?.price ?? product.price)
               : <span className="muted small">👆 {t('pick_size_price')}</span>}</div>
           </>)}
-          {hasColors && (<>
-            <div className="pd-vars-l">🎨 {t('color')}</div>
-            <div className="row wrap" style={{ gap: 6 }}>
-              {product.colors.map((c) => (
-                <button key={c} type="button" className={'pd-var pd-var-c' + (selColor === c ? ' on' : '')} onClick={() => setSelColor(c)}>
-                  <i style={{ background: COLOR_HEX[c] || '#cbd5e1' }} />{c}
-                </button>
-              ))}
-            </div>
-          </>)}
+          {hasColors && (
+            <div className="pd-vars-l">{selColor ? '✅ ' + t('color') + ' : ' + selColor : '👆 ' + t('color') + ' — pastilles ci-dessus'}</div>
+          )}
         </div>
       )}
       {/* 📜 v2026.10.08.9 — la description défile dans sa PROPRE boîte VERTICALE
@@ -368,7 +393,7 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
               onAdd({ size: selSize, color: selColor, price: unitPrice() });   // ② confirmation → ajout de LA variante choisie
             }}>
             <span className="pd-add-l1">🛒 {!varsOpen ? t('add_to_cart') : (hasSizes && !selSize) || (hasColors && !selColor) ? t('pick_variant') : '✓ ' + t('confirm')}</span>
-            <span className="pd-add-l2">{!varsOpen ? (hasSizes ? '📏 ' + t('size') : '🎨 ' + t('color')) : (unitPrice() != null ? fmtMoney(unitPrice() * qty) : '—')}</span>
+            <span className="pd-add-l2">{!varsOpen ? (hasSizes ? fmtMoney2(pmin, pmax) : product.promo_price != null ? fmtMoney(product.promo_price) : fmtMoney(product.price)) : (unitPrice() != null ? fmtMoney(unitPrice() * qty) : '—')}</span>
           </button>
         </div>
       ) : (

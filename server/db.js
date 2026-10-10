@@ -150,6 +150,7 @@ CREATE TABLE IF NOT EXISTS password_resets (
   id SERIAL PRIMARY KEY,
   product_id INTEGER NOT NULL,
   color TEXT NOT NULL,
+  photo TEXT,
   created_at BIGINT NOT NULL,
   UNIQUE(product_id, color)
 );
@@ -400,6 +401,7 @@ export async function initDb() {
   await run('ALTER TABLE products ADD COLUMN qty INTEGER').catch(() => {});              // 📦 quantité visible par le client (NULL = illimité)
   await run('ALTER TABLE products ADD COLUMN via_excel INTEGER NOT NULL DEFAULT 0').catch(() => {});   // 📥 importé par Excel (remplaçable par un nouvel import)
   await run('ALTER TABLE products ADD COLUMN promo_price REAL').catch(() => {});        // 🏷️ v2026.10.08.12 : prix de promotion (vêtements)
+  await run('ALTER TABLE product_colors ADD COLUMN photo TEXT').catch(() => {});          // 📸 v2026.10.08.13 : couleur ↔ photo associée (clic pastille = photo)
   await run('ALTER TABLE driver_locations ADD COLUMN bearing REAL').catch(() => {});    // 🧭 v2026.09.23.3 : cap du livreur — le magasin voit le bec pivoter (même sur place)
   await run("ALTER TABLE push_subscriptions ADD COLUMN kind TEXT NOT NULL DEFAULT 'web'").catch(() => {});   // 🔔 'web' (VAPID) ou 'fcm' (APK)
   await run('ALTER TABLE push_subscriptions ADD COLUMN fcm_token TEXT').catch(() => {});

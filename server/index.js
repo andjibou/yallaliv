@@ -1004,24 +1004,34 @@ async function withVariants(products) {
   const ids = products.map((p) => p.id);
   const ph = ids.map(() => '?').join(',');
   const sizes = await all(`SELECT product_id, size, price FROM product_sizes WHERE product_id IN (${ph}) ORDER BY id`, ids).catch(() => []);
-  const colors = await all(`SELECT product_id, color FROM product_colors WHERE product_id IN (${ph}) ORDER BY id`, ids).catch(() => []);
+  const colors = await all(`SELECT product_id, color, photo FROM product_colors WHERE product_id IN (${ph}) ORDER BY id`, ids).catch(() => []);
   const smap = {}, cmap = {};
   for (const s of sizes) (smap[s.product_id] = smap[s.product_id] || []).push({ size: s.size, price: s.price });
-  for (const c of colors) (cmap[c.product_id] = cmap[c.product_id] || []).push(c.color);
+  for (const c of colors) (cmap[c.product_id] = cmap[c.product_id] || []).push({ color: c.color, photo: c.photo || null });   // 📸 v2026.10.08.13 : {color, photo}
   return products.map((p) => ({ ...p, promo_price: p.promo_price ?? null, sizes: smap[p.id] || null, has_sizes: !!(smap[p.id] || []).length, colors: cmap[p.id] || null }));
 }
 
 // 👕 v2026.10.08.12 — enregistre les tailles et couleurs d'un produit (remplace tout).
 async function saveVariants(productId, sizes, colors) {
-  await run('DELETE FROM product_sizes WHERE product_id=?', [productId]).catch(() => {});
-  await run('DELETE FROM product_colors WHERE product_id=?', [productId]).catch(() => {});
+  // 🎨 v2026.10.08.13 : undefined = ne pas toucher (permet d'enregistrer tailles puis
+  // couleurs séparément — les couleurs ont besoin des chemins des photos uploadées)
+  if (sizes !== undefined) await run('DELETE FROM product_sizes WHERE product_id=?', [productId]).catch(() => {});
+  if (colors !== undefined) await run('DELETE FROM product_colors WHERE product_id=?', [productId]).catch(() => {});
   const szs = Array.isArray(sizes) ? sizes.map((s) => ({ size: String(s?.size ?? '').trim().slice(0, 12), price: parseFloat(s?.price) })).filter((s) => s.size && !isNaN(s.price) && s.price >= 0) : [];
   for (const s of new Map(szs.map((s) => [s.size.toLowerCase(), s])).values()) {
     await run('INSERT INTO product_sizes(product_id,size,price,created_at) VALUES(?,?,?,?) ON CONFLICT (product_id, size) DO NOTHING', [productId, s.size, round2(s.price), Date.now()]).catch(() => {});
   }
-  const cols = Array.isArray(colors) ? [...new Set(colors.map((c) => String(c ?? '').trim()).filter(Boolean).slice(0, 8))] : [];
+  // 📸 v2026.10.08.13 : couleurs = [{ color, photo }] (photo associée pour le clic pastille) ; strings acceptées (rétrocompat)
+  const colObjs = Array.isArray(colors) ? colors.map((c) => (typeof c === 'string' ? { color: c, photo: null } : c)) : [];
+  const seen = new Set();
+  const cols = colObjs.map((c) => ({ color: String(c?.color ?? '').trim(), photo: c?.photo ? String(c.photo).slice(0, 300) : null })).filter((c) => {
+    const k = c.color.toLowerCase();
+    if (!c.color || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  }).slice(0, 8);
   for (const c of cols) {
-    await run('INSERT INTO product_colors(product_id,color,created_at) VALUES(?,?,?) ON CONFLICT (product_id, color) DO NOTHING', [productId, c.slice(0, 20), Date.now()]).catch(() => {});
+    await run('INSERT INTO product_colors(product_id,color,photo,created_at) VALUES(?,?,?,?) ON CONFLICT (product_id, color) DO NOTHING', [productId, c.color.slice(0, 20), c.photo, Date.now()]).catch(() => {});
   }
 }
 

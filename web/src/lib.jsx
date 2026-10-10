@@ -691,7 +691,9 @@ export const fmtDate = (ts, lang) => new Date(ts).toLocaleString(lang === 'ar' ?
 // ================= Settings (currency, app name) =================
 const SYM = { EGP: 'ج.م', EUR: '€', USD: '$', MAD: 'د.م', DZD: 'د.ج', TND: 'د.ت', XOF: 'CFA', SAR: 'ر.س', AED: 'د.إ' };
 let CUR = 'EGP';
-export function fmtMoney(n) { return (Math.round(n * 100) / 100).toFixed(2) + ' ' + (SYM[CUR] || CUR); }
+export function fmtMoney(n) { return fmtMoneyN(n) + ' ' + (SYM[CUR] || CUR); }   // 🔢 v2026.10.08.13 : sans les zéros de fin (150.00 → 150)
+export function fmtMoneyN(n) { return (Math.round(n * 100) / 100).toFixed(2).replace(/\.?0+$/, ''); }   // nombre SEUL, sans devise (pour « 150 - 180 ج.م »)
+export function fmtMoney2(a, b) { return a === b ? fmtMoney(a) : fmtMoneyN(a) + ' - ' + fmtMoneyN(b) + ' ' + (SYM[CUR] || CUR); }   // fourchette min-max, UN SEUL devise à la fin
 
 const SetCtx = createContext(null);
 export function SettingsProvider({ children }) {
@@ -901,40 +903,87 @@ const hslName = (h, sat, lig) => {
   if (h < 300) return 'violet';
   return 'rose';
 };
-export function detectColors(src) {
+// 🧠 v2026.10.08.13 — détecteur de la couleur DOMINANTE DU VÊTEMENT (une seule) :
+// ① le FOND est estimé par la médiane des bords de l'image et ÉLIMINÉ ;
+// ② les pixels restants de la zone centrale sont regroupés par k-means (mini-IA
+//    statistique, apprentissage non supervisé) ;
+// ③ le cluster le plus lourd = la couleur du vêtement.
+// opts.exclude = couleurs rejetées par le marchand (✕) → l'algo « apprend » et
+// propose le cluster suivant (la vraie couleur quand la 1ʳᵉ détection se trompait).
+export function detectColors(src, opts = {}) {
+  const exclude = opts.exclude || [];
+  const max = opts.max || 1;
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
+      const K = 3;   // ⚠️ portée : doit vivre ICI (hors try) pour être visible dans sumsWeights
       try {
+        const W = 48, H = 48;
         const cv = document.createElement('canvas');
-        cv.width = 40; cv.height = 40;
+        cv.width = W; cv.height = H;
         const cx = cv.getContext('2d', { willReadFrequently: true });
-        // zone centrale (60 %) : le vêtement, pas le fond
-        const cw = img.width * 0.6, chh = img.height * 0.6;
-        cx.drawImage(img, (img.width - cw) / 2, (img.height - chh) / 2, cw, chh, 0, 0, 40, 40);
-        const d = cx.getImageData(0, 0, 40, 40).data;
-        const counts = {};
-        let tot = 0;
-        for (let i = 0; i < d.length; i += 4) {
-          const r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255;
-          const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
-          const l = (mx + mn) / 2;
-          const sat = mx === mn ? 0 : (mx - mn) / (1 - Math.abs(2 * l - 1));
-          let h = 0;
-          if (mx !== mn) {
-            const dd = mx - mn;
-            if (mx === r) h = 60 * (((g - b) / dd) % 6);
-            else if (mx === g) h = 60 * ((b - r) / dd + 2);
-            else h = 60 * ((r - g) / dd + 4);
-            if (h < 0) h += 360;
-          }
-          counts[hslName(h, sat, l)] = (counts[hslName(h, sat, l)] || 0) + 1;
-          tot++;
+        cx.drawImage(img, 0, 0, W, H);
+        const d = cx.getImageData(0, 0, W, H).data;
+        const at = (x, y) => { const i = (y * W + x) * 4; return d[i + 3] >= 128 ? [d[i], d[i + 1], d[i + 2]] : null; };
+        // fond = médiane des pixels du cadre (2 px)
+        const bg = [];
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+          if (x < 2 || y < 2 || x >= W - 2 || y >= H - 2) { const c = at(x, y); if (c) bg.push(c); }
         }
-        const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-        resolve(sorted.filter(([, c]) => c / tot >= 0.08).slice(0, 3).map(([n]) => n));
+        const med = (arr) => arr.sort((a, b) => a - b)[Math.floor(arr.length / 2)] || 0;
+        const bgC = [med(bg.map((c) => c[0])), med(bg.map((c) => c[1])), med(bg.map((c) => c[2]))];
+        // pixels du VÊTEMENT : différents du fond + dans l'ellipse centrale (±75 %)
+        const pool = [];
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+          const c = at(x, y); if (!c) continue;
+          const dBg = Math.hypot(c[0] - bgC[0], c[1] - bgC[1], c[2] - bgC[2]);
+          const dC = Math.hypot((x - W / 2) / W, (y - H / 2) / H);
+          if (dBg > 48 && dC < 0.42) pool.push(c);
+        }
+        const use = pool.length >= 40 ? pool : pool.length ? pool : bg.length ? bg : [[128, 128, 128]];
+        // k-means (k=3, 10 itérations) — initialisation aux quartiles pour être stable
+        let cents = [use[0], use[Math.floor(use.length / 2)], use[use.length - 1]];
+        for (let it = 0; it < 10; it++) {
+          const sums = Array.from({ length: K }, () => [0, 0, 0, 0]);
+          for (const [r, g, b] of use) {
+            let bi = 0, bd = Infinity;
+            for (let k = 0; k < K; k++) { const dd = (r - cents[k][0]) ** 2 + (g - cents[k][1]) ** 2 + (b - cents[k][2]) ** 2; if (dd < bd) { bd = dd; bi = k; } }
+            const sm = sums[bi]; sm[0] += r; sm[1] += g; sm[2] += b; sm[3]++;
+          }
+          cents = sums.map((sm, k) => (sm[3] ? [sm[0] / sm[3], sm[1] / sm[3], sm[2] / sm[3]] : cents[k]));
+        }
+        // clusters triés par poids → noms de couleurs → exclusion de celles rejetées (✕)
+        const names = sumsWeights(cents, use, exclude).map((x) => x.name);
+        resolve(names.slice(0, max));
       } catch { resolve([]); }
+      function sumsWeights(cs, pxs, ex) {
+        const w = cs.map(() => 0);
+        for (const [r, g, b] of pxs) {
+          let bi = 0, bd = Infinity;
+          for (let k = 0; k < K; k++) { const dd = (r - cs[k][0]) ** 2 + (g - cs[k][1]) ** 2 + (b - cs[k][2]) ** 2; if (dd < bd) { bd = dd; bi = k; } }
+          w[bi]++;
+        }
+        return cs
+          .map((c, k) => ({ name: hslName(...rgb2hsl(c)), weight: w[k] }))
+          .filter((x) => x.weight > 0 && !ex.includes(x.name))
+          .sort((a, b) => b.weight - a.weight);
+      }
+      function rgb2hsl([r, g, b]) {
+        const R = r / 255, G = g / 255, B = b / 255;
+        const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+        const l = (mx + mn) / 2;
+        const sat = mx === mn ? 0 : (mx - mn) / (1 - Math.abs(2 * l - 1));
+        let h = 0;
+        if (mx !== mn) {
+          const dd = mx - mn;
+          if (mx === R) h = 60 * (((G - B) / dd) % 6);
+          else if (mx === G) h = 60 * ((B - R) / dd + 2);
+          else h = 60 * ((R - G) / dd + 4);
+          if (h < 0) h += 360;
+        }
+        return [h, sat, l];
+      }
     };
     img.onerror = () => resolve([]);
     img.src = src;

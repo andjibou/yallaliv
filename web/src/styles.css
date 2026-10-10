@@ -855,3 +855,7 @@ button.icon-btn.yl-back:active { transform: scale(.92); }
 .pd-var i { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid rgba(15,23,42,.25); display: inline-block; }
 .pd-price-now { font-size: 15px; font-weight: 900; color: #0e9f6e; }
 .pd-color-chip { border: 1px solid var(--line); }
+
+/* ═══ 🎨💰 v2026.10.08.13 — VÊTEMENTS : UNE couleur par photo (dominante du vêtement) + prix min-max ═══ */
+.pd-colors { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }   /* pastilles visibles DÈS l'ouverture de la fiche (clic = couleur + photo) */
+.pg-sizes-hint { display: none; }   /* (plus utilisé : le prix est TOUJOURS affiché en fourchette min-max) */

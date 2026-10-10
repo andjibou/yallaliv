@@ -348,8 +348,11 @@ function Products() {
   const fileXl = useRef(null);
   const xlMode = useRef(false);   // false = premier import · true = mise à jour (remplace les produits Excel)
   const [photo, setPhoto] = useState(null); // dataURL en attente d'envoi
-  const [colors, setColors] = useState([]);   // 🎨 v2026.10.08.12 : couleurs du produit (union des détections, retirables)
-  const [det, setDet] = useState({});         // 🎨 détections par photo ('main' ou 'g0','g1'…) → pastilles sous chaque photo
+  // 🎨 v2026.10.08.13 — UNE SEULE couleur par photo, LA dominante du vêtement (pas le fond).
+  // det[clé] = { name, rejected, photo } · clés : 'main' (photo principale), 'g'+i (file d'attente
+  // nouveau produit), 'p'+id (photo galerie enregistrée), 'x'+i (couleur héritée sans photo).
+  // ✕ sous une photo = couleur fausse → RE-DÉTECTION en excluant les rejetées (l'algo « apprend »).
+  const [det, setDet] = useState({});
   const [busy, setBusy] = useState(false);
   const [galleryBusy, setGalleryBusy] = useState(false);
 
@@ -366,11 +369,10 @@ function Products() {
     if (r.error === 'format') return toast(t('img_err_format'), 'err');
     if (r.error === 'too_big') return toast(t('img_err_big'), 'err');
     setPhoto(r);   // { thumb, display }
-    // 🎨 v2026.10.08.12 : couleurs détectées automatiquement — visibles sous la photo avant d'enregistrer
+    // 🎨 v2026.10.08.13 : LA couleur dominante du vêtement, détectée automatiquement sous la photo
     if (isClothingType(data?.store?.type)) {
       const found = await detectColors(r.display);
-      setDet((d) => ({ ...d, main: found }));
-      setColors((c) => [...new Set([...c, ...found])]);
+      setDet((d) => ({ ...d, main: { name: found[0] || null, rejected: [], photo: null } }));
     }
   };
 
@@ -386,16 +388,19 @@ function Products() {
     for (const f of list) {
       const r = await processImage(f);
       if (r.error) { toast((r.error === 'too_big' ? t('img_err_big') : t('img_err_format')) + ' · ' + f.name, 'err'); continue; }
-      try { await api(`/merchant/products/${edit.id}/photos`, { method: 'POST', body: { thumb: r.thumb, display: r.display } }); ok++; }
-      catch (ex) { toast(ex.message, 'err'); }
-      if (isClothingType(data?.store?.type)) {   // 🎨 couleurs détectées → enregistrées tout de suite
-        const found = await detectColors(r.display);
-        if (found.length) {
-          const merged = [...new Set([...(edit.colors || []), ...found])];
-          setEdit((e) => ({ ...e, colors: merged })); setColors(merged);
-          try { await api(`/merchant/products/${edit.id}`, { method: 'PUT', body: { colors: merged } }); } catch {}
+      try {
+        const rr = await api(`/merchant/products/${edit.id}/photos`, { method: 'POST', body: { thumb: r.thumb, display: r.display } });
+        ok++;
+        if (isClothingType(data?.store?.type)) {   // 🎨 v2026.10.08.13 : couleur de CETTE photo, associée à son chemin
+          const found = await detectColors(r.display);
+          if (found[0] && rr?.photo?.id) {
+            const nd = { ...det, ['p' + rr.photo.id]: { name: found[0], rejected: [], photo: rr.photo.photo } };
+            setDet(nd);
+            try { await api(`/merchant/products/${edit.id}`, { method: 'PUT', body: { colors: buildColorsFrom(nd, edit.photo || null, []) } }); } catch {}
+          }
         }
       }
+      catch (ex) { toast(ex.message, 'err'); }
     }
     setGalleryBusy(false);
     if (ok > 0) toast(ok === 1 ? t('photo_added') : t('photos_n_added').replace('{n}', ok));
@@ -417,13 +422,17 @@ function Products() {
       const r = await processImage(f);
       if (r.error) { toast((r.error === 'too_big' ? t('img_err_big') : t('img_err_format')) + ' · ' + f.name, 'err'); continue; }
       add.push(r);
-      if (isClothingType(data?.store?.type)) {   // 🎨 détection sur chaque photo ajoutée
-        const found = await detectColors(r.display);
-        if (found.length) { setDet((d) => ({ ...d, ['g' + add.length]: found })); setColors((c) => [...new Set([...c, ...found])]); }
-      }
     }
     setGalleryBusy(false);
-    if (add.length) setPendGal((g) => [...g, ...add]);
+    if (add.length) {
+      setPendGal((g) => [...g, ...add]);
+      if (isClothingType(data?.store?.type)) {   // 🎨 v2026.10.08.13 : UNE couleur par photo ajoutée
+        for (let i = 0; i < add.length; i++) {
+          const found = await detectColors(add[i].display);
+          setDet((d) => ({ ...d, ['g' + (pendGal.length + i + 1)]: { name: found[0] || null, rejected: [], photo: null } }));
+        }
+      }
+    }
   };
 
   // 📥 Lecture du fichier Excel CÔTÉ NAVIGATEUR (le fichier n'est jamais envoyé au serveur)
@@ -463,6 +472,38 @@ function Products() {
     catch (ex) { toast(ex.message, 'err'); }
   };
 
+  // 🎨 v2026.10.08.13 — construit la liste [{ color, photo }] depuis les détections :
+  // 'main' → chemin de la photo principale, 'g'+i → chemin de la i-ème photo de la file,
+  // 'p'+id → chemin connu, 'x' → héritée. Une couleur = une ligne (doublons fusionnés).
+  const buildColorsFrom = (detObj, mainPath, galPaths) => {
+    const cols = []; const seen = new Set();
+    const push = (name, ph) => { const k = String(name || '').toLowerCase(); if (name && !seen.has(k)) { seen.add(k); cols.push({ color: name, photo: ph || null }); } };
+    if (detObj.main?.name) push(detObj.main.name, mainPath);
+    (pendGal || []).forEach((r, i) => { const e = detObj['g' + (i + 1)]; if (e?.name) push(e.name, (galPaths || [])[i] || null); });
+    for (const k of Object.keys(detObj)) { if (k !== 'main' && !/^g\d+$/.test(k)) { const e = detObj[k]; if (e?.name) push(e.name, e.photo || null); } }
+    return cols;
+  };
+  // ✕ la couleur n'est PAS la bonne → RE-DÉTECTE en excluant les rejetées → la vraie couleur
+  const rejectColor = async (key, src) => {
+    const cur = det[key] || {};
+    const rejected = [...(cur.rejected || []), cur.name].filter(Boolean);
+    setDet((d) => ({ ...d, [key]: { name: null, rejected, photo: cur.photo || null } }));
+    const found = src ? await detectColors(src, { exclude: rejected }) : [];
+    setDet((d) => ({ ...d, [key]: { name: found[0] || null, rejected, photo: cur.photo || null } }));
+  };
+  // à l'ouverture d'un produit existant : chaque photo retrouve SA couleur (photo ↔ couleur)
+  const initDet = (pr) => {
+    const d = {};
+    const cols = (pr.colors || []).map((c) => (typeof c === 'string' ? { color: c, photo: null } : c));
+    const used = new Set();
+    const take = (pred) => { for (let i = 0; i < cols.length; i++) if (!used.has(i) && pred(cols[i])) { used.add(i); return cols[i]; } return null; };
+    const mainC = take((c) => c.photo && pr.photo && c.photo === pr.photo) || take((c) => !c.photo);
+    if (mainC) d.main = { name: mainC.color, rejected: [], photo: pr.photo || null };
+    for (const ph of (pr.photos || [])) { const c = take((x) => x.photo && x.photo === ph.photo); if (c) d['p' + ph.id] = { name: c.color, rejected: [], photo: ph.photo }; }
+    cols.forEach((c, i) => { if (!used.has(i)) d['x' + i] = { name: c.color, rejected: [], photo: c.photo || null }; });
+    return d;
+  };
+
   const save = async () => {
     const v = V(t);
     const e = runV({ name: v.name(t('product_name')), price: v.num(t('price'), 0, '45.50') }, edit);
@@ -476,21 +517,27 @@ function Products() {
         : undefined;
       const body = { ...edit, price: parseFloat(edit.price), qty: edit.qty === '' || edit.qty == null ? null : parseInt(edit.qty, 10), category: edit.category || 'Général',
         promo_price: isClothing && edit.promo_price !== '' && edit.promo_price != null && !isNaN(parseFloat(edit.promo_price)) ? parseFloat(edit.promo_price) : null,
-        sizes, colors: isClothing ? [...new Set(colors)] : undefined };
+        sizes, colors: undefined };   // 🎨 v2026.10.08.13 : couleurs envoyées après l'upload (chemins des photos)
       let saved;
       if (edit.id) saved = (await api('/merchant/products/' + edit.id, { method: 'PUT', body })).product;
       else saved = (await api('/merchant/products', { method: 'POST', body })).product;
+      let mainPath = edit.photo || null;
       if (photo) {
-        try { await api(`/merchant/products/${saved.id}/photo`, { method: 'PUT', body: { thumb: photo.thumb, display: photo.display } }); }
+        try { const r2 = await api(`/merchant/products/${saved.id}/photo`, { method: 'PUT', body: { thumb: photo.thumb, display: photo.display } }); mainPath = r2?.product?.photo || mainPath; }
         catch (ex) { toast(ex.message, 'err'); }
       }
+      const galPaths = [];
       if (!edit.id && pendGal.length) {
         let ok = 0;
         for (const r of pendGal) {
-          try { await api(`/merchant/products/${saved.id}/photos`, { method: 'POST', body: { thumb: r.thumb, display: r.display } }); ok++; }
-          catch (ex) { toast(ex.message, 'err'); }
+          try { const rr = await api(`/merchant/products/${saved.id}/photos`, { method: 'POST', body: { thumb: r.thumb, display: r.display } }); galPaths.push(rr?.photo?.photo || null); ok++; }
+          catch (ex) { galPaths.push(null); toast(ex.message, 'err'); }
         }
         if (ok > 0) toast(ok === 1 ? t('photo_added') : t('photos_n_added').replace('{n}', ok));
+      }
+      if (isClothing) {   // 🎨 v2026.10.08.13 : une couleur par photo, associée à son chemin (clic pastille client → photo)
+        try { await api('/merchant/products/' + saved.id, { method: 'PUT', body: { colors: buildColorsFrom(det, mainPath, galPaths) } }); }
+        catch (ex) { toast(ex.message, 'err'); }
       }
       toast(t('saved'));
       setPhoto(null);
@@ -510,7 +557,7 @@ function Products() {
       <div className="row spread mb12">
         <div className="h2">📦 {t('products')} ({data.products.length})</div>
         <div className="row wrap" style={{ gap: 6 }}>
-          <button className="btn primary sm" onClick={() => { setEdit({ ...EMPTY_P }); setPhoto(null); setPendGal([]); setColors([]); setDet({}); }}>＋ {t('add_product')}</button>
+          <button className="btn primary sm" onClick={() => { setEdit({ ...EMPTY_P }); setPhoto(null); setPendGal([]); setDet({}); }}>＋ {t('add_product')}</button>
           <button className="btn blue sm" onClick={() => { xlMode.current = false; fileXl.current?.click(); }}>📥 Excel</button>
           <button className="btn amber sm" onClick={() => { xlMode.current = true; fileXl.current?.click(); }}>🔄 Mettre à jour (Excel)</button>
           <input ref={fileXl} type="file" accept=".xlsx,.xls,.csv" hidden onChange={(e) => { onXlFile(e.target.files[0], xlMode.current); e.target.value = ''; }} />
@@ -532,9 +579,9 @@ function Products() {
                   : fmtMoney(p.price)}
               </div>
               {(p.sizes || []).length > 0 && <div className="muted small">📏 {(p.sizes || []).map((x) => x.size).join(' · ')}</div>}
-              {(p.colors || []).length > 0 && <div className="row" style={{ gap: 3 }}>{(p.colors || []).slice(0, 6).map((c) => <i key={c} title={c} style={{ width: 10, height: 10, borderRadius: '50%', background: (COLOR_HEX[c] || '#cbd5e1'), display: 'inline-block', border: '1px solid rgba(15,23,42,.18)' }} />)}</div>}
+              {(p.colors || []).length > 0 && <div className="row" style={{ gap: 3 }}>{(p.colors || []).slice(0, 6).map((c) => { const nm = typeof c === 'string' ? c : c?.color; return <i key={nm} title={nm} style={{ width: 10, height: 10, borderRadius: '50%', background: (COLOR_HEX[nm] || '#cbd5e1'), display: 'inline-block', border: '1px solid rgba(15,23,42,.18)' }} />; })}</div>}
             </div>
-            <button className="btn ghost sm" onClick={() => { setEdit(p); setColors(p.colors || []); setDet({}); }}>✏️</button>
+            <button className="btn ghost sm" onClick={() => { setEdit(p); setDet(initDet(p)); }}>✏️</button>
             <button className="btn danger sm" onClick={() => del(p)}>🗑️</button>
           </div>
         ))}
@@ -616,10 +663,11 @@ function Products() {
                 <span className="muted small">{t('photo_hint')}</span>
               </div>
             </div>
-            {det.main?.length > 0 && (
+            {det.main?.name && (
               <div className="row wrap mb12" style={{ gap: 6 }}>
-                <span className="muted small">🎨 Couleurs détectées :</span>
-                {det.main.map((c) => <ColorChip key={c} name={c} onRemove={() => { setDet((d) => ({ ...d, main: d.main.filter((x) => x !== c) })); setColors((cs) => cs.filter((x) => x !== c || (det['g0'] || []).includes(x))); }} />)}
+                <span className="muted small">🎨 Couleur du vêtement :</span>
+                <ColorChip name={det.main.name} onRemove={() => rejectColor('main', photo?.display || (edit.photo ? photoUrl(edit.photo, 'full') : null))} />
+                <span className="muted small">✕ = mauvaise couleur → re-analyse</span>
               </div>
             )}
 
@@ -632,6 +680,9 @@ function Products() {
                       <img className="p-photo" src={photoUrl(ph.photo, 'thumb')} alt="" />
                       <button className="btn danger sm" style={{ position: 'absolute', top: -7, insetInlineEnd: -7, padding: '2px 7px', minWidth: 0 }}
                         onClick={() => delGallery(ph)}>✕</button>
+                      {(det['p' + ph.id] || {}).name && (
+                        <ColorChip small name={det['p' + ph.id].name} onRemove={() => rejectColor('p' + ph.id, photoUrl(ph.photo, 'full'))} />
+                      )}
                     </div>
                   ))
                   : pendGal.map((r, i) => (
@@ -639,10 +690,8 @@ function Products() {
                       <img className="p-photo" src={r.display} alt="" />
                       <button className="btn danger sm" style={{ position: 'absolute', top: -7, insetInlineEnd: -7, padding: '2px 7px', minWidth: 0 }}
                         onClick={() => setPendGal((g) => g.filter((_, x) => x !== i))}>✕</button>
-                      {(det['g' + (i + 1)] || []).length > 0 && (
-                        <div className="col" style={{ gap: 2, marginTop: 4 }}>
-                          {det['g' + (i + 1)].map((c) => <ColorChip key={c} name={c} small onRemove={() => setDet((d) => ({ ...d, ['g' + (i + 1)]: (d['g' + (i + 1)] || []).filter((x) => x !== c) }))} />)}
-                        </div>
+                      {(det['g' + (i + 1)] || {}).name && (
+                        <ColorChip small name={det['g' + (i + 1)].name} onRemove={() => rejectColor('g' + (i + 1), r.display)} />
                       )}
                     </div>
                   ))}
@@ -715,10 +764,10 @@ function Products() {
                   <button type="button" className="btn blue sm" onClick={() => setEdit((ed) => ({ ...ed, sizes: [...(ed.sizes || []), { size: '', price: '' }] }))}>＋ Taille personnalisée</button>
                 </div>
                 <div className="field mt8">
-                  <label className="label">🎨 Couleurs du vêtement (détectées automatiquement sur les photos)</label>
-                  {colors.length > 0
-                    ? <div className="row wrap" style={{ gap: 6 }}>{colors.map((c) => <ColorChip key={c} name={c} onRemove={() => setColors((cs) => cs.filter((x) => x !== c))} />)}</div>
-                    : <span className="muted small">Ajoute une photo : les couleurs apparaîtront ici (tu peux en retirer avec ✕).</span>}
+                  <label className="label">🎨 Couleurs du vêtement (une par photo, détectées automatiquement)</label>
+                  {buildColorsFrom(det, edit?.photo || null, []).length > 0
+                    ? <div className="row wrap" style={{ gap: 6 }}>{buildColorsFrom(det, edit?.photo || null, []).map((c) => <ColorChip key={c.color} name={c.color} />)}</div>
+                    : <span className="muted small">Ajoute une photo : sa couleur dominante apparaîtra ici. ✕ sous une photo = couleur fausse → re-analyse automatique.</span>}
                 </div>
               </>
             )}
