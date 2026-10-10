@@ -266,7 +266,7 @@ const DICT = {
     route: 'Trajet', view_route: 'Voir le trajet',
     choose_on_map: 'Choisir sur la carte', pin_hint: 'L\u2019épingle est fixe : déplacez la carte jusqu\u2019à ce que le centre soit exactement votre adresse',
     confirm_location: 'Confirmer cette position', locating: 'Recherche de l\u2019adresse…', address_updated: 'Adresse mise à jour 📍',
-    loc_defined: 'Position précise définie', product_details: 'Détail du produit', cart_title: 'Panier', continue_shopping: 'Continuer mes achats', checkout: 'Commander', color: 'Couleur', pick_size_price: 'Choisis une taille pour voir le prix', pick_variant: 'Choisis taille et couleur', confirm: 'Confirmer', same_cat: 'Dans la même catégorie', add_to_cart: 'Ajouter au panier',
+    loc_defined: 'Position précise définie', product_details: 'Détail du produit', cart_title: 'Panier', continue_shopping: 'Continuer', checkout: 'Commander',   // ↩️ v2026.10.08.16 : texte PLUS COURT (débordement APK) color: 'Couleur', pick_size_price: 'Choisis une taille pour voir le prix', pick_variant: 'Choisis taille et couleur', confirm: 'Confirmer', same_cat: 'Dans la même catégorie', add_to_cart: 'Ajouter au panier',
     tab_active: 'En cours', tab_new: 'Nouvelles', tab_done: 'Terminées',
     drivers_team: 'Mes livreurs', add_driver: 'Ajouter un livreur', no_drivers: 'Aucun livreur pour le moment — ajoutez votre premier livreur 🛵',
     driver_created: 'Livreur créé ✓', login_note: 'Identifiant à communiquer au livreur :', live_positions: 'Positions en direct',
@@ -449,7 +449,7 @@ const DICT = {
     route: 'المسار', view_route: 'عرض المسار',
     choose_on_map: 'اختر على الخريطة', pin_hint: 'الدبوس ثابت: حرّك الخريطة حتى يصبح المركز هو عنوانك بالضبط',
     confirm_location: 'تأكيد هذا الموقع', locating: 'جارٍ البحث عن العنوان…', address_updated: 'تم تحديث العنوان 📍',
-    loc_defined: 'تم تحديد الموقع بدقة', product_details: 'تفاصيل المنتج', cart_title: 'السلة', continue_shopping: 'متابعة التسوق', checkout: 'إتمام الطلب', color: 'اللون', pick_size_price: 'اختر المقاس لرؤية السعر', pick_variant: 'اختر المقاس واللون', confirm: 'تأكيد', same_cat: 'من نفس الفئة', add_to_cart: 'أضف إلى السلة',
+    loc_defined: 'تم تحديد الموقع بدقة', product_details: 'تفاصيل المنتج', cart_title: 'السلة', continue_shopping: 'متابعة', checkout: 'إتمام الطلب', color: 'اللون', pick_size_price: 'اختر المقاس لرؤية السعر', pick_variant: 'اختر المقاس واللون', confirm: 'تأكيد', same_cat: 'من نفس الفئة', add_to_cart: 'أضف إلى السلة',
     tab_active: 'جارية', tab_new: 'جديدة', tab_done: 'منتهية',
     drivers_team: 'سائقوّي', add_driver: 'إضافة سائق', no_drivers: 'لا يوجد سائقون — أضف أول سائق 🛵',
     driver_created: 'تم إنشاء السائق ✓', login_note: 'المعرف الذي يجب إبلاغه للسائق:', live_positions: 'المواقع المباشرة',
@@ -631,7 +631,7 @@ const DICT = {
     route: 'Route', view_route: 'View route',
     choose_on_map: 'Choose on the map', pin_hint: 'The pin is fixed: move the map until the center is exactly your address',
     confirm_location: 'Confirm this position', locating: 'Locating address…', address_updated: 'Address updated 📍',
-    loc_defined: 'Precise position set', product_details: 'Product details', cart_title: 'Cart', continue_shopping: 'Continue shopping', checkout: 'Checkout', color: 'Color', pick_size_price: 'Pick a size to see the price', pick_variant: 'Pick size and color', confirm: 'Confirm', same_cat: 'In the same category', add_to_cart: 'Add to cart',
+    loc_defined: 'Precise position set', product_details: 'Product details', cart_title: 'Cart', continue_shopping: 'Continue', checkout: 'Checkout', color: 'Color', pick_size_price: 'Pick a size to see the price', pick_variant: 'Pick size and color', confirm: 'Confirm', same_cat: 'In the same category', add_to_cart: 'Add to cart',
     tab_active: 'Active', tab_new: 'New', tab_done: 'Done',
     drivers_team: 'My drivers', add_driver: 'Add driver', no_drivers: 'No drivers yet — add your first driver 🛵',
     driver_created: 'Driver created ✓', login_note: 'Login to give to the driver:', live_positions: 'Live positions',
@@ -879,6 +879,15 @@ export const isClothingType = (type) => {
   return ['clothing', 'vetements', 'vetement', 'mode', 'fashion', 'habits', 'habit', 'habillement', 'dress', 'wear', 'textile', 'confection', 'pret-a-porter'].includes(s.replace(/[^a-z-]/g, ''))
     || /cloth|vetement|fashion|habillement|textile|confection|streetwear|sportwear/.test(s);
 };
+
+// 🍕 v2026.10.08.16 — magasins de type RESTAURANT (formulaire « Devenir partenaire » = restaurant)
+export const isRestaurantType = (type) => {
+  const s = String(type || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  if (!s) return false;
+  return /restaurant|^resto$|^food$|مطعم/.test(s);
+};
+// 📏 tailles avec PRIX PAR TAILLE : vêtements ET restaurants (les restaurants n'ont PAS de couleurs)
+export const hasSizePrices = (type) => isClothingType(type) || isRestaurantType(type);
 
 // 🎨 v2026.10.08.12 — couleurs des vêtements détectées AUTOMATIQUEMENT depuis les photos.
 // On échantillonne la zone CENTRALE de l'image (le vêtement est au milieu, le fond sur

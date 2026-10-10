@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useNavigate, useParams, useLocation, Outlet, useSearchParams } from 'react-router-dom';
 import TrackMap from '../TrackMap.jsx';
-import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage, gmapsNavUrl, gmapsSearchUrl, COLOR_HEX, fmtMoney2, fmtMoneyN } from '../lib.jsx';
+import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage, gmapsNavUrl, gmapsSearchUrl, COLOR_HEX, fmtMoney2, fmtMoneyN, isRestaurantType } from '../lib.jsx';
 import { BottomNav, CartBar, StatusBadge, PayBadge, Stepper, Empty, Spinner, BackBtn, LangSwitch, Modal, Stars, SuggestBox, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import PickMap, { reverseGeocode, geocodeSearch } from '../PickMap.jsx';
@@ -176,7 +176,7 @@ const PFAV_KEY = 'yl_pfavs';
 const loadPFavs = () => { try { return JSON.parse(localStorage.getItem(PFAV_KEY) || '{}'); } catch { return {}; } };
 const HEART_PATH = 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z';
 
-function PgCard({ p, rating, fav, onFav, onOpen, onAdd }) {
+function PgCard({ p, rating, fav, onFav, onOpen, onAdd, bare }) {
   const t = useT();   // 👕 v2026.10.08.12 : libellé « Taille » sur les cartes vêtements
   const [pi, setPi] = useState(0);   // photo affichée (navigation ‹ › sans ouvrir le produit)
   const gal = (p.gallery || (p.photos || []).map((x) => x && x.photo) || []).filter(Boolean);
@@ -186,7 +186,7 @@ function PgCard({ p, rating, fav, onFav, onOpen, onAdd }) {
   const sp = (p.sizes || []).map((z) => z.price);   // 💰 v2026.10.08.13 : fourchette min-max (le prix reste TOUJOURS visible)
   const pmm = sp.length ? { min: Math.min(...sp), max: Math.max(...sp) } : { min: p.price, max: p.price };   // que les PRIX DE TAILLES (toujours explicites)
   return (
-    <div className={'pg-card' + (hasVars ? ' v-pr' : '')}>
+    <div className={'pg-card' + (hasVars ? ' v-pr' : '') + (bare ? ' pg-bare' : '')}>   {/* 🖼️ bare : cadre TRANSPARENT (suggestions restaurant) */}
       <button type="button" className={'pg-heart' + (fav ? ' on' : '')} aria-label="favori"
         onClick={(e) => { e.stopPropagation(); onFav(p.id); }}>
         <svg viewBox="0 0 24 24"><path d={HEART_PATH} /></svg>
@@ -228,7 +228,7 @@ function PgCard({ p, rating, fav, onFav, onOpen, onAdd }) {
 
 /* ↔️ v2026.10.04.5 : les produits s'affichent en LIGNES HORORALES DÉROULANTES
    (accueil = une seule ligne · catégories/magasins = une ligne par section) */
-function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd, grid }) {
+function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd, grid, bare }) {   // bare = v2026.10.08.16 : cartes SANS cadre (suggestions restaurant)
   if (!prods || !prods.length) return null;
   return (
     <>
@@ -237,7 +237,7 @@ function ProductGrid({ title, prods, rating, favs, onFav, onOpen, onAdd, grid })
           uniquement) ; sans grid → ligne horizontale déroulante (🏆/✨, accueil : inchangées) */}
       <div className={grid ? 'pg-grid' : 'pg-scroll'}>
         {prods.map((p) => (
-          <PgCard key={p.id} p={p} rating={rating} fav={!!favs[p.id]} onFav={onFav} onOpen={onOpen} onAdd={onAdd} />
+          <PgCard key={p.id} p={p} rating={rating} fav={!!favs[p.id]} onFav={onFav} onOpen={onOpen} onAdd={onAdd} bare={bare} />
         ))}
       </div>
     </>
@@ -305,7 +305,8 @@ function ProductDetail({ product, closed, qty, setQty, onAdd, header, siblings, 
           cadre produit en dessous ne bouge JAMAIS. */}
       {sibs.length > 0 && (
         <div className="pd-sibs-zone">
-          <ProductGrid prods={sibs} rating={sibRating} favs={sibFavs || {}} onFav={sibOnFav || (() => {})} onOpen={(p) => onPick?.(p)} onAdd={sibOnAdd || (() => {})} />
+          {/* 🖼️ v2026.10.08.16 — RESTAURANT : les produits de suggestion PERDENT leur cadre (transparent) */}
+          <ProductGrid prods={sibs} rating={sibRating} favs={sibFavs || {}} onFav={sibOnFav || (() => {})} onOpen={(p) => onPick?.(p)} onAdd={sibOnAdd || (() => {})} bare={isRestaurantType(storeType)} />
         </div>
       )}
       {/* 📌 v2026.10.08.10 — CADRE PRODUIT FIXE : photo 4:5, nom, description, bouton

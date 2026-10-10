@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, alarm, pushSubscribe, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage, detectColors, COLOR_HEX, isClothingType, ph as photoUrl, gmapsNavUrl, gmapsSearchUrl } from '../lib.jsx';
+import { api, apiText, downloadCsv, useT, useLang, useAuth, usePoll, fmtMoney, fmtDate, toast, notif, beep, alarm, pushSubscribe, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage, detectColors, COLOR_HEX, isClothingType, isRestaurantType, hasSizePrices, ph as photoUrl, gmapsNavUrl, gmapsSearchUrl } from '../lib.jsx';
 import { StatusBadge, PayBadge, Empty, Spinner, Modal, LangSwitch, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import { BarsChart, compactMoney } from '../Chart.jsx';
@@ -521,7 +521,8 @@ function Products() {
     setBusy(true);
     try {
       const isClothing = isClothingType(data?.store?.type);   // 👕 v2026.10.08.12 : variantes vêtements (tout slug vêtement)
-      const sizes = isClothing
+      const withSizes = hasSizePrices(data?.store?.type);   // 📏 v2026.10.08.16 : tailles aussi pour les RESTAURANTS (sans couleurs)
+      const sizes = withSizes
         ? (edit.sizes || []).map((x) => ({ size: String(x.size || '').trim(), price: x.price === '' || x.price == null ? parseFloat(edit.price) : parseFloat(x.price) })).filter((x) => x.size && !isNaN(x.price))
         : undefined;
       const body = { ...edit, price: parseFloat(edit.price), qty: edit.qty === '' || edit.qty == null ? null : parseInt(edit.qty, 10), category: edit.category || 'Général',
@@ -735,13 +736,15 @@ function Products() {
                 <input className="input" type="number" min="0" step="1" value={edit.qty ?? ''} onChange={(e) => setEdit({ ...edit, qty: e.target.value })} placeholder="vide = illimité" />
               </div>
             </div>
-            {isClothingType(data?.store?.type) && (   // 👕🎨 v2026.10.08.12 — champs VÊTEMENTS (clothing, vêtements, mode…)
+            {hasSizePrices(data?.store?.type) && (   // 👕🍕 v2026.10.08.16 — TAILLES prix/taille : VÊTEMENTS et RESTAURANTS (restaurants : PAS de couleurs)
               <>
                 <div className="row">
-                  <div className="field" style={{ width: 170 }}>
-                    <label className="label">🏷️ Prix promotionnel</label>
-                    <input className="input" type="number" min="0" step="0.5" value={edit.promo_price ?? ''} onChange={(e) => setEdit({ ...edit, promo_price: e.target.value })} placeholder="vide = aucun" />
-                  </div>
+                  {isClothingType(data?.store?.type) && (   // 🏷️ promo : vêtements uniquement
+                    <div className="field" style={{ width: 170 }}>
+                      <label className="label">🏷️ Prix promotionnel</label>
+                      <input className="input" type="number" min="0" step="0.5" value={edit.promo_price ?? ''} onChange={(e) => setEdit({ ...edit, promo_price: e.target.value })} placeholder="vide = aucun" />
+                    </div>
+                  )}
                   <div className="field" style={{ width: 170 }}>
                     <label className="label">📏 Tailles (prix / taille)</label>
                     <div className="row" style={{ gap: 4 }}>
