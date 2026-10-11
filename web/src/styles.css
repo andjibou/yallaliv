@@ -905,7 +905,10 @@ button.icon-btn.yl-back:active { transform: scale(.92); }
    .sty-create = boule FIXE (sticky à gauche) : les autres boules passent EN DESSOUS
    pendant leur défilement · .sty-create-ic = cercle OPAQUE (masque les boules qui
    glissent derrière) · .space-btn = icône $ (changement d'espace) */
-.sty-create { position: sticky; left: 0; z-index: 5; }
+.stc-zone { position: relative; margin: 0 -14px; }   /* bord à bord : l'arc de la boule touche le DÉBUT de la page */
+.stc-mask { position: absolute; left: 0; top: 0; bottom: 0; width: 96px; z-index: 5; background: var(--bg); }   /* 🕶️ masque OPAQUE : les boules qui défilent dessous DISPARAISSENT (ni ombre ni nom) */
+.stc-zone .sty-create { position: absolute; left: 0; top: 2px; z-index: 6; margin: 0; }
+.stc-zone .stc-row { padding-left: 100px; }   /* la liste défilante commence APRÈS la boule fixe */
 .sty-create .sty-create-ic { background: linear-gradient(160deg, #ecfdf5, #a7f3d0); }
-.sty-create .sty-label { color: #065f46; font-weight: 900; }
+.sty-create .sty-label { color: #065f46; font-weight: 900; white-space: nowrap; max-width: none; }
 .space-btn svg { display: block; }

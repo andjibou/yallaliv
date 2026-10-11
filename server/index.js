@@ -340,8 +340,7 @@ app.post('/api/auth/google', rateLimit(10, 15 * 60000, 'Trop de tentatives. Rée
 // ---------- DEVENIR PARTENAIRE : client -> magasin (formulaire dans le profil client) ----------
 // Les données de compte (nom, email, téléphone) ne sont PAS redemandées : seules les infos du magasin.
 app.post('/api/partner', auth, h(async (req, res) => {
-  if (req.user.role === 'merchant') return res.status(400).json({ error: 'Vous avez déjà un magasin' });
-  if (req.user.role !== 'client') return res.status(403).json({ error: 'Accès refusé' });
+  if (req.user.role !== 'client' && req.user.role !== 'merchant') return res.status(403).json({ error: 'Accès refusé' });   // 💼 v2026.10.08.19 : un MARCHAND peut créer PLUSIEURS magasins (plusieurs espaces)
   const { store_name, store_type = 'market', store_address = '' } = req.body;
   const store_phone = String(req.body.store_phone || req.user.phone || '').trim();
   if (!store_name || !String(store_name).trim()) return res.status(400).json({ error: 'Nom du magasin requis (ex. : Restaurant Al Nil)' });

@@ -910,14 +910,17 @@ export function ClientHome() {
           ))}
         </div>
       ) : stypes.length > 0 ? (
-        <AutoScroll className="stc-row">
-          {/* 💼 v2026.10.08.18 — boule FIXE « Crée ton business » : GIF animé (bonhomme
-              qui récolte l'argent) · STICKY à gauche : les autres boules passent EN DESSOUS
-              pendant leur défilement · clic = créer son magasin (sans passer par 👤) */}
+        /* 💼 v2026.10.08.19 — boule « Mon business » HORS de la liste défilante : FIXE,
+           arc collé au DÉBUT de la page, MASQUE opaque derrière → les autres boules qui
+           passent en dessous DISPARAISSENT (ni ombre ni nom). Clic = formulaire
+           « Devenir partenaire » pour TOUS — un utilisateur peut créer PLUSIEURS espaces. */
+        <div className="stc-zone">
+          <div className="stc-mask" aria-hidden="true" />
           <button type="button" className="sty-card sty-create" onClick={() => nav(user ? '/app/profile?partner=1' : '/login')} title={t('create_business')}>
             <span className="sty-icon sty-create-ic"><img src="/business.gif" alt={t('create_business')} /></span>
             <span className="sty-label">{t('create_business')}</span>
           </button>
+          <AutoScroll className="stc-row">
           {stypes.map((c) => (
             <button key={c.type} type="button" className="sty-card" onClick={() => nav('/app/stores/' + c.type)} title={lang === 'ar' ? c.label_ar : lang === 'en' ? c.label_en : c.label_fr}>
               <span className="sty-icon"><img src={c.icon} alt="" loading="lazy" /></span>
@@ -925,12 +928,15 @@ export function ClientHome() {
             </button>
           ))}
         </AutoScroll>
+        </div>
       ) : (
-        <AutoScroll className="stc-row">
+        <div className="stc-zone">
+          <div className="stc-mask" aria-hidden="true" />
           <button type="button" className="sty-card sty-create" onClick={() => nav(user ? '/app/profile?partner=1' : '/login')} title={t('create_business')}>
             <span className="sty-icon sty-create-ic"><img src="/business.gif" alt={t('create_business')} /></span>
             <span className="sty-label">{t('create_business')}</span>
           </button>
+          <AutoScroll className="stc-row">
           {STORE_CARDS.map((c) => (
             <button key={c.type} type="button" className="sty-card" onClick={() => nav('/app/stores/' + c.type)}>
               <span className="sty-icon"><img src={c.img} alt="" loading="lazy" /></span>
@@ -938,6 +944,7 @@ export function ClientHome() {
             </button>
           ))}
         </AutoScroll>
+        </div>
       )}
 
       {/* 🛍️ v2026.10.04.4 — produits de l'accueil : MÊME grille 2 colonnes que les magasins
@@ -1809,8 +1816,9 @@ export function ClientProfile() {
   const nav = useNavigate();
   const { user, logout, setUser } = useAuth();
   const [pOpen, setPOpen] = useState(false);                                  // formulaire « Devenir partenaire »
-  useEffect(() => {   // 💼 v2026.10.08.18 : boule « Crée ton business » → ?partner=1 ouvre le formulaire
-    if (new URLSearchParams(window.location.search).get('partner') === '1' && user?.role === 'client') setPOpen(true);
+  useEffect(() => {   // 💼 v2026.10.08.19 : boule « Mon business » → ?partner=1 ouvre le formulaire pour TOUS
+    // (même un marchand qui a déjà un magasin : il peut créer PLUSIEURS espaces)
+    if (new URLSearchParams(window.location.search).get('partner') === '1' && user) setPOpen(true);
   }, [user?.role]);
   const [pForm, setPForm] = useState({ name: '', type: 'restaurant', phone: '', address: '', lat: null, lng: null });
   const [pBusy, setPBusy] = useState(false);
