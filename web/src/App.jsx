@@ -5,7 +5,7 @@ import { ErrorBoundary } from './ui.jsx';
 import { SwapModal, Spinner } from './ui.jsx';
 import { Login, Register } from './pages/auth.jsx';
 import Legal from './pages/legal.jsx';
-import { ClientLayout, ClientHome, StorePage, CartPage, ClientOrders, ClientProfile, MarketPage, ListingDetailPage, ChatsPage, ChatPage, SellerProfilePage, SalesPage, ServiceRequestPage, DeliveryPage, StoresByTypePage, DepartmentPage, PublishPage, NotificationsPage, SettingsPage, StatusPage } from './pages/client.jsx';
+import { ClientLayout, ClientHome, StorePage, CartPage, ClientOrders, ClientProfile, MarketPage, ListingDetailPage, ChatsPage, ChatPage, SellerProfilePage, SalesPage, ServiceRequestPage, DeliveryPage, DeliveryRequestPage, StoresByTypePage, DepartmentPage, PublishPage, NotificationsPage, SettingsPage, StatusPage } from './pages/client.jsx';
 import MerchantApp from './pages/merchant.jsx';
 import DriverApp from './pages/driver.jsx';
 import AdminApp from './pages/superadmin.jsx';
@@ -72,7 +72,7 @@ export default function App() {
               <SwapModal />
               {/* Version du front — sert à VÉRIFIER que l'app charge bien la dernière version
                   (badge discret en bas à droite de chaque écran). À incrémenter à chaque déploiement. */}
-              <div style={{ position: 'fixed', bottom: 3, right: 8, fontSize: 10, opacity: 0.45, zIndex: 9999, pointerEvents: 'none' }}>YallaLiv v2026.10.08.20</div>
+              <div style={{ position: 'fixed', bottom: 3, right: 8, fontSize: 10, opacity: 0.45, zIndex: 9999, pointerEvents: 'none' }}>YallaLiv v2026.10.08.21</div>
               <Routes>
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
@@ -90,7 +90,8 @@ export default function App() {
                   <Route path="seller/:id" element={<SellerProfilePage />} />
                   <Route path="sales" element={<SalesPage />} />
                   <Route path="service" element={<ServiceRequestPage />} />
-                  <Route path="delivery" element={<DeliveryPage />} />   {/* 🛵 v2026.10.08.20 : espace livraison */}
+                  <Route path="delivery" element={<DeliveryPage />} />   {/* 🛵 v2026.10.08.20 : espace livraison (accès après confirmation) */}
+                  <Route path="delivery-request" element={<DeliveryRequestPage />} />   {/* 📝 v2026.10.08.21 : demande d'espace livraison */}
                   <Route path="stores/:type" element={<StoresByTypePage />} />
                   <Route path="dept/:id" element={<DepartmentPage />} />
                   <Route path="publish" element={<PublishPage />} />

@@ -962,6 +962,60 @@ app.get('/api/delivery/mine', auth, requireRole('client', 'merchant', 'superadmi
   });
 }));
 
+// 🛵 v2026.10.08.21 — ESPACE LIVRAISON : demande de compte (via « Mon business »).
+// Le formulaire (type, nom, téléphone, adresse, abonnement) crée une demande PENDING
+// → message au SUPERADMIN → après confirmation, l'utilisateur accède à son espace
+// via le bouton $ (comme les espaces magasin).
+app.post('/api/delivery/request', auth, requireRole('client', 'merchant'), h(async (req, res) => {
+  const ex = await get('SELECT * FROM delivery_accounts WHERE user_id=?', [req.user.id]);
+  if (ex && ex.status === 'approved') return res.status(400).json({ error: 'Vous avez déjà un espace livraison' });
+  if (ex && ex.status === 'pending') return res.status(400).json({ error: 'Votre demande est déjà en attente de confirmation' });
+  const name = String(req.body.name || '').trim().slice(0, 80);
+  const phone = String(req.body.phone || req.user.phone || '').trim();
+  const address = String(req.body.address || '').trim().slice(0, 200);
+  const validTypes = ['restaurant', 'market', 'pharmacy', 'home', 'clothes', 'electronics', 'appliance'];
+  const type = validTypes.includes(req.body.type) ? req.body.type : 'market';
+  const subscription = 'a_definir';   // 💳 type d'abonnement : à spécifier plus tard
+  if (name.length < 2) return res.status(400).json({ error: 'Nom du magasin requis' });
+  if (phone.replace(/\D/g, '').length < 10) return res.status(400).json({ error: 'Téléphone invalide (ex. : 0100 123 4567)' });
+  if (address.length < 5) return res.status(400).json({ error: 'Adresse du magasin requise' });
+  const r = await run('INSERT INTO delivery_accounts(user_id,name,type,phone,address,subscription,status,created_at) VALUES(?,?,?,?,?,?,?,?) RETURNING id',
+    [req.user.id, name, type, phone, address, subscription, 'pending', Date.now()]);
+  try {
+    const su = await all("SELECT id FROM users WHERE role='superadmin'");
+    pushTo(su.map((u) => u.id), '🛵 Nouvelle demande d\'espace livraison', name.slice(0, 60) + ' — à confirmer', '/admin');
+  } catch {}
+  res.json({ id: r.rows[0].id, status: 'pending' });
+}));
+
+// Mon compte espace livraison (null = aucun · pending = en attente · approved = accès)
+app.get('/api/delivery/account', auth, h(async (req, res) => {
+  const a = await get('SELECT * FROM delivery_accounts WHERE user_id=?', [req.user.id]);
+  res.json({ account: a || null });
+}));
+
+// 🛵 SUPERADMIN : liste des demandes d'espaces livraison
+app.get('/api/admin/delivery-accounts', auth, requireRole('superadmin'), h(async (req, res) => {
+  const rows = await all(`SELECT a.*, u.name AS owner_name, u.email AS owner_email
+    FROM delivery_accounts a JOIN users u ON u.id = a.user_id
+    ORDER BY (a.status='pending') DESC, a.created_at DESC`);
+  res.json({ accounts: rows });
+}));
+
+// 🛵 SUPERADMIN : confirmer / refuser (comme les magasins)
+app.put('/api/admin/delivery-accounts/:id/status', auth, requireRole('superadmin'), h(async (req, res) => {
+  const a = await get('SELECT * FROM delivery_accounts WHERE id=?', [req.params.id]);
+  if (!a) return res.status(404).json({ error: 'Demande introuvable' });
+  const status = req.body.status;
+  if (!['approved', 'rejected', 'pending'].includes(status)) return res.status(400).json({ error: 'Statut invalide' });
+  await run('UPDATE delivery_accounts SET status=?, decided_at=? WHERE id=?', [status, Date.now(), a.id]);
+  try {
+    if (status === 'approved') pushTo([a.user_id], '🛵 Espace livraison confirmé ✅', 'Votre espace livraison est prêt — ouvrez-le via le bouton $', '/app/delivery');
+    if (status === 'rejected') pushTo([a.user_id], '🛵 Espace livraison refusé', 'Votre demande a été refusée. Contactez le support.', '');
+  } catch {}
+  res.json({ ok: true });
+}));
+
 app.get('/api/ads', h(async (req, res) => {
   res.json({ ads: await all('SELECT id, image, link FROM ads WHERE active=1 ORDER BY created_at DESC LIMIT 10') });
 }));

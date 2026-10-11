@@ -172,14 +172,18 @@ function SpaceSwitch() {
   const t = useT();
   const nav = useNavigate();
   const [open, setOpen] = useState(false);
-  if (!user || user.role === 'client') return null;
+  const [dlvAcc, setDlvAcc] = useState(null);   // 🛵 v2026.10.08.21 : espace livraison (compte confirmé par le superadmin)
+  useEffect(() => { api('/delivery/account').then((d) => setDlvAcc(d.account)).catch(() => {}); }, []);
+  const hasDelivery = !!dlvAcc && dlvAcc.status === 'approved';
+  if (!user || (user.role === 'client' && !hasDelivery)) return null;   // le $ apparaît dès qu'un 2e espace existe (magasin OU livraison)
   const spaces = [
     { k: 'app', icon: '🛍️', label: t('switch_client'), go: () => nav('/app') },
     ...(user.role === 'merchant' ? [{ k: 'merchant', icon: '🏪', label: t('switch_store'), go: () => nav('/merchant') }] : []),
     ...(user.role === 'driver' ? [{ k: 'driver', icon: '🛵', label: t('switch_driver'), go: () => nav('/driver') }] : []),
     ...(user.role === 'superadmin' ? [{ k: 'admin', icon: '👑', label: t('switch_admin'), go: () => nav('/admin') }] : []),
   ];
-  const cur = window.location.pathname.startsWith('/merchant') ? 'merchant' : window.location.pathname.startsWith('/driver') ? 'driver' : window.location.pathname.startsWith('/admin') ? 'admin' : 'app';
+  const cur = window.location.pathname.startsWith('/merchant') ? 'merchant' : window.location.pathname.startsWith('/driver') ? 'driver' : window.location.pathname.startsWith('/admin') ? 'admin' : window.location.pathname.startsWith('/app/delivery') ? 'delivery' : 'app';
+  if (hasDelivery) spaces.splice(1, 0, { k: 'delivery', icon: '🛵', label: t('switch_delivery'), go: () => nav('/app/delivery') });
   return (
     <div style={{ position: 'relative' }}>
       <button type="button" className="head-icon space-btn" onClick={() => setOpen((v) => !v)} title={t('my_spaces')} aria-label={t('my_spaces')}>
@@ -684,6 +688,7 @@ export function ClientHome() {
   const [products, setProducts] = useState(null);
   const [ads, setAds] = useState(null);
   const [stypes, setStypes] = useState(null);   // 🏬 v2026.09.30.5 : cartes magasins (superadmin)
+  const [bizChoice, setBizChoice] = useState(false);   // 💼 v2026.10.08.21 : la boule demande — magasin OU services de livraison ?
   const [immo, setImmo] = useState(null);      // 🏢🚗 immobilier + automotive
   const [gDetail, setGDetail] = useState(null);   // fiche produit ouverte depuis la recherche
   const [gQty, setGQty] = useState(1);
@@ -831,7 +836,6 @@ export function ClientHome() {
   };
 
   const hour = new Date().getHours();
-  const greet = hour < 12 ? t('good_morning') : hour < 18 ? t('good_afternoon') : t('good_evening');
 
   return (
     <div>
@@ -847,7 +851,6 @@ export function ClientHome() {
             <div className="logo">🚀</div>
             <div>
               <div className="brand-name" style={{ color: '#fff' }}>Yalla<span style={{ color: '#a7f3d0' }}>Liv</span></div>
-              <div className="xsmall" style={{ color: 'rgba(255,255,255,.88)' }}>{greet} {user?.name?.split(' ')[0]} 👋</div>
             </div>
           </div>
           <div className="row" style={{ gap: 6 }}>
@@ -879,12 +882,27 @@ export function ClientHome() {
         />
       </div>
 
-      {/* 🛵 Bandeau : demander un service à un livreur général (acceptation volontaire) */}
-      <button type="button" className="svc-banner" onClick={() => nav('/app/delivery')}>   {/* 🛵 v2026.10.08.20 : hub Espace livraison */}
-        <span className="svc-emoji">🛵</span>
-        <span className="grow ellipsis" style={{ minWidth: 0, fontWeight: 900, fontSize: 14, color: '#fff' }}>{t('svc_title')}</span>
-        <span className="svc-cta">{t('svc_cta')} →</span>
-      </button>
+      {/* 💼 v2026.10.08.21 — la boule « Mon business » demande D'ABORD : ouvrir un MAGASIN
+          (formulaire existant) ou avoir besoin des SERVICES DE LIVRAISON (formulaire
+          dédié → demande au superadmin → confirmation → accès via le bouton $). */}
+      <Modal open={bizChoice} onClose={() => setBizChoice(false)} title={'💼 ' + t('create_business')}>
+        <div className="col" style={{ gap: 10 }}>
+          <button type="button" className="card row dlv-btn" onClick={() => { setBizChoice(false); nav(user ? '/app/profile?partner=1' : '/login'); }}>
+            <span className="dlv-ic">🏪</span>
+            <span className="grow" style={{ textAlign: 'start' }}>
+              <span style={{ display: 'block', fontWeight: 900 }}>{t('biz_open_store')}</span>
+              <span className="muted small">{t('biz_open_store_sub')}</span>
+            </span>
+          </button>
+          <button type="button" className="card row dlv-btn" onClick={() => { setBizChoice(false); nav(user ? '/app/delivery-request' : '/login'); }}>
+            <span className="dlv-ic">🛵</span>
+            <span className="grow" style={{ textAlign: 'start' }}>
+              <span style={{ display: 'block', fontWeight: 900 }}>{t('biz_need_delivery')}</span>
+              <span className="muted small">{t('biz_need_delivery_sub')}</span>
+            </span>
+          </button>
+        </div>
+      </Modal>
 
       {/* 🧃 Publicités (publiées depuis l'espace superadmin) — défilement automatique + manuel */}
       {ads && ads.length > 0 && (
@@ -917,7 +935,7 @@ export function ClientHome() {
            « Devenir partenaire » pour TOUS — un utilisateur peut créer PLUSIEURS espaces. */
         <div className="stc-zone">
           <div className="stc-mask" aria-hidden="true" />
-          <button type="button" className="sty-card sty-create" onClick={() => nav(user ? '/app/profile?partner=1' : '/login')} title={t('create_business')}>
+          <button type="button" className="sty-card sty-create" onClick={() => setBizChoice(true)} title={t('create_business')}>
             <span className="sty-icon sty-create-ic"><img src="/business.gif" alt={t('create_business')} /></span>
             <span className="sty-label">{t('create_business')}</span>
           </button>
@@ -933,7 +951,7 @@ export function ClientHome() {
       ) : (
         <div className="stc-zone">
           <div className="stc-mask" aria-hidden="true" />
-          <button type="button" className="sty-card sty-create" onClick={() => nav(user ? '/app/profile?partner=1' : '/login')} title={t('create_business')}>
+          <button type="button" className="sty-card sty-create" onClick={() => setBizChoice(true)} title={t('create_business')}>
             <span className="sty-icon sty-create-ic"><img src="/business.gif" alt={t('create_business')} /></span>
             <span className="sty-label">{t('create_business')}</span>
           </button>
@@ -2888,6 +2906,7 @@ export function SalesPage() {
    Les comptes des livreurs généraux sont créés par le SUPERADMIN (onglet 🛵 Livreurs généraux). */
 export function DeliveryPage() {
   const t = useT(); const nav = useNavigate(); const { user } = useAuth();
+  const [acct, setAcct] = useState(null);           // 🛵 v2026.10.08.21 : accès UNIQUEMENT après confirmation du superadmin
   const [view, setView] = useState('ask');          // ask | mine | history
   const [nearby, setNearby] = useState(null);
   const [mapOpen, setMapOpen] = useState(false);    // 🗺️ carte des livreurs proches
@@ -2915,7 +2934,7 @@ export function DeliveryPage() {
     setBusy(false);
   };
   const loadMine = () => api('/delivery/mine').then(setMine).catch((e) => toast(e.message, 'err'));
-  useEffect(() => { loadMine(); }, []);
+  useEffect(() => { api('/delivery/account').then((d) => setAcct(d.account)).catch(() => setAcct(null)); loadMine(); }, []);
   usePoll(loadMine, 6000);
 
   const myDrivers = (mine?.ongoing || []).filter((o) => o.driver_pos).map((o) => ({
@@ -2935,7 +2954,12 @@ export function DeliveryPage() {
   return (
     <div>
       <div className="topbar"><BackBtn /><div className="grow"><div className="brand-name">🛵 {t('delivery_title')}</div></div></div>
-      {!user ? <Empty e="🔐" text={t('login_profile_cta')} /> : (<>
+      {!user ? <Empty e="🔐" text={t('login_profile_cta')} /> : !acct || acct.status !== 'approved' ? (
+        <div className="card" style={{ padding: 18, textAlign: 'center' }}>
+          <Empty e={acct && acct.status === 'pending' ? '⏳' : '🔒'} text={acct && acct.status === 'pending' ? t('awaiting_confirm') : t('no_deliv_account')} />
+          {(!acct || acct.status !== 'pending') && <button className="btn soft block mt8" onClick={() => nav('/app')}>💼 {t('create_business')}</button>}
+        </div>
+      ) : (<>
       <div className="col mb12" style={{ gap: 8 }}>
         <BigBtn emoji="🛵" label={t('ask_driver')} sub={t('ask_driver_sub')} on={view === 'ask'} onClick={() => setView('ask')} />
         <BigBtn emoji="📋" label={t('my_deliveries')} sub={((mine?.ongoing) || []).length + ' ' + t('ongoing_count')} on={view === 'mine'} onClick={() => { setView('mine'); loadMine(); }} />
@@ -3004,6 +3028,70 @@ export function DeliveryPage() {
           ? <div className="drv-map"><DriversMap drivers={myDrivers} /></div>
           : <Empty e="🛵" text={t('no_assigned_yet')} />}
       </Modal>
+    </div>
+  );
+}
+
+/* 📝 v2026.10.08.21 — demande d'ESPACE LIVRAISON (via Mon business → Services de livraison).
+   Formulaire : type de magasin, nom, téléphone, adresse, type d'abonnement (à définir).
+   À l'envoi : la demande part au SUPERADMIN (message dans son espace) et attend sa
+   confirmation — comme les magasins. Après confirmation : accès via le bouton $. */
+export function DeliveryRequestPage() {
+  const t = useT(); const nav = useNavigate(); const { user } = useAuth();
+  const [f, setF] = useState({ type: 'market', name: '', phone: user?.phone || '', address: '' });
+  const [busy, setBusy] = useState(false);
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const submit = async () => {
+    if (busy) return;
+    if (f.name.trim().length < 2) return toast(t('store_name') + ' ?', 'err');
+    if (f.phone.replace(/\D/g, '').length < 10) return toast(t('invalid_phone') || 'Téléphone invalide', 'err');
+    if (f.address.trim().length < 5) return toast(t('address') + ' ?', 'err');
+    setBusy(true);
+    try {
+      await api('/delivery/request', { method: 'POST', body: { type: f.type, name: f.name.trim(), phone: f.phone.trim(), address: f.address.trim() } });
+      toast(t('deliv_req_sent'), 'ok');
+      nav('/app');
+    } catch (ex) { toast(ex.message, 'err'); }
+    setBusy(false);
+  };
+  return (
+    <div>
+      <div className="topbar"><BackBtn /><div className="grow"><div className="brand-name">🛵 {t('deliv_req_title')}</div></div></div>
+      <div className="card mb12" style={{ padding: 14 }}>
+        <div className="field">
+          <label className="label">🏬 {t('store_type')}</label>
+          <select className="select" value={f.type} onChange={(e) => set('type', e.target.value)}>
+            <option value="restaurant">🍽️ {t('type_restaurant')}</option>
+            <option value="market">🛒 {t('type_market')}</option>
+            <option value="pharmacy">💊 {t('type_pharmacy')}</option>
+            <option value="home">🛋️ {t('type_home')}</option>
+            <option value="clothes">👕 {t('type_clothes')}</option>
+            <option value="electronics">📱 {t('type_electronics')}</option>
+            <option value="appliance">🧺 {t('type_appliance')}</option>
+          </select>
+        </div>
+        <div className="field">
+          <label className="label">🏪 {t('store_name')}</label>
+          <input className="input" value={f.name} onChange={(e) => set('name', e.target.value)} placeholder="ex. : Colis Express Alexandrie" />
+        </div>
+        <div className="field">
+          <label className="label">📞 {t('phone')}</label>
+          <input className="input" dir="ltr" type="tel" value={f.phone} onChange={(e) => set('phone', e.target.value)} placeholder="0100 123 4567" />
+        </div>
+        <div className="field">
+          <label className="label">📍 {t('address')}</label>
+          <textarea className="textarea" rows={2} value={f.address} onChange={(e) => set('address', e.target.value)} placeholder="12 rue Saad Zaghloul, Alexandrie" />
+        </div>
+        <div className="field">
+          <label className="label">💳 {t('subscription')}</label>
+          <select className="select" value="a_definir" disabled>
+            <option value="a_definir">{t('subscription_tbd')}</option>
+          </select>
+          <div className="muted xsmall mt4">{t('subscription_note')}</div>
+        </div>
+        <p className="muted small" style={{ margin: '8px 0 0' }}>⏳ {t('deliv_req_note')}</p>
+        <button className="btn primary block mt8" disabled={busy} onClick={submit}>{busy ? '…' : '✅ ' + t('deliv_req_submit')}</button>
+      </div>
     </div>
   );
 }

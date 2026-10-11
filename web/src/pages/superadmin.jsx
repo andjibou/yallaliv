@@ -10,13 +10,16 @@ export default function AdminApp() {
   const { user, logout } = useAuth();
   const [tab, setTab] = useState('dash');
   const [pendStores, setPendStores] = useState(0);
+  const [pendDA, setPendDA] = useState(0);   // 📦 demandes d'espaces livraison en attente
   usePoll(() => api('/admin/stores').then((d) => setPendStores(d.stores.filter((s) => s.status === 'pending').length)).catch(() => {}), 8000);
+  usePoll(() => api('/admin/delivery-accounts').then((d) => setPendDA(d.accounts.filter((a) => a.status === 'pending').length)).catch(() => {}), 8000);
   const tabs = [
     { id: 'dash', label: '📊 ' + t('sa_dashboard') },
     { id: 'users', label: '👥 ' + t('sa_users') },
     { id: 'stores', label: '🏪 ' + t('sa_stores') + (pendStores ? ` 🔴${pendStores}` : '') },
     { id: 'orders', label: '🧾 ' + t('sa_orders') },
     { id: 'gdrivers', label: '🛵 ' + t('general_drivers') },
+    { id: 'daccounts', label: '📦 ' + t('sa_daccounts') + (pendDA ? ` 🔴${pendDA}` : '') },   // 📦 v2026.10.08.21 : demandes d'espaces livraison
     { id: 'promos', label: '🎁 ' + t('promos') },
     { id: 'reports', label: '🚨 ' + t('reports_tab') },   // 🚨 v2026.09.26.2 — modération Marché
     { id: 'ads', label: '📣 ' + t('ads_tab') },   // 📣 v2026.09.27.1 — pubs de l'accueil
@@ -57,6 +60,7 @@ export default function AdminApp() {
         {tab === 'stores' && <Stores />}
         {tab === 'orders' && <Orders />}
         {tab === 'gdrivers' && <GeneralDrivers />}
+        {tab === 'daccounts' && <DeliveryAccounts />}   {/* 📦 v2026.10.08.21 */}
         {tab === 'promos' && <Promos />}
         {tab === 'reports' && <Reports />}
         {tab === 'ads' && <Ads />}
@@ -275,6 +279,44 @@ function Users() {
 }
 
 /* ---------- Stores ---------- */
+/* 📦 v2026.10.08.21 — ESPACES LIVRAISON : demandes (via Mon business) à confirmer,
+   comme les magasins. ✅ confirmé → l'utilisateur voit « 🛵 Espace livraison » dans son $. */
+function DeliveryAccounts() {
+  const t = useT();
+  const [accounts, setAccounts] = useState(null);
+  usePoll(() => api('/admin/delivery-accounts').then((d) => setAccounts(d.accounts)).catch(() => {}), 8000);
+  const setStatus = async (a, status) => {
+    try {
+      await api(`/admin/delivery-accounts/${a.id}/status`, { method: 'PUT', body: { status } });
+      toast(status === 'approved' ? '✅ Espace livraison confirmé' : '❌ Demande refusée');
+      api('/admin/delivery-accounts').then((d) => setAccounts(d.accounts)).catch(() => {});
+    } catch (ex) { toast(ex.message, 'err'); }
+  };
+  if (!accounts) return <Spinner />;
+  if (!accounts.length) return <Empty e="📦" text="Aucune demande d'espace livraison" />;
+  return (
+    <div>
+      {accounts.map((a) => (
+        <div key={a.id} className="card row wrap mb12" style={{ cursor: 'default', ...(a.status === 'pending' ? { border: '2px solid #f59e0b', background: 'linear-gradient(0deg,#fffbeb,#fffbeb)' } : {}) }}>
+          <div className="store-emoji" style={{ background: '#0ea5e9', width: 48, height: 48, fontSize: 25 }}>🛵</div>
+          <div className="grow">
+            <div style={{ fontWeight: 800 }}>{a.name} <span className={'badge b-' + a.status}>{t(a.status === 'approved' ? 'active' : a.status === 'pending' ? 'pending' : 'suspended')}</span></div>
+            <div className="muted small">🏬 {t('type_' + a.type)} · 👤 {a.owner_name} ({a.owner_email})</div>
+            <div className="muted small">📞 {a.phone} · 📍 {a.address}</div>
+          </div>
+          <div className="row" style={{ gap: 6 }}>
+            {a.status === 'pending' && <>
+              <button className="btn primary sm" onClick={() => setStatus(a, 'approved')}>✅ {t('approve')}</button>
+              <button className="btn danger sm" onClick={() => setStatus(a, 'rejected')}>❌ {t('reject')}</button>
+            </>}
+            {a.status === 'approved' && <button className="btn danger sm" onClick={() => setStatus(a, 'pending')}>↩️ {t('pending')}</button>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Stores() {
   const t = useT();
   const { lang } = useLang();
