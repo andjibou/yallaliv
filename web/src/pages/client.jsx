@@ -565,17 +565,24 @@ function AutoScroll({ children, className = '', mode = 'loop', delay = 3500 }) {
   const [loop, setLoop] = useState(false);   // duplique le contenu seulement si la ligne déborde
   useEffect(() => {
     if (mode === 'page') {   // 📣 pubs : changement d'un seul coup (comme avant)
+      const snap = () => {   // 🔧 v2026.10.08.23 : quel que soit le glissé, on réaligne sur une pub ENTIÈRE
+        const el = ref.current; if (!el) return;
+        const cw = el.clientWidth;
+        if (cw > 0 && el.scrollWidth > cw) el.scrollTo({ left: Math.round(el.scrollLeft / cw) * cw, behavior: 'smooth' });
+      };
+      ref.current?.addEventListener('scrollend', snap);
       const tm = setInterval(() => {
         if (Date.now() < pause.current) return;
         const el = ref.current;
         if (!el || el.scrollWidth <= el.clientWidth) return;
-        const step = el.clientWidth;   // v2026.10.04.8 : la pub change EN ENTIER (pas à moitié)
-        const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 8;
-        el.scrollTo({ left: atEnd ? 0 : el.scrollLeft + step, behavior: 'smooth' });
+        const cw = el.clientWidth;
+        const page = Math.round(el.scrollLeft / cw);   // 🔧 v23 : on repart TOUJOURS d'une page ENTIÈRE — un glissé à moitié ne laisse plus un bout de l'ancienne pub visible
+        const atEnd = (page + 1) * cw >= el.scrollWidth - 8;
+        el.scrollTo({ left: atEnd ? 0 : (page + 1) * cw, behavior: 'smooth' });
       }, delay);
-      return () => clearInterval(tm);
+      return () => { clearInterval(tm); ref.current?.removeEventListener('scrollend', snap); };
     }
-    let raf = 0, last = 0;
+    let raf = 0, last = 0, lastScroll = -1, lastProg = 0;
     const tick = (ts) => {
       const el = ref.current;
       if (el) {
@@ -588,10 +595,20 @@ function AutoScroll({ children, className = '', mode = 'loop', delay = 3500 }) {
             if (move >= 1) {
               el.scrollLeft += move;
               acc.current -= move;
-              const half = el.scrollWidth / 2;
-              if (el.scrollLeft >= half - 1) el.scrollLeft -= half;   // 🔄 boucle invisible (sans saut)
+              // 🔧 v23 : période EXACTE = écart entre la 1re carte du duplicata et celle de
+              // l'original → la boucle repart PILE au début : plus aucune carte ne reste
+              // coincée à moitié au bord (bug « Immobilier & Automotive ne sortait pas »)
+              const nodes = el.querySelectorAll('.asc-copy > *');
+              const P = (nodes.length >= 4 && nodes.length % 2 === 0) ? nodes[nodes.length / 2].offsetLeft - nodes[0].offsetLeft : 0;
+              if (P > 1) { if (el.scrollLeft >= P) el.scrollLeft -= P; }
+              else { const half = el.scrollWidth / 2; if (el.scrollLeft >= half - 1) el.scrollLeft -= half; }
             }
           }
+          // 🚨 v23 watchdog : hors pause, la ligne DOIT avancer — si le navigateur ignore les
+          // écritures (geste tactile resté ouvert…), réveil dur : la ligne repart du début
+          // au lieu de rester figée avec des boules qui ne sortent jamais
+          if (el.scrollLeft !== lastScroll) { lastScroll = el.scrollLeft; lastProg = ts; }
+          else if (ts - lastProg > 3000) { lastProg = ts; lastScroll = -1; el.style.overflowX = 'hidden'; setTimeout(() => { el.style.overflowX = 'auto'; }, 60); }
           last = ts;
         } else { last = 0; acc.current = 0; }
       }
@@ -689,6 +706,11 @@ export function ClientHome() {
   const [ads, setAds] = useState(null);
   const [stypes, setStypes] = useState(null);   // 🏬 v2026.09.30.5 : cartes magasins (superadmin)
   const [bizChoice, setBizChoice] = useState(false);   // 💼 v2026.10.08.21 : la boule demande — magasin OU services de livraison ?
+  const [dlvOn, setDlvOn] = useState(false);   // 🛵 v2026.10.08.23 : le bandeau course n'apparaît QUE pour un espace livraison CONFIRMÉ
+  useEffect(() => {   // 🛵 v23 : bandeau visible seulement une fois l'espace livraison confirmé par le superadmin
+    if (!user) { setDlvOn(false); return; }
+    api('/delivery/account').then((d) => setDlvOn(!!d.account && d.account.status === 'approved')).catch(() => setDlvOn(false));
+  }, [user?.id]);
   const [immo, setImmo] = useState(null);      // 🏢🚗 immobilier + automotive
   const [gDetail, setGDetail] = useState(null);   // fiche produit ouverte depuis la recherche
   const [gQty, setGQty] = useState(1);
@@ -794,7 +816,7 @@ export function ClientHome() {
     // → armement rapide (900 ms) + re-mesure périodique : la mesure FRAÎCHE au moment du gel
     //   reste la vraie sécurité, peu importe ce qui charge encore.
     const armTm = setTimeout(() => { armed = true; if (!frozen && !inlineMode) measure(); paint(); }, 900);
-    const measIt = setInterval(() => { if (!frozen && !inlineMode) { measure(); paint(); } }, 800);   // suit le chargement des images
+    const measIt = setInterval(() => { if (!frozen) { if (!inlineMode) measure(); paint(); } }, 800);   // 🐛 v2026.10.08.23 : peint AUSSI en mode « page courte » — une page devenue assez longue (images/annonces chargées) REDEVIENT overlay : avant, le déroulé restait coincé et ne sortait plus
     return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onResize); clearInterval(measIt); clearTimeout(armTm); unfreeze(); };
   }, [immo]);
   const [favs, setFavs] = useState(() => loadPFavs());   // ❤️ v2026.10.04.4 : favoris produits (accueil)
@@ -904,10 +926,11 @@ export function ClientHome() {
         </div>
       </Modal>
 
-      {/* 🛵 v2026.10.08.22 — bandeau « Besoin d'une course ? » DE RETOUR à sa place (retiré
-          par erreur en v2026.10.08.21) : entrée directe de l'espace livraison. La page gère
-          tous les états : 🔒 pas de compte (→ Mon business) · ⏳ en attente · hub si confirmé. */}
-      <button type="button" className="svc-banner" onClick={() => nav(user ? '/app/delivery' : '/login')} title={t('svc_title')}>
+      {/* 🛵 v2026.10.08.23 — bandeau « Besoin d'une course ? » réservé aux utilisateurs dont
+          l'espace livraison « 🛵 Espace livraison » est CONFIRMÉ (les autres passent par
+          💼 Mon business → 🛵 Besoin des services de livraison). */}
+      {dlvOn && (
+      <button type="button" className="svc-banner" onClick={() => nav('/app/delivery')} title={t('svc_title')}>
         <span className="svc-emoji">🛵</span>
         <span style={{ flex: 1, minWidth: 0 }}>
           <span style={{ display: 'block', fontWeight: 900, fontSize: 15.5, color: '#fff' }}>{t('svc_title')}</span>
@@ -915,6 +938,7 @@ export function ClientHome() {
         </span>
         <span className="svc-cta">{t('svc_cta')}</span>
       </button>
+      )}
 
       {/* 🧃 Publicités (publiées depuis l'espace superadmin) — défilement automatique + manuel */}
       {ads && ads.length > 0 && (
@@ -2953,13 +2977,11 @@ export function DeliveryPage() {
     id: o.driver.id, name: o.driver.name, phone: o.driver.phone, lat: o.driver_pos.lat, lng: o.driver_pos.lng, general: true, online: true,
   }));
 
-  const BigBtn = ({ emoji, label, sub, on, onClick }) => (
-    <button type="button" className={'card row dlv-btn' + (on ? ' on' : '')} onClick={onClick}>
-      <span className="dlv-ic">{emoji}</span>
-      <span className="grow" style={{ textAlign: 'start' }}>
-        <span style={{ display: 'block', fontWeight: 900 }}>{label}</span>
-        <span className="muted small">{sub}</span>
-      </span>
+  const BigBtn = ({ emoji, label, sub, on, onClick }) => (   // ↔️ v2026.10.08.23 : boutons du hub HORIZENTAUX (côte à côte)
+    <button type="button" className={'card dlv-btn' + (on ? ' on' : '')} title={sub} onClick={onClick}
+      style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '11px 4px 9px', textAlign: 'center' }}>
+      <span className="dlv-ic" style={{ width: 38, height: 38, fontSize: 19 }}>{emoji}</span>
+      <span style={{ fontWeight: 900, fontSize: 12, lineHeight: 1.25 }}>{label}</span>
     </button>
   );
 
@@ -2972,7 +2994,7 @@ export function DeliveryPage() {
           {(!acct || acct.status !== 'pending') && <button className="btn soft block mt8" onClick={() => nav('/app')}>💼 {t('create_business')}</button>}
         </div>
       ) : (<>
-      <div className="col mb12" style={{ gap: 8 }}>
+      <div className="row mb12" style={{ gap: 8, alignItems: 'stretch' }}>
         <BigBtn emoji="🛵" label={t('ask_driver')} sub={t('ask_driver_sub')} on={view === 'ask'} onClick={() => setView('ask')} />
         <BigBtn emoji="📋" label={t('my_deliveries')} sub={((mine?.ongoing) || []).length + ' ' + t('ongoing_count')} on={view === 'mine'} onClick={() => { setView('mine'); loadMine(); }} />
         <BigBtn emoji="🕓" label={t('deliv_history')} sub={((mine?.history) || []).length} on={view === 'history'} onClick={() => { setView('history'); loadMine(); }} />
