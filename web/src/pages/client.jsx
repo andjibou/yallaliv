@@ -5,6 +5,7 @@ import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast
 import { BottomNav, CartBar, StatusBadge, PayBadge, Stepper, Empty, Spinner, BackBtn, LangSwitch, Modal, Stars, SuggestBox, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import PickMap, { reverseGeocode, geocodeSearch } from '../PickMap.jsx';
+import DriversMap from '../DriversMap.jsx';   // 🛵 v2026.10.08.20 : espace livraison — carte des livreurs
 import AccountSettings from '../AccountSettings.jsx';
 import { StoresMap } from '../RouteMap.jsx';
 
@@ -879,7 +880,7 @@ export function ClientHome() {
       </div>
 
       {/* 🛵 Bandeau : demander un service à un livreur général (acceptation volontaire) */}
-      <button type="button" className="svc-banner" onClick={() => nav('/app/service')}>
+      <button type="button" className="svc-banner" onClick={() => nav('/app/delivery')}>   {/* 🛵 v2026.10.08.20 : hub Espace livraison */}
         <span className="svc-emoji">🛵</span>
         <span className="grow ellipsis" style={{ minWidth: 0, fontWeight: 900, fontSize: 14, color: '#fff' }}>{t('svc_title')}</span>
         <span className="svc-cta">{t('svc_cta')} →</span>
@@ -2878,12 +2879,144 @@ export function SalesPage() {
 }
 
 // ================= 🛵 Demande de service à un livreur général (v2026.09.27.1) =================
+/* ═══ 🛵 v2026.10.08.20 — ESPACE LIVRAISON ═══
+   Hub pour les utilisateurs qui veulent des SERVICES DE LIVRAISON (livreurs généraux) :
+   • 🛵 Demander un livreur → 🗺️ Ouvrir la carte (livreurs généraux à MOINS DE 2,5 km de
+     sa position) · 📦 Nouvelle livraison (receveur + adresse + montant à payer ou déjà payé)
+   • 📋 Mes livraisons → livraisons EN COURS + carte des livreurs chargés de les récupérer/livrer
+   • 🕓 Histoire → tout l'historique
+   Les comptes des livreurs généraux sont créés par le SUPERADMIN (onglet 🛵 Livreurs généraux). */
+export function DeliveryPage() {
+  const t = useT(); const nav = useNavigate(); const { user } = useAuth();
+  const [view, setView] = useState('ask');          // ask | mine | history
+  const [nearby, setNearby] = useState(null);
+  const [mapOpen, setMapOpen] = useState(false);    // 🗺️ carte des livreurs proches
+  const [dmapOpen, setDmapOpen] = useState(false);  // 🗺️ carte des livreurs de mes livraisons
+  const [mine, setMine] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const ST = { pending: '⏳ ' + t('st_pending') || '⏳ En attente', assigned: '🛵 Assigné', picked_up: '📦 Récupéré', delivered: '✅ Livré', cancelled: '❌ Annulé', refused: '↩️ Refusé' };
+  const stLbl = (st) => ST[st] || st;
+
+  const getPos = () => new Promise((res) => {   // 📍 ma position (GPS) → repli centre-ville
+    if (!navigator.geolocation) return res({ lat: 31.2001, lng: 29.9187 });
+    navigator.geolocation.getCurrentPosition(
+      (p) => res({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      () => res({ lat: 31.2001, lng: 29.9187 }),
+      { timeout: 5000 });
+  });
+  const openNearby = async () => {
+    if (busy) return; setBusy(true);
+    try {
+      const pos = await getPos();
+      const d = await api('/delivery/drivers-nearby?lat=' + pos.lat + '&lng=' + pos.lng);
+      setNearby(d.drivers);
+      setMapOpen(true);
+    } catch (e) { toast(e.message, 'err'); }
+    setBusy(false);
+  };
+  const loadMine = () => api('/delivery/mine').then(setMine).catch((e) => toast(e.message, 'err'));
+  useEffect(() => { loadMine(); }, []);
+  usePoll(loadMine, 6000);
+
+  const myDrivers = (mine?.ongoing || []).filter((o) => o.driver_pos).map((o) => ({
+    id: o.driver.id, name: o.driver.name, phone: o.driver.phone, lat: o.driver_pos.lat, lng: o.driver_pos.lng, general: true, online: true,
+  }));
+
+  const BigBtn = ({ emoji, label, sub, on, onClick }) => (
+    <button type="button" className={'card row dlv-btn' + (on ? ' on' : '')} onClick={onClick}>
+      <span className="dlv-ic">{emoji}</span>
+      <span className="grow" style={{ textAlign: 'start' }}>
+        <span style={{ display: 'block', fontWeight: 900 }}>{label}</span>
+        <span className="muted small">{sub}</span>
+      </span>
+    </button>
+  );
+
+  return (
+    <div>
+      <div className="topbar"><BackBtn /><div className="grow"><div className="brand-name">🛵 {t('delivery_title')}</div></div></div>
+      {!user ? <Empty e="🔐" text={t('login_profile_cta')} /> : (<>
+      <div className="col mb12" style={{ gap: 8 }}>
+        <BigBtn emoji="🛵" label={t('ask_driver')} sub={t('ask_driver_sub')} on={view === 'ask'} onClick={() => setView('ask')} />
+        <BigBtn emoji="📋" label={t('my_deliveries')} sub={((mine?.ongoing) || []).length + ' ' + t('ongoing_count')} on={view === 'mine'} onClick={() => { setView('mine'); loadMine(); }} />
+        <BigBtn emoji="🕓" label={t('deliv_history')} sub={((mine?.history) || []).length} on={view === 'history'} onClick={() => { setView('history'); loadMine(); }} />
+      </div>
+
+      {view === 'ask' && (
+        <div className="card col" style={{ padding: 14, gap: 10 }}>
+          <div className="label">{t('ask_driver')}</div>
+          <button type="button" className="btn primary block" disabled={busy} onClick={openNearby}>🗺️ {t('open_map')}</button>
+          <div className="muted xsmall">🛵 {t('drivers_near_hint')}</div>
+          <button type="button" className="btn soft block" onClick={() => nav('/app/service')}>📦 {t('new_delivery')}</button>
+          <div className="muted xsmall">📦 {t('new_delivery_hint')}</div>
+        </div>
+      )}
+
+      {view === 'mine' && (
+        <div className="card" style={{ padding: 14 }}>
+          <div className="row spread mb8">
+            <div className="label" style={{ margin: 0 }}>📋 {t('ongoing_deliveries')} ({(mine?.ongoing || []).length})</div>
+            <button type="button" className="btn ghost sm" onClick={() => setDmapOpen(true)}>🗺️ {t('open_map')}</button>
+          </div>
+          {(mine?.ongoing || []).length === 0 ? <Empty e="📦" text={t('no_ongoing')} /> : (mine.ongoing).map((o) => (
+            <div key={o.id} className="product-row" style={{ flexWrap: 'wrap' }}>
+              <div className="avatar" style={{ background: 'linear-gradient(135deg,#0e9f6e,#0ea5e9)' }}>📦</div>
+              <div className="grow" style={{ minWidth: 130 }}>
+                <div style={{ fontWeight: 800 }}>#{o.id} · {o.receiver_name || t('deliv_package')}</div>
+                <div className="muted small ellipsis">🏁 {o.address}</div>
+                <div className="muted xsmall">
+                  {o.driver ? '🛵 ' + o.driver.name : '⏳ ' + t('waiting_driver')}
+                  {o.prepaid ? ' · ✅ ' + t('already_paid') : (o.cod_amount != null ? ' · 💰 ' + fmtMoney(o.cod_amount) : '')}
+                </div>
+              </div>
+              <span className="badge" style={{ background: '#e0f2fe', color: '#075985' }}>{stLbl(o.status)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {view === 'history' && (
+        <div className="card" style={{ padding: 14 }}>
+          <div className="label mb8">🕓 {t('deliv_history')} ({(mine?.history || []).length})</div>
+          {(mine?.history || []).length === 0 ? <Empty e="🕓" text={t('no_history')} /> : (mine.history).map((o) => (
+            <div key={o.id} className="product-row" style={{ flexWrap: 'wrap' }}>
+              <div className="avatar" style={{ background: '#94a3b8' }}>📦</div>
+              <div className="grow" style={{ minWidth: 130 }}>
+                <div style={{ fontWeight: 800 }}>#{o.id} · {o.receiver_name || t('deliv_package')}</div>
+                <div className="muted small ellipsis">🏁 {o.address}</div>
+                <div className="muted xsmall">{fmtDate(o.created_at)} · 🛵 {fmtMoney(o.fee)}{o.driver ? ' · ' + o.driver.name : ''}</div>
+              </div>
+              <span className="badge" style={{ background: o.status === 'delivered' ? '#d1fae5' : '#fee2e2', color: o.status === 'delivered' ? '#065f46' : '#b91c1c' }}>{stLbl(o.status)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      </>)}
+
+      <Modal open={mapOpen} onClose={() => setMapOpen(false)} title={'🗺️ ' + (nearby ? nearby.length + ' ' + t('drivers_near') : t('open_map'))}>
+        {nearby && nearby.length > 0
+          ? <div className="drv-map"><DriversMap drivers={nearby} /></div>
+          : <Empty e="🛵" text={t('no_drivers_near')} />}
+        <div className="muted small mt8">📍 {t('drivers_near_hint')}</div>
+      </Modal>
+      <Modal open={dmapOpen} onClose={() => setDmapOpen(false)} title={'🗺️ ' + t('my_deliveries')}>
+        {myDrivers.length > 0
+          ? <div className="drv-map"><DriversMap drivers={myDrivers} /></div>
+          : <Empty e="🛵" text={t('no_assigned_yet')} />}
+      </Modal>
+    </div>
+  );
+}
+
 export function ServiceRequestPage() {
   const t = useT(); const { lang } = useLang(); const nav = useNavigate(); const { user } = useAuth();
   const [desc, setDesc] = useState('');
   const [pAddr, setPAddr] = useState(''); const [pGps, setPGps] = useState(null); const [pSugg, setPSugg] = useState(null);
   const [dAddr, setDAddr] = useState(''); const [dGps, setDGps] = useState(null); const [dSugg, setDSugg] = useState(null);
   const [phone, setPhone] = useState(user?.phone || '');
+  const [rName, setRName] = useState('');   // 📦 v2026.10.08.20 : nom du RECEVEUR
+  const [cod, setCod] = useState('');       // 💰 montant à payer par le receveur
+  const [prepaid, setPrepaid] = useState(false);   // ✅ déjà payé par l'expéditeur
   const [busy, setBusy] = useState(false);
   const [pPick, setPPick] = useState(false); const [dPick, setDPick] = useState(false);
   const pTm = useRef(null); const dTm = useRef(null);
@@ -2911,13 +3044,18 @@ export function ServiceRequestPage() {
     : null;
   const submit = async () => {
     if (busy) return;
-    if (desc.trim().length < 5) return toast(t('svc_desc_ph') + ' ?', 'err');
+    if (desc.trim().length < 5 && !rName.trim()) return toast(t('svc_desc_ph') + ' ?', 'err');   // 📦 v2026.10.08.20 : description OPTIONNELLE si le receveur est donné
     if (!pGps) return toast(t('pickup_required'), 'err');
     if (!dGps) return toast(t('loc_required'), 'err');
     if (!phone.trim()) return toast(t('listing_phone') + ' ?', 'err');
     setBusy(true);
     try {
-      const r = await api('/services', { method: 'POST', body: { description: desc.trim(), pickup_address: pAddr.trim(), pickup_lat: pGps.lat, pickup_lng: pGps.lng, address: dAddr.trim(), lat: dGps.lat, lng: dGps.lng, phone: phone.trim(), delivery_fee: feeEst || 25 } });
+      const r = await api('/services', { method: 'POST', body: {
+        description: desc.trim(), pickup_address: pAddr.trim(), pickup_lat: pGps.lat, pickup_lng: pGps.lng,
+        address: dAddr.trim(), lat: dGps.lat, lng: dGps.lng, phone: phone.trim(), delivery_fee: feeEst || 25,
+        receiver_name: rName.trim(), receiver_phone: phone.trim(),   // 📦 v2026.10.08.20 : receveur
+        cod_amount: prepaid || cod.trim() === '' ? null : parseFloat(cod), prepaid,   // 💰 montant
+      } });
       toast(t('deliver_ok') + ' 🔑 ' + r.pin, 'ok');
       nav('/app/orders');
     } catch (ex) { toast(ex.message, 'err'); }
@@ -2951,15 +3089,38 @@ export function ServiceRequestPage() {
       </div>
       <div className="banner ok mb12">💡 {t('svc_pay_note')}</div>
       <div className="card mb12" style={{ padding: 14 }}>
+        {/* 📦 v2026.10.08.20 — ESPACE LIVRAISON : le RECEVEUR (nom + téléphone) et le MONTANT */}
+        <div className="field">
+          <label className="label">👤 {t('receiver_name')}</label>
+          <input className="input" value={rName} onChange={(e) => setRName(e.target.value)} placeholder="ex. : Salma Mahmoud" />
+        </div>
         <div className="field">
           <label className="label">📝 {t('svc_desc')}</label>
-          <textarea className="textarea" rows={3} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder={t('svc_desc_ph')} />
+          <textarea className="textarea" rows={3} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder={rName ? t('svc_desc_opt') : t('svc_desc_ph')} />
         </div>
         {addrField('p', '📍 ' + t('svc_pickup'), pAddr, pGps, pSugg)}
-        {addrField('d', '🏁 ' + t('svc_dropoff'), dAddr, dGps, dSugg)}
+        <button type="button" className="btn ghost sm mb8" onClick={() => {
+          if (!navigator.geolocation) return toast(t('gps_fail'), 'err');
+          navigator.geolocation.getCurrentPosition((p) => {
+            setPGps({ lat: p.coords.latitude, lng: p.coords.longitude });
+            setPAddr((a) => a || t('my_pos'));
+            toast('📍 ' + t('loc_set'), 'ok');
+          }, () => toast(t('gps_fail'), 'err'), { timeout: 6000 });
+        }}>📍 {t('my_pos')}</button>
+        {addrField('d', '🏁 ' + t('svc_dropoff') + ' — ' + t('receiver_addr'), dAddr, dGps, dSugg)}
         <div className="field">
-          <label className="label">📞 {t('listing_phone')}</label>
+          <label className="label">📞 {t('receiver_phone')}</label>
           <input className="input" dir="ltr" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0100 123 4567" />
+        </div>
+        <div className="field">
+          <label className="label">💰 {t('amount_to_pay')}</label>
+          <div className="row" style={{ gap: 8 }}>
+            <input className="input grow" dir="ltr" type="number" min="0" step="0.5" value={prepaid ? '' : cod} disabled={prepaid}
+              onChange={(e) => setCod(e.target.value)} placeholder="ex. : 120" />
+            <button type="button" className={'btn sm' + (prepaid ? ' primary' : ' ghost')} style={{ minWidth: 0, whiteSpace: 'nowrap' }}
+              onClick={() => setPrepaid((v) => !v)}>{prepaid ? '✅ ' + t('already_paid') : '💵 ' + t('cod_btn')}</button>
+          </div>
+          <div className="muted xsmall mt4">{prepaid ? '✅ ' + t('prepaid_note') : t('cod_note')}</div>
         </div>
         <div className="row spread mt8" style={{ padding: '8px 12px', background: '#f0fdf4', borderRadius: 10 }}>
           <span className="small" style={{ fontWeight: 800 }}>🛵 {t('deliver_fee')}</span>

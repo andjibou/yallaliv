@@ -885,13 +885,22 @@ app.post('/api/market/orders/:id/decline', auth, h(async (req, res) => {
 
 // ================= 🛵 📣 v2026.09.27.1 — Services à la demande (bandeau accueil) + Publicités =================
 app.post('/api/services', auth, requireRole('client', 'merchant', 'superadmin'), h(async (req, res) => {
-  const description = String(req.body.description || '').trim().slice(0, 300);
+  // 📦 v2026.10.08.20 — ESPACE LIVRAISON : le formulaire « Nouvelle livraison » envoie le
+  // RECEVEUR (nom + téléphone), l'adresse de livraison et le MONTANT (à payer par le
+  // receveur, ou déjà payé). La description devient optionnelle si le receveur est donné.
+  const receiver_name = String(req.body.receiver_name || '').trim().slice(0, 80);
+  const receiver_phone = String(req.body.receiver_phone || '').trim().slice(0, 30);
+  const prepaid = req.body.prepaid ? 1 : 0;
+  let cod_amount = req.body.cod_amount != null && req.body.cod_amount !== '' && !isNaN(parseFloat(req.body.cod_amount)) ? round2(parseFloat(req.body.cod_amount)) : null;
+  if (cod_amount != null) cod_amount = Math.max(0, Math.min(1000000, cod_amount));
+  let description = String(req.body.description || '').trim().slice(0, 300);
+  if (!description && receiver_name) description = `📦 Colis pour ${receiver_name}` + (prepaid ? ' — ✅ déjà payé' : (cod_amount != null ? ` — 💰 à encaisser : ${cod_amount} EGP` : ''));
   const pickup_address = String(req.body.pickup_address || '').trim().slice(0, 200);
   const address = String(req.body.address || '').trim().slice(0, 200);   // point de LIVRAISON
-  const phone = String(req.body.phone || req.user.phone || '').trim();
+  const phone = String(receiver_phone || req.body.phone || req.user.phone || '').trim();
   const plat = parseFloat(req.body.pickup_lat); const plng = parseFloat(req.body.pickup_lng);
   const clat = parseFloat(req.body.lat); const clng = parseFloat(req.body.lng);
-  if (description.length < 5) return res.status(400).json({ error: 'Décrivez la course (5 caractères minimum)' });
+  if (description.length < 5) return res.status(400).json({ error: 'Décrivez la course (5 caractères minimum) — ou donnez le nom du receveur' });
   if (pickup_address.length < 5) return res.status(400).json({ error: 'Adresse de récupération trop courte' });
   if (address.length < 5) return res.status(400).json({ error: 'Adresse de livraison trop courte' });
   if (!phone) return res.status(400).json({ error: 'Téléphone requis' });
@@ -903,9 +912,9 @@ app.post('/api/services', auth, requireRole('client', 'merchant', 'superadmin'),
   if (open.n >= 3) return res.status(400).json({ error: 'Trop de demandes de service en cours (max 3)' });
   const pin = String(1000 + Math.floor(Math.random() * 9000));
   const now = Date.now();
-  const r = await run(`INSERT INTO orders(kind,seller_id,listing_id,client_id,store_id,driver_id,status,payment,paid,subtotal,delivery_fee,commission,total,address,phone,note,pickup_address,pickup_lat,pickup_lng,client_lat,client_lng,visibility,pin,created_at,updated_at)
-    VALUES('service',NULL,NULL,?,NULL,NULL,'pending','cash',0,0,?,0,?,?,?,?,?,?,?,?,?,'public',?,?,?) RETURNING id`,
-    [req.user.id, fee, fee, address, phone, description.slice(0, 200), pickup_address, plat, plng, clat, clng, pin, now, now]);
+  const r = await run(`INSERT INTO orders(kind,seller_id,listing_id,client_id,store_id,driver_id,status,payment,paid,subtotal,delivery_fee,commission,total,address,phone,note,pickup_address,pickup_lat,pickup_lng,client_lat,client_lng,visibility,pin,receiver_name,receiver_phone,cod_amount,prepaid,created_at,updated_at)
+    VALUES('service',NULL,NULL,?,NULL,NULL,'pending','cash',0,0,?,0,?,?,?,?,?,?,?,?,?,'public',?,?,?,?,?,?,?) RETURNING id`,
+    [req.user.id, fee, fee, address, phone, description.slice(0, 200), pickup_address, plat, plng, clat, clng, pin, receiver_name || null, receiver_phone || null, cod_amount, prepaid, now, now]);
   const oid = r.rows[0].id;
   await run('INSERT INTO order_items(order_id,product_id,name,emoji,price,qty) VALUES(?,?,?,?,?,?)', [oid, null, description.slice(0, 80), '🛵', 0, 1]);
   try {   // prévenir les livreurs généraux en ligne
@@ -914,6 +923,45 @@ app.post('/api/services', auth, requireRole('client', 'merchant', 'superadmin'),
   } catch {}
   res.json({ order_id: oid, pin, delivery_fee: fee });
 }));
+// 🛵 v2026.10.08.20 — ESPACE LIVRAISON : livreurs GÉNÉRAUX en ligne à MOINS DE 2,5 km
+// de la position de l'utilisateur (position fraîche < 10 min).
+app.get('/api/delivery/drivers-nearby', auth, requireRole('client', 'merchant', 'superadmin'), h(async (req, res) => {
+  const lat = parseFloat(req.query.lat), lng = parseFloat(req.query.lng);
+  if (isNaN(lat) || isNaN(lng)) return res.status(400).json({ error: 'Position requise' });
+  const R = 2500, RAD = 0.0225;   // 2,5 km (± pré-filtre ~2,25°… non : 0.0225° ≈ 2,5 km)
+  const rows = await all(`SELECT u.id, u.name, u.phone, u.vehicle, l.lat, l.lng, l.updated_at,
+      (6371000 * acos(least(1, greatest(-1, cos(radians(?)) * cos(radians(l.lat)) * cos(radians(l.lng) - radians(?)) + sin(radians(?)) * sin(radians(l.lat)))))) AS dist
+    FROM users u JOIN driver_locations l ON l.driver_id = u.id
+    WHERE u.role='driver' AND u.store_id IS NULL AND u.status='active' AND u.online=1 AND l.updated_at > ?`,
+    [lat, lng, lat, Date.now() - 10 * 60000]);
+  const drivers = rows
+    .filter((d) => d.dist <= R)
+    .map((d) => ({ id: d.id, name: d.name, phone: d.phone, vehicle: d.vehicle, lat: d.lat, lng: d.lng, dist: Math.round(d.dist), general: true }))
+    .sort((a, b) => a.dist - b.dist);
+  res.json({ drivers, radius: R });
+}));
+
+// 📋 v2026.10.08.20 — ESPACE LIVRAISON : MES LIVRAISONS (en cours) + HISTOIRE.
+// En cours = pending / assigned / picked_up · histoire = delivered / cancelled / refused.
+// Chaque ligne embarque le livreur ASSIGNÉ et SA POSITION (carte « mes livraisons »).
+app.get('/api/delivery/mine', auth, requireRole('client', 'merchant', 'superadmin'), h(async (req, res) => {
+  const rows = await all(`SELECT o.*, u.name AS driver_name, u.phone AS driver_phone, l.lat AS dlat, l.lng AS dlng
+    FROM orders o LEFT JOIN users u ON u.id = o.driver_id LEFT JOIN driver_locations l ON l.driver_id = o.driver_id
+    WHERE o.kind = 'service' AND o.client_id = ?
+    ORDER BY o.created_at DESC LIMIT 100`, [req.user.id]);
+  const shape = (o) => ({
+    id: o.id, status: o.status, fee: o.delivery_fee, total: o.total, pin: o.pin,
+    receiver_name: o.receiver_name, receiver_phone: o.receiver_phone, cod_amount: o.cod_amount, prepaid: !!o.prepaid,
+    address: o.address, phone: o.phone, note: o.note, created_at: o.created_at, updated_at: o.updated_at,
+    driver: o.driver_id ? { id: o.driver_id, name: o.driver_name, phone: o.driver_phone } : null,
+    driver_pos: o.driver_id && o.dlat != null ? { lat: o.dlat, lng: o.dlng } : null,
+  });
+  res.json({
+    ongoing: rows.filter((o) => ['pending', 'assigned', 'picked_up'].includes(o.status)).map(shape),
+    history: rows.filter((o) => !['pending', 'assigned', 'picked_up'].includes(o.status)).map(shape),
+  });
+}));
+
 app.get('/api/ads', h(async (req, res) => {
   res.json({ ads: await all('SELECT id, image, link FROM ads WHERE active=1 ORDER BY created_at DESC LIMIT 10') });
 }));

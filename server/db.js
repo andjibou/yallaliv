@@ -414,6 +414,10 @@ export async function initDb() {
   await run('ALTER TABLE orders ADD COLUMN pickup_address TEXT').catch(() => {});   // chez le vendeur
   await run('ALTER TABLE orders ADD COLUMN pickup_lat REAL').catch(() => {});
   await run('ALTER TABLE orders ADD COLUMN pickup_lng REAL').catch(() => {});
+  await run('ALTER TABLE orders ADD COLUMN receiver_name TEXT').catch(() => {});   // 📦 v2026.10.08.20 : espace livraison — nom du receveur
+  await run('ALTER TABLE orders ADD COLUMN receiver_phone TEXT').catch(() => {});   // 📞 téléphone du receveur
+  await run('ALTER TABLE orders ADD COLUMN cod_amount REAL').catch(() => {});       // 💰 montant à payer par le receveur
+  await run('ALTER TABLE orders ADD COLUMN prepaid INTEGER').catch(() => {});       // ✅ déjà payé par l'expéditeur
   await run('ALTER TABLE users ALTER COLUMN email DROP NOT NULL').catch(() => {});   // comptes par telephone (email NULL)
   // 🛍️ v2026.09.26.1 — Marché Phase 1 : sous-catégories, état, attributs, zone, vues, renouvellement, multi-photos
   await run('ALTER TABLE listings ADD COLUMN subcategory TEXT').catch(() => {});
