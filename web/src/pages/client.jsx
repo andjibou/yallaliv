@@ -135,20 +135,66 @@ export function ClientLayout() {
 }
 
 /* ================= HOME (v2026.09.27.1 — refonte : en-tête dégradé, bandeau service, pubs, cartes magasins, départements) ================= */
-// 🌐 sélecteur de langue (remplace l'ancien FR ع EN)
+// 🌐 v2026.10.08.18 — sélecteur de langue : ICÔNE RONDE (globe), mêmes dimensions
+// que 🔔 et 👤 (remplace l'ancienne pilule « 🇫🇷 FR ▾ »)
 function LangSelect() {
   const { lang, setLang } = useLang();
   const [open, setOpen] = useState(false);
-  const LBL = { fr: '🇫🇷 FR', ar: '🇪🇬 ع', en: '🇬🇧 EN' };
   return (
     <div style={{ position: 'relative' }}>
-      <button type="button" className="lang-btn" onClick={() => setOpen((v) => !v)}>{LBL[lang] || '🌐'} ▾</button>
+      <button type="button" className="head-icon" onClick={() => setOpen((v) => !v)} title="Langue · اللغة · Language" aria-label="langue">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.9" strokeLinecap="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M3 12h18" />
+          <ellipse cx="12" cy="12" rx="4.2" ry="9" />
+        </svg>
+      </button>
       {open && (
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setOpen(false)} />
           <div className="lang-menu">
             {[['fr', '🇫🇷 Français'], ['ar', '🇪🇬 العربية'], ['en', '🇬🇧 English']].map(([k, l]) => (
               <button key={k} type="button" className={'lang-opt' + (lang === k ? ' on' : '')} onClick={() => { setLang(k); setOpen(false); }}>{l} {lang === k ? '✓' : ''}</button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// 💱 v2026.10.08.18 — changement d'ESPACE ($ Acheteur / Magasin / Livreur / Admin) :
+// icône ronde visible partout, UNIQUEMENT pour les utilisateurs qui ont créé un autre
+// espace (magasin, livraison, administration). Les clients simples ne la voient pas.
+function SpaceSwitch() {
+  const { user } = useAuth();
+  const t = useT();
+  const nav = useNavigate();
+  const [open, setOpen] = useState(false);
+  if (!user || user.role === 'client') return null;
+  const spaces = [
+    { k: 'app', icon: '🛍️', label: t('switch_client'), go: () => nav('/app') },
+    ...(user.role === 'merchant' ? [{ k: 'merchant', icon: '🏪', label: t('switch_store'), go: () => nav('/merchant') }] : []),
+    ...(user.role === 'driver' ? [{ k: 'driver', icon: '🛵', label: t('switch_driver'), go: () => nav('/driver') }] : []),
+    ...(user.role === 'superadmin' ? [{ k: 'admin', icon: '👑', label: t('switch_admin'), go: () => nav('/admin') }] : []),
+  ];
+  const cur = window.location.pathname.startsWith('/merchant') ? 'merchant' : window.location.pathname.startsWith('/driver') ? 'driver' : window.location.pathname.startsWith('/admin') ? 'admin' : 'app';
+  return (
+    <div style={{ position: 'relative' }}>
+      <button type="button" className="head-icon space-btn" onClick={() => setOpen((v) => !v)} title={t('my_spaces')} aria-label={t('my_spaces')}>
+        <svg width="19" height="19" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9.5" fill="#fbbf24" stroke="#b45309" strokeWidth="1.6" />
+          <text x="12" y="16.4" textAnchor="middle" fontSize="12.5" fontWeight="900" fill="#7c2d12" fontFamily="Arial, sans-serif">$</text>
+        </svg>
+      </button>
+      {open && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setOpen(false)} />
+          <div className="lang-menu">
+            {spaces.map((sp) => (
+              <button key={sp.k} type="button" className={'lang-opt' + (cur === sp.k ? ' on' : '')} onClick={() => { setOpen(false); sp.go(); }}>
+                {sp.icon} {sp.label} {cur === sp.k ? '✓' : ''}
+              </button>
             ))}
           </div>
         </>
@@ -805,6 +851,7 @@ export function ClientHome() {
           </div>
           <div className="row" style={{ gap: 6 }}>
             <LangSelect />
+            <SpaceSwitch />
             <button type="button" className="head-icon" onClick={() => nav('/app/notifications')} title={t('notifications')} aria-label={t('notifications')}>
               🔔{unread > 0 && <span className="dot-badge">{unread > 99 ? '99+' : unread}</span>}
             </button>
@@ -864,6 +911,13 @@ export function ClientHome() {
         </div>
       ) : stypes.length > 0 ? (
         <AutoScroll className="stc-row">
+          {/* 💼 v2026.10.08.18 — boule FIXE « Crée ton business » : GIF animé (bonhomme
+              qui récolte l'argent) · STICKY à gauche : les autres boules passent EN DESSOUS
+              pendant leur défilement · clic = créer son magasin (sans passer par 👤) */}
+          <button type="button" className="sty-card sty-create" onClick={() => nav(user ? '/app/profile?partner=1' : '/login')} title={t('create_business')}>
+            <span className="sty-icon sty-create-ic"><img src="/business.gif" alt={t('create_business')} /></span>
+            <span className="sty-label">{t('create_business')}</span>
+          </button>
           {stypes.map((c) => (
             <button key={c.type} type="button" className="sty-card" onClick={() => nav('/app/stores/' + c.type)} title={lang === 'ar' ? c.label_ar : lang === 'en' ? c.label_en : c.label_fr}>
               <span className="sty-icon"><img src={c.icon} alt="" loading="lazy" /></span>
@@ -873,6 +927,10 @@ export function ClientHome() {
         </AutoScroll>
       ) : (
         <AutoScroll className="stc-row">
+          <button type="button" className="sty-card sty-create" onClick={() => nav(user ? '/app/profile?partner=1' : '/login')} title={t('create_business')}>
+            <span className="sty-icon sty-create-ic"><img src="/business.gif" alt={t('create_business')} /></span>
+            <span className="sty-label">{t('create_business')}</span>
+          </button>
           {STORE_CARDS.map((c) => (
             <button key={c.type} type="button" className="sty-card" onClick={() => nav('/app/stores/' + c.type)}>
               <span className="sty-icon"><img src={c.img} alt="" loading="lazy" /></span>
@@ -1751,6 +1809,9 @@ export function ClientProfile() {
   const nav = useNavigate();
   const { user, logout, setUser } = useAuth();
   const [pOpen, setPOpen] = useState(false);                                  // formulaire « Devenir partenaire »
+  useEffect(() => {   // 💼 v2026.10.08.18 : boule « Crée ton business » → ?partner=1 ouvre le formulaire
+    if (new URLSearchParams(window.location.search).get('partner') === '1' && user?.role === 'client') setPOpen(true);
+  }, [user?.role]);
   const [pForm, setPForm] = useState({ name: '', type: 'restaurant', phone: '', address: '', lat: null, lng: null });
   const [pBusy, setPBusy] = useState(false);
   const [pErr, setPErr] = useState({});   // ⚠️ erreurs par champ du formulaire partenaire

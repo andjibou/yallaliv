@@ -900,3 +900,12 @@ button.icon-btn.yl-back:active { transform: scale(.92); }
 .pd-sibs-bare { background: transparent !important; border-bottom: none !important; }
 .pd-size-tag { cursor: pointer; font: inherit; font-size: 13px; font-weight: 800; }
 .pd-size-tag.on { border-color: var(--brand); background: #ecfdf5; color: #065f46; box-shadow: 0 0 0 1.5px var(--brand); }
+
+/* ═══ 💼🌐💱 v2026.10.08.18 — ACCUEIL : boule « Crée ton business » + icônes rondes ═══
+   .sty-create = boule FIXE (sticky à gauche) : les autres boules passent EN DESSOUS
+   pendant leur défilement · .sty-create-ic = cercle OPAQUE (masque les boules qui
+   glissent derrière) · .space-btn = icône $ (changement d'espace) */
+.sty-create { position: sticky; left: 0; z-index: 5; }
+.sty-create .sty-create-ic { background: linear-gradient(160deg, #ecfdf5, #a7f3d0); }
+.sty-create .sty-label { color: #065f46; font-weight: 900; }
+.space-btn svg { display: block; }
