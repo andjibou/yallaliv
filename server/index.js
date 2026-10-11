@@ -967,7 +967,8 @@ app.get('/api/delivery/mine', auth, requireRole('client', 'merchant', 'superadmi
 // → message au SUPERADMIN → après confirmation, l'utilisateur accède à son espace
 // via le bouton $ (comme les espaces magasin).
 app.post('/api/delivery/request', auth, requireRole('client', 'merchant'), h(async (req, res) => {
-  const ex = await get('SELECT * FROM delivery_accounts WHERE user_id=?', [req.user.id]);
+  // 🛡️ v2026.10.08.22 : seules les lignes BLOQUANTES comptent (un ancien refus n'empêche pas de redemander)
+  const ex = await get(`SELECT * FROM delivery_accounts WHERE user_id=? AND status IN ('approved','pending') LIMIT 1`, [req.user.id]);
   if (ex && ex.status === 'approved') return res.status(400).json({ error: 'Vous avez déjà un espace livraison' });
   if (ex && ex.status === 'pending') return res.status(400).json({ error: 'Votre demande est déjà en attente de confirmation' });
   const name = String(req.body.name || '').trim().slice(0, 80);
@@ -983,14 +984,16 @@ app.post('/api/delivery/request', auth, requireRole('client', 'merchant'), h(asy
     [req.user.id, name, type, phone, address, subscription, 'pending', Date.now()]);
   try {
     const su = await all("SELECT id FROM users WHERE role='superadmin'");
-    pushTo(su.map((u) => u.id), '🛵 Nouvelle demande d\'espace livraison', name.slice(0, 60) + ' — à confirmer', '/admin');
+    pushTo(su.map((u) => u.id), '🛵 Nouvelle demande d\'espace livraison', name.slice(0, 60) + ' — à confirmer (onglet 📦 Espaces livraison)', '/admin?tab=daccounts');
   } catch {}
   res.json({ id: r.rows[0].id, status: 'pending' });
 }));
 
 // Mon compte espace livraison (null = aucun · pending = en attente · approved = accès)
 app.get('/api/delivery/account', auth, h(async (req, res) => {
-  const a = await get('SELECT * FROM delivery_accounts WHERE user_id=?', [req.user.id]);
+  // 🛡️ v2026.10.08.22 : après un refus + re-demande, l'utilisateur a PLUSIEURS lignes —
+  // on retourne la plus pertinente (approved > pending > rejected, la plus récente).
+  const a = await get(`SELECT * FROM delivery_accounts WHERE user_id=? ORDER BY (status='approved') DESC, (status='pending') DESC, created_at DESC LIMIT 1`, [req.user.id]);
   res.json({ account: a || null });
 }));
 
@@ -2201,19 +2204,12 @@ app.post('/api/admin/stores/:id/reject', auth, requireRole('superadmin'), h(asyn
   const s = await get('SELECT * FROM stores WHERE id=?', [req.params.id]);
   if (!s) return res.status(404).json({ error: 'Magasin introuvable' });
   if (s.status !== 'pending') return res.status(400).json({ error: 'Seul un magasin en attente peut être refusé' });
-  const ord = await get('SELECT COUNT(*) AS c FROM orders WHERE store_id=?', [s.id]);
-  if (ord.c > 0) { // activite deja existante -> on suspend au lieu de supprimer
-    await run('UPDATE stores SET status=? WHERE id=?', ['suspended', s.id]);
-    await run('UPDATE users SET status=? WHERE id=?', ['suspended', s.owner_id]);
-    return res.json({ ok: true, mode: 'suspended' });
-  }
-  // magasin neuf : suppression propre (photos, produits, store, compte proprietaire)
-  await run('DELETE FROM product_photos WHERE product_id IN (SELECT id FROM products WHERE store_id=?)', [s.id]);
-  await run('DELETE FROM products WHERE store_id=?', [s.id]);
-  await run('DELETE FROM push_subscriptions WHERE user_id=?', [s.owner_id]);
-  await run('DELETE FROM stores WHERE id=?', [s.id]);
-  await run('DELETE FROM users WHERE id=? AND role=?', [s.owner_id, 'merchant']);
-  res.json({ ok: true, mode: 'deleted' });
+  // 🛡️ v2026.10.08.22 : refus NON DESTRUCTIF — le magasin passe « rejected » mais RIEN n'est
+  // supprimé (ni photos, ni produits, ni magasin, NI LE COMPTE propriétaire). Le marchand peut
+  // recréer une demande via 💼 Mon business, et le superadmin peut réactiver (🔄) s'il change d'avis.
+  await run('UPDATE stores SET status=? WHERE id=?', ['rejected', s.id]);
+  try { pushTo([s.owner_id], '🏬 Magasin refusé', 'Votre demande de magasin a été refusée. Vous pouvez en recréer une depuis 💼 Mon business.', ''); } catch {}
+  res.json({ ok: true, mode: 'rejected' });
 }));
 
 app.get('/api/admin/orders', auth, requireRole('superadmin'), h(async (req, res) => {

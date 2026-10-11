@@ -8,7 +8,7 @@ export default function AdminApp() {
   const t = useT();
   const [acct, setAcct] = useState(false);
   const { user, logout } = useAuth();
-  const [tab, setTab] = useState('dash');
+  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'dash');   // 🔗 v2026.10.08.22 : /admin?tab=… (liens des notifications)
   const [pendStores, setPendStores] = useState(0);
   const [pendDA, setPendDA] = useState(0);   // 📦 demandes d'espaces livraison en attente
   usePoll(() => api('/admin/stores').then((d) => setPendStores(d.stores.filter((s) => s.status === 'pending').length)).catch(() => {}), 8000);
@@ -300,7 +300,7 @@ function DeliveryAccounts() {
         <div key={a.id} className="card row wrap mb12" style={{ cursor: 'default', ...(a.status === 'pending' ? { border: '2px solid #f59e0b', background: 'linear-gradient(0deg,#fffbeb,#fffbeb)' } : {}) }}>
           <div className="store-emoji" style={{ background: '#0ea5e9', width: 48, height: 48, fontSize: 25 }}>🛵</div>
           <div className="grow">
-            <div style={{ fontWeight: 800 }}>{a.name} <span className={'badge b-' + a.status}>{t(a.status === 'approved' ? 'active' : a.status === 'pending' ? 'pending' : 'suspended')}</span></div>
+            <div style={{ fontWeight: 800 }}>{a.name} <span className={'badge b-' + a.status}>{t(a.status === 'approved' ? 'active' : a.status === 'pending' ? 'pending' : 'rejected')}</span></div>
             <div className="muted small">🏬 {t('type_' + a.type)} · 👤 {a.owner_name} ({a.owner_email})</div>
             <div className="muted small">📞 {a.phone} · 📍 {a.address}</div>
           </div>
@@ -310,6 +310,7 @@ function DeliveryAccounts() {
               <button className="btn danger sm" onClick={() => setStatus(a, 'rejected')}>❌ {t('reject')}</button>
             </>}
             {a.status === 'approved' && <button className="btn danger sm" onClick={() => setStatus(a, 'pending')}>↩️ {t('pending')}</button>}
+            {a.status === 'rejected' && <button className="btn primary sm" onClick={() => setStatus(a, 'approved')}>✅ {t('approve')}</button>}   {/* 🛡️ v22 : un refus est RÉVERSIBLE */}
           </div>
         </div>
       ))}
@@ -341,7 +342,7 @@ function Stores() {
     if (!window.confirm(t('reject_store_q') + ' « ' + s.name + ' » ?')) return;
     try {
       const r = await api(`/admin/stores/${s.id}/reject`, { method: 'POST' });
-      toast(r.mode === 'deleted' ? t('store_rejected') : t('store_suspended'));
+      toast(r.mode === 'rejected' ? t('store_rejected') : t('store_suspended'));
       api('/admin/stores').then((d) => setStores(d.stores)).catch(() => {});
     } catch (ex) { toast(ex.message, 'err'); }
   };
@@ -354,7 +355,7 @@ function Stores() {
           onClick={() => openDetail(s)}>
           <div className="store-emoji" style={{ background: s.color || '#0e9f6e', width: 48, height: 48, fontSize: 25 }}>{s.emoji}</div>
           <div className="grow">
-            <div style={{ fontWeight: 800 }}>{s.name} <span className={'badge b-' + s.status}>{t(s.status === 'approved' ? 'active' : s.status === 'pending' ? 'pending' : 'suspended')}</span></div>
+            <div style={{ fontWeight: 800 }}>{s.name} <span className={'badge b-' + s.status}>{t(s.status === 'approved' ? 'active' : s.status === 'pending' ? 'pending' : s.status === 'rejected' ? 'rejected' : 'suspended')}</span></div>
             <div className="muted small">{t('type_' + s.type)} · 👤 {s.owner_name} ({s.owner_email})</div>
             <div className="muted small">📦 {s.product_count} {t('products_count')} · 🛵 {fmtMoney(s.delivery_fee)} · ⭐ {Number(s.rating).toFixed(1)}</div>
           </div>
@@ -364,7 +365,7 @@ function Stores() {
               <button className="btn danger sm" onClick={(e) => { e.stopPropagation(); reject(s); }}>❌ {t('reject')}</button>
             </>}
             {s.status === 'approved' && <button className="btn danger sm" onClick={(e) => { e.stopPropagation(); setStatus(s, 'suspended'); }}>🚫 {t('suspend')}</button>}
-            {s.status === 'suspended' && <button className="btn soft sm" onClick={(e) => { e.stopPropagation(); setStatus(s, 'approved'); }}>🔄 {t('activate')}</button>}
+            {(s.status === 'suspended' || s.status === 'rejected') && <button className="btn soft sm" onClick={(e) => { e.stopPropagation(); setStatus(s, 'approved'); }}>🔄 {t('activate')}</button>}
             <button className="btn blue sm" onClick={(e) => { e.stopPropagation(); openDetail(s); }}>ℹ️</button>
           </div>
         </div>

@@ -904,6 +904,18 @@ export function ClientHome() {
         </div>
       </Modal>
 
+      {/* 🛵 v2026.10.08.22 — bandeau « Besoin d'une course ? » DE RETOUR à sa place (retiré
+          par erreur en v2026.10.08.21) : entrée directe de l'espace livraison. La page gère
+          tous les états : 🔒 pas de compte (→ Mon business) · ⏳ en attente · hub si confirmé. */}
+      <button type="button" className="svc-banner" onClick={() => nav(user ? '/app/delivery' : '/login')} title={t('svc_title')}>
+        <span className="svc-emoji">🛵</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'block', fontWeight: 900, fontSize: 15.5, color: '#fff' }}>{t('svc_title')}</span>
+          <span style={{ display: 'block', fontSize: 12, color: 'rgba(255,255,255,.88)' }}>{t('svc_sub')}</span>
+        </span>
+        <span className="svc-cta">{t('svc_cta')}</span>
+      </button>
+
       {/* 🧃 Publicités (publiées depuis l'espace superadmin) — défilement automatique + manuel */}
       {ads && ads.length > 0 && (
         <AutoScroll className="ads-row" mode="page">

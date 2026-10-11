@@ -68,6 +68,7 @@ function Top({ onAccount }) {
 function StatusBanner({ store }) {
   const t = useT();
   if (store.status === 'pending') return <div className="banner warn">⏳ {t('pending_store')}</div>;
+  if (store.status === 'rejected') return <div className="banner err">❌ {t('store_rejected')} — {t('biz_open_store_sub')}</div>;   {/* 🛡️ v22 : refus NON destructif */}
   if (store.status === 'suspended') return <div className="banner err">🚫 {t('suspended')}</div>;
   return null;
 }
