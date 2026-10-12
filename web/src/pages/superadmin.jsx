@@ -9,6 +9,7 @@ export default function AdminApp() {
   const [acct, setAcct] = useState(false);
   const { user, logout } = useAuth();
   const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'dash');   // 🔗 v2026.10.08.22 : /admin?tab=… (liens des notifications)
+  const [menuOpen, setMenuOpen] = useState(false);   // ☰ v2026.10.12.27 : menu VERTICAL (les onglets horizontaux ne plaisaient pas)
   const [pendStores, setPendStores] = useState(0);
   const [pendDA, setPendDA] = useState(0);   // 📦 demandes d'espaces livraison en attente
   usePoll(() => api('/admin/stores').then((d) => setPendStores(d.stores.filter((s) => s.status === 'pending').length)).catch(() => {}), 8000);
@@ -19,7 +20,7 @@ export default function AdminApp() {
     { id: 'stores', label: '🏪 ' + t('sa_stores') + (pendStores ? ` 🔴${pendStores}` : '') },
     { id: 'orders', label: '🧾 ' + t('sa_orders') },
     { id: 'gdrivers', label: '🛵 ' + t('general_drivers') },
-    { id: 'dcash', label: '💰 ' + t('dcash_title') },   // 💰 v2026.10.08.26 : caisse des livreurs
+    { id: 'dcash', label: '💰 ' + t('dcash_title') },   // 💰 v2026.10.08.26 : caisse des livreurs généraux
     { id: 'daccounts', label: '📦 ' + t('sa_daccounts') + (pendDA ? ` 🔴${pendDA}` : '') },   // 📦 v2026.10.08.21 : demandes d'espaces livraison
     { id: 'promos', label: '🎁 ' + t('promos') },
     { id: 'reports', label: '🚨 ' + t('reports_tab') },   // 🚨 v2026.09.26.2 — modération Marché
@@ -27,14 +28,19 @@ export default function AdminApp() {
     { id: 'stypes', label: '🏬 ' + t('sa_stypes') },   // 🏬 v2026.09.30.5 — cartes magasins de l'accueil
     { id: 'settings', label: '⚙️ ' + t('sa_settings') }
   ];
+  const curTabLabel = (tabs.find((x) => x.id === tab) || {}).label || '';
   return (
     <div className="shell">
       <ApkUpdateBanner />   {/* 🔄 v2026.09.29.1 : mise à jour de l'APK visible aussi côté superadmin */}
       <div className="topbar">
+        {/* ☰ v2026.10.12.27 — bouton 3 barres : ouvre le menu VERTICAL des espaces */}
+        <button type="button" className="icon-btn sa-burger" onClick={() => setMenuOpen(true)} aria-label="Menu" title="Menu">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0e9f6e" strokeWidth="2.6" strokeLinecap="round"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+        </button>
         <div className="logo">👑</div>
         <div className="grow">
           <div className="brand-name" style={{ fontSize: 18 }}>Super Admin · Yalla<span className="accent">Liv</span></div>
-          <div className="muted small ellipsis">{user?.name}</div>
+          <div className="muted small ellipsis">{curTabLabel}</div>
         </div>
         <LangSwitch />
         <button className="icon-btn" onClick={() => setAcct(true)} title={t('account_settings')}>👤</button>
@@ -45,11 +51,25 @@ export default function AdminApp() {
           🔔 <b>{pendStores}</b> {t('pending_stores')} → <u>{t('review_now')}</u>
         </div>
       )}
-      <div className="tabs">
-        {tabs.map((x) => (
-          <button key={x.id} className={'tab' + (tab === x.id ? ' on' : '')} onClick={() => setTab(x.id)}>{x.label}</button>
-        ))}
-      </div>
+      {/* ☰ v2026.10.12.27 — MENU VERTICAL : les 12 espaces affichés en COLONNE (fini les onglets horizontaux) */}
+      {menuOpen && (
+        <>
+          <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />
+          <div className="menu-drawer" role="menu">
+            <div className="row spread mb8">
+              <div style={{ fontWeight: 900, fontSize: 15 }}>📋 Menu</div>
+              <button type="button" className="icon-btn" onClick={() => setMenuOpen(false)} aria-label="fermer">✕</button>
+            </div>
+            <div className="menu-list">
+              {tabs.map((x) => (
+                <button key={x.id} type="button" className={'menu-item' + (tab === x.id ? ' on' : '')} onClick={() => { setTab(x.id); setMenuOpen(false); }}>
+                  {x.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
       {acct && (
         <Modal open onClose={() => setAcct(false)} title={'👤 ' + t('account_settings')}>
           <AccountSettings />

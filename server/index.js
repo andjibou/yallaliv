@@ -1894,7 +1894,14 @@ const dayGains = async (driverId) => {
     WHERE driver_id=? AND kind='service' AND status IN ('delivered','refused') AND updated_at >= ? ORDER BY updated_at DESC`, [driverId, dayStart()]);
   return { rate, trips, gains: Math.round(trips.length * rate * 100) / 100 };
 };
+// 💰 v2026.10.12.27 — la CAISSE est réservée aux livreurs GÉNÉRAUX (mes livreurs) :
+// les chargés (livreurs créés par les magasins, store_id) sont payés par leur magasin.
+const cashGeneralOnly = (req, res) => {
+  if (req.user.store_id) { res.status(403).json({ error: 'Caisse réservée aux livreurs généraux' }); return false; }
+  return true;
+};
 app.get('/api/driver/cash', auth, requireRole('driver'), h(async (req, res) => {
+  if (!cashGeneralOnly(req, res)) return;
   const c = await getCash(req.user.id);
   const { rate, trips, gains } = await dayGains(req.user.id);
   // 💼 avances aux magasins : colis NON PAYÉS pris en charge aujourd'hui (et non encore clôturés)
@@ -1914,6 +1921,7 @@ app.get('/api/driver/cash', auth, requireRole('driver'), h(async (req, res) => {
 }));
 // 🏁 remise de fin de journée (code secret requis) — le livreur rend le capital
 app.post('/api/driver/cash/return', auth, requireRole('driver'), h(async (req, res) => {
+  if (!cashGeneralOnly(req, res)) return;
   const c = await getCash(req.user.id);
   if (!c.secret || String(req.body.code || '').trim() !== c.secret) return res.status(400).json({ error: 'Code secret incorrect' });
   await run('UPDATE driver_cash SET pending_return=1 WHERE driver_id=?', [req.user.id]);
@@ -1923,6 +1931,7 @@ app.post('/api/driver/cash/return', auth, requireRole('driver'), h(async (req, r
 }));
 // 👛 demande de retrait (code secret requis)
 app.post('/api/driver/cash/withdraw', auth, requireRole('driver'), h(async (req, res) => {
+  if (!cashGeneralOnly(req, res)) return;
   const c = await getCash(req.user.id);
   if (!c.secret || String(req.body.code || '').trim() !== c.secret) return res.status(400).json({ error: 'Code secret incorrect' });
   const amount = round2(parseFloat(req.body.amount));
@@ -1932,10 +1941,10 @@ app.post('/api/driver/cash/withdraw', auth, requireRole('driver'), h(async (req,
   try { const su = await all("SELECT id FROM users WHERE role='superadmin'"); pushTo(su.map((u) => u.id), '👛 Demande de retrait', (await get('SELECT name FROM users WHERE id=?', [req.user.id])).name + ' demande ' + amount + ' EGP', '/admin?tab=dcash'); } catch {}
   res.json({ ok: true });
 }));
-// 💼 SUPERADMIN : caisse de tous les livreurs
+// 💼 SUPERADMIN : caisse des livreurs GÉNÉRAUX uniquement (v2026.10.12.27)
 app.get('/api/admin/drivers-cash', auth, requireRole('superadmin'), h(async (req, res) => {
   const rows = await all(`SELECT u.id, u.name, u.phone, u.vehicle, u.online, c.capital, c.wallet, c.secret, c.pending_return
-    FROM users u LEFT JOIN driver_cash c ON c.driver_id = u.id WHERE u.role='driver' AND u.status='active' ORDER BY u.name`);
+    FROM users u LEFT JOIN driver_cash c ON c.driver_id = u.id WHERE u.role='driver' AND u.store_id IS NULL AND u.status='active' ORDER BY u.name`);
   const rate = parseFloat(await getSetting('driver_trip_gain', '25')) || 25;
   const reqs = await all(`SELECT l.*, u.name FROM driver_cash_log l JOIN users u ON u.id=l.driver_id WHERE l.status='pending' ORDER BY l.id DESC LIMIT 50`);
   const out = [];

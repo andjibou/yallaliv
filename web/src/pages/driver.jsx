@@ -11,7 +11,7 @@ export default function DriverApp() {
   const { user, logout } = useAuth();
   const [online, setOnline] = useState(!!user.online);
   const [tab, setTab] = useState(user.store_id == null ? 'mine' : 'available');
-  const [view, setView] = useState('home');   // 💰 v2026.10.08.26 : Accueil | $ (caisse du livreur)
+  const [view, setView] = useState('home');   // 💰 v2026.10.08.26 : Accueil | $ (caisse du livreur — GÉNÉRAUX uniquement)
   const [cash, setCash] = useState(null);     // 💰 capital / à encaisser / gains / portefeuille
   const [cashView, setCashView] = useState(null);   // sous-page : capital | collect | gains | wallet
   const [codeAsk, setCodeAsk] = useState(null);     // 🔑 saisie du code secret (remise / retrait)
@@ -19,9 +19,11 @@ export default function DriverApp() {
   const [showSecret, setShowSecret] = useState(false);   // 👁 code secret du portefeuille
   const [codeVal, setCodeVal] = useState('');   // 🔑 saisie du code secret
   const [wdAmt, setWdAmt] = useState('');       // 💰 montant du retrait
+  const [gpsPanel, setGpsPanel] = useState(false);   // ⚙️ v2026.10.12.27 : panneau de réglages GPS (bouton dans 👤)
+  const isGeneral = user.store_id == null;      // 🛵 v2026.10.12.27 : la caisse $ = livreurs GÉNÉRAUX uniquement (pas les chargés)
   const loadCash = () => api('/driver/cash').then(setCash).catch(() => {});
-  useEffect(() => { if (view === 'cash') loadCash(); }, [view]);
-  usePoll(() => { if (view === 'cash') loadCash(); }, 10000);
+  useEffect(() => { if (isGeneral && view === 'cash') loadCash(); }, [view]);
+  usePoll(() => { if (isGeneral && view === 'cash') loadCash(); }, 10000);
   const [avail, setAvail] = useState(null);
   const [mine, setMine] = useState(null);
   const [stats, setStats] = useState(null);
@@ -62,7 +64,6 @@ export default function DriverApp() {
   const activeRef = useRef(null);
 
   const approved = user.status === 'active';
-  const isGeneral = user.store_id == null;
 
   usePoll(() => {
     if (!approved) return;
@@ -301,6 +302,28 @@ export default function DriverApp() {
     const it = setInterval(read, 4000);
     return () => clearInterval(it);
   }, []);
+  // ⚙️ v2026.10.12.27 — liste de contrôle GPS (partagée : compteur du bouton ⚙️ + panneau).
+  // Le panneau vit dans 👤 (bouton ⚙️ SOUS le statut En ligne/Hors ligne) : le livreur doit
+  // TOUT activer — le bouton porte un compteur ROUGE des réglages non activés.
+  const gpsItems = !YG ? [] : [
+    { ok: typeof Notification !== 'undefined' && Notification.permission === 'granted', label: '⓪ 🔔 Notifications de l\'application', act: () => pushSubscribe().catch(() => {}) },   // 🔔 le livreur doit TOUT activer
+    { ok: !!gpsStatus?.permission, label: '③ GPS en temps réel (chaque seconde)', act: () => YG?.requestPermission?.().catch(() => {}) },
+    { ok: !!gpsStatus?.battery, label: '① Rester éveillé (batterie « Sans restriction »)', act: () => YG?.requestBatteryExemption?.().catch(() => {}) },
+    { ok: !!gpsStatus?.overlay, label: '② Par-dessus les autres applications', act: () => YG?.requestOverlay?.().catch(() => {}) },
+    (() => {
+      // hors ligne : le service est VOLONTAIREMENT arrêté → il suffit que la batterie soit « Sans restriction »
+      const ok4 = !!gpsStatus?.battery && (online ? !!gpsStatus?.running : true);
+      return { ok: ok4, label: `④ Continuer après fermeture de l'app${detectedBrand ? ' · ' + BRANDS[detectedBrand].short : ''}`, act: () => { setBrandSel(detectedBrand || null); setBrandHelp(true); } };
+    })(),
+    (() => {
+      // ⑤ : accordée à l'installation (RECEIVE_BOOT_COMPLETED) — suffit que l'APK soit à jour
+      const p = (s) => String(s || '').split('.').map(Number);
+      const a = p(gpsStatus?.apkVersion), b = p(APK_REQUIRED);
+      const ok5 = a.length >= 3 && b.length >= 3 && (a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] >= b[2]))));
+      return { ok: ok5, label: '⑤ Redémarrage auto après extinction du téléphone', act: () => updateApp() };
+    })(),
+  ];
+  const gpsMissing = gpsStatus ? gpsItems.filter((it) => !it.ok).length : 0;   // statut pas encore lu → pas de compteur
   // 🔐 Assistant d'autorisations (app native) : à l'arrivée dans l'espace livreur,
   // on demande UNE SEULE FOIS chaque autorisation manquante (Android les mémorise pour toujours) :
   // ③ Position « tout le temps » → ① Batterie « Sans restriction » → ② Par-dessus les autres apps.
@@ -366,7 +389,7 @@ export default function DriverApp() {
   if (!approved) {
     return (
       <div className="shell">
-        <DrvHead t={t} user={user} onAccount={() => setAcct(true)} />
+        <DrvHead t={t} user={user} warn={YG ? gpsMissing : 0} onAccount={() => setAcct(true)} />
         <div className="banner warn">⏳ {t('waiting_validation')}</div>
         <Empty e="🛵" text={t('waiting_validation')} />
       </div>
@@ -387,7 +410,7 @@ export default function DriverApp() {
 
   return (
     <div className="shell">
-      <DrvHead t={t} user={user} online={online} onAccount={() => setAcct(true)} />
+      <DrvHead t={t} user={user} online={online} warn={YG ? gpsMissing : 0} onAccount={() => setAcct(true)} />
       {isNative && !YG && (
         <div className="card" style={{ background: '#fee2e2', border: '1px solid #ef4444', padding: '10px 14px', fontSize: 13 }}>
           🔴 <b>APK ANCIEN détecté</b> — cette application ne contient pas le service GPS natif (vérifie : réglages Android → YallaLiv → version doit être <b>3.0</b>). Installe le nouvel APK fourni par l'administrateur, puis reconnecte-toi.
@@ -403,50 +426,8 @@ export default function DriverApp() {
           </button>
         </div>
       )}
-      {YG && online && (() => {
-        const age = gpsStatus?.lastUploadAt ? Math.max(0, Math.round((Date.now() - gpsStatus.lastUploadAt) / 1000)) : null;
-        const ok = gpsStatus?.running && age != null && age < 20;
-        return (
-          <div className="card" style={{ background: ok ? '#d1fae5' : '#fffbeb', border: `1px solid ${ok ? '#34d399' : '#fcd34d'}`, padding: '10px 14px', fontSize: 13 }}>
-            <b>📍 Service GPS</b> : {gpsStatus == null ? '…' : gpsStatus.running ? 'ACTIF ✅' : 'arrêté'}
-            {age != null && <span> · dernier envoi <b>il y a {age} s</b></span>}
-            {gpsStatus?.apkVersion && <span> · APK v{gpsStatus.apkVersion}</span>}
-            {gpsStatus && !gpsStatus.permission && <span style={{ color: '#b91c1c' }}> · ⚠️ permission position manquante</span>}
-
-            {gpsStatus && (() => {
-              const items = [
-                { ok: typeof Notification !== 'undefined' && Notification.permission === 'granted', label: '⓪ 🔔 Notifications de l\'application', act: () => pushSubscribe().catch(() => {}) },   // 🔔 v26 : le livreur doit TOUT activer
-                { ok: !!gpsStatus.permission, label: '③ GPS en temps réel (chaque seconde)', act: () => YG.requestPermission?.().catch(() => {}) },
-                { ok: !!gpsStatus.battery, label: '① Rester éveillé (batterie « Sans restriction »)', act: () => YG.requestBatteryExemption?.().catch(() => {}) },
-                { ok: !!gpsStatus.overlay, label: '② Par-dessus les autres applications', act: () => YG.requestOverlay?.().catch(() => {}) },
-                (() => {
-                  const a4 = gpsStatus.lastUploadAt ? Math.round((Date.now() - gpsStatus.lastUploadAt) / 1000) : null;
-                  const ok4 = !!gpsStatus.battery && !!gpsStatus.running;
-                  return { ok: ok4, label: `④ Continuer après fermeture de l'app${detectedBrand ? ' · ' + BRANDS[detectedBrand].short : ''}`, act: () => { setBrandSel(detectedBrand || null); setBrandHelp(true); } };
-                })(),
-                (() => {
-                  // ⑤ : accordée à l'installation (RECEIVE_BOOT_COMPLETED) — suffit que l'APK soit à jour
-                  const p = (s) => String(s || '').split('.').map(Number);
-                  const a = p(gpsStatus.apkVersion), b = p(APK_REQUIRED);
-                  const ok5 = a.length >= 3 && b.length >= 3 && (a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] >= b[2]))));
-                  return { ok: ok5, label: '⑤ Redémarrage auto après extinction du téléphone', act: () => updateApp() };
-                })(),
-              ];
-              return (
-                <div style={{ marginTop: 6 }}>
-                  {items.map((it) => (
-                    <div key={it.label} className="row" style={{ justifyContent: 'space-between', gap: 6, padding: '2px 0' }}>
-                      <span style={{ opacity: 0.9 }}>{it.ok ? '✅' : '⚠️'} {it.label}</span>
-                      {!it.ok && <button className="btn" style={{ padding: '2px 10px', fontSize: 12 }} onClick={it.act}>Activer</button>}
-                    </div>
-                  ))}
-                  <button className="btn" style={{ padding: '2px 10px', fontSize: 12, marginTop: 4 }} onClick={openAppSettings}>⚙️ Tous les réglages</button>
-                </div>
-              );
-            })()}
-          </div>
-        );
-      })()}
+      {/* ⚙️ v2026.10.12.27 — le tableau de bord GPS a DÉMÉNAGÉ dans 👤 (bouton ⚙️ sous le statut
+          En ligne/Hors ligne, avec compteur ROUGE des réglages non activés — le livreur doit tout activer) */}
       {view === 'home' && (<>
       <div className="stat-grid">
         <div className="stat hl"><div className="v" style={{ fontSize: 18 }}>{fmtMoney(stats?.today_earnings || 0)}</div><div className="k">💰 {t('today_earnings')}</div></div>
@@ -583,13 +564,45 @@ export default function DriverApp() {
             <span style={{ fontWeight: 800 }}>{online ? '🟢 ' + t('online') : '⚪ ' + t('offline')}</span>
             <button type="button" className={'switch' + (online ? ' on' : '')} onClick={toggleOnline} aria-label="online" />
           </div>
+          {/* ⚙️ v2026.10.12.27 — bouton Paramètres SOUS le statut En ligne/Hors ligne.
+              Compteur ROUGE = nombre de réglages non activés → le livreur entre et les active. */}
+          {YG && (
+            <button type="button" className="btn block mb12" onClick={() => setGpsPanel(true)}>
+              ⚙️ {t('gps_settings')}{gpsMissing > 0 && <span className="gps-count">{gpsMissing}</span>}
+            </button>
+          )}
           <AccountSettings />
           <button className="btn danger block mt12" onClick={logout}>🚪 {t('logout')}</button>
         </Modal>
       )}
 
-      {/* ═══ 💰 v2026.10.08.26 — PAGE $ : la caisse du livreur (4 grands boutons) ═══ */}
-      {view === 'cash' && (
+      {/* ⚙️ v2026.10.12.27 — PANNEAU de réglages GPS : statut du service + liste de contrôle (tout activer) */}
+      <Modal open={gpsPanel} onClose={() => setGpsPanel(false)} title={'⚙️ ' + t('gps_settings')}>
+        {(() => {
+          const age = gpsStatus?.lastUploadAt ? Math.max(0, Math.round((Date.now() - gpsStatus.lastUploadAt) / 1000)) : null;
+          const ok = gpsStatus?.running && age != null && age < 20;
+          return (
+            <div className="card" style={{ background: ok ? '#d1fae5' : '#fffbeb', border: `1px solid ${ok ? '#34d399' : '#fcd34d'}`, padding: '10px 14px', fontSize: 13 }}>
+              <b>📍 Service GPS</b> : {gpsStatus == null ? '…' : gpsStatus.running ? 'ACTIF ✅' : 'arrêté'}
+              {age != null && <span> · dernier envoi <b>il y a {age} s</b></span>}
+              {gpsStatus?.apkVersion && <span> · APK v{gpsStatus.apkVersion}</span>}
+              {gpsStatus && !gpsStatus.permission && <span style={{ color: '#b91c1c' }}> · ⚠️ permission position manquante</span>}
+              <div style={{ marginTop: 6 }}>
+                {gpsItems.map((it) => (
+                  <div key={it.label} className="row" style={{ justifyContent: 'space-between', gap: 6, padding: '2px 0' }}>
+                    <span style={{ opacity: 0.9 }}>{it.ok ? '✅' : '⚠️'} {it.label}</span>
+                    {!it.ok && <button className="btn" style={{ padding: '2px 10px', fontSize: 12 }} onClick={it.act}>Activer</button>}
+                  </div>
+                ))}
+                <button className="btn" style={{ padding: '2px 10px', fontSize: 12, marginTop: 4 }} onClick={openAppSettings}>⚙️ Tous les réglages</button>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
+
+      {/* ═══ 💰 v2026.10.08.26 — PAGE $ : la caisse du livreur (4 grands boutons) — GÉNÉRAUX uniquement ═══ */}
+      {isGeneral && view === 'cash' && (
         <div>
           <div className="topbar"><button className="icon-btn yl-back" onClick={() => (cashView ? setCashView(null) : setView('home'))} aria-label="retour">←</button><div className="grow"><div className="brand-name">💱 {t('dcash_title')}</div></div></div>
           {!cash ? <Spinner /> : (<>
@@ -725,7 +738,9 @@ export default function DriverApp() {
       </Modal>
       <ChatModal order={chat} onClose={() => setChat(null)} />
 
-      {/* 🧭 v2026.10.08.26 — barre de navigation bas : Accueil + $ (caisse du livreur) */}
+      {/* 🧭 v2026.10.08.26 — barre de navigation bas : Accueil + $ (caisse) — GÉNÉRAUX uniquement :
+          un chargé n'a pas de caisse → pas de bouton $ ni de barre (une seule vue Accueil) */}
+      {isGeneral && (
       <nav className="cnav">
         <button type="button" className={'cnav-item' + (view === 'home' ? ' on' : '')} onClick={() => { setView('home'); setCashView(null); }}>
           <span className="ci">🏠</span>{t('home')}
@@ -737,6 +752,7 @@ export default function DriverApp() {
           </svg></span>{t('dcash_title')}
         </button>
       </nav>
+      )}
 
       <Modal open={!!routeView} onClose={() => setRouteView(null)} title={'🗺️ ' + t('route') + ' #' + (routeView?.id || '')}>
         {routeView && (
@@ -909,8 +925,9 @@ const detectBrand = () => {
 
 /* 🟩 v2026.10.08.26 — EN-TÊTE comme l'espace client : dégradé vert + logo + sélecteur
    de langue ROND (globe svg) + 🔔 notifications + 👤 profil (en ligne/hors ligne et
-   déconnexion sont DEDANS). Le badge en ligne vit dans la barre du bas. */
-function DrvHead({ t, user, online, onAccount }) {
+   déconnexion sont DEDANS). Le badge en ligne vit dans la barre du bas.
+   ⚙️ v2026.10.12.27 : le 👤 porte un compteur ROUGE des réglages GPS non activés. */
+function DrvHead({ t, user, online, warn, onAccount }) {
   return (
     <div className="home-head">
       <div className="row spread mb8">
@@ -924,7 +941,9 @@ function DrvHead({ t, user, online, onAccount }) {
         <div className="row" style={{ gap: 6 }}>
           <DriverLang />
           <BellButton />
-          <button type="button" className="head-icon" onClick={onAccount} title={t('account_settings')} aria-label={t('account_settings')}>👤</button>
+          <button type="button" className="head-icon" onClick={onAccount} title={t('account_settings')} aria-label={t('account_settings')} style={{ position: 'relative' }}>👤
+            {warn > 0 && <span className="gps-count" style={{ position: 'absolute', top: -5, right: -6, marginLeft: 0 }}>{warn}</span>}
+          </button>
         </div>
       </div>
     </div>
@@ -970,4 +989,3 @@ function CashBig({ emoji, label, sub, val, on }) {
     </button>
   );
 }
-
