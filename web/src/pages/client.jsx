@@ -3074,6 +3074,8 @@ export function DeliveryRequestPage() {
   const t = useT(); const nav = useNavigate(); const { user } = useAuth();
   const [f, setF] = useState({ type: 'market', name: '', phone: user?.phone || '', address: '' });
   const [busy, setBusy] = useState(false);
+  const [pos, setPos] = useState(null);   // 📍 v2026.10.08.24 : position du magasin (carte)
+  const [mapOpen, setMapOpen] = useState(false);
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
   const submit = async () => {
     if (busy) return;
@@ -3082,7 +3084,7 @@ export function DeliveryRequestPage() {
     if (f.address.trim().length < 5) return toast(t('address') + ' ?', 'err');
     setBusy(true);
     try {
-      await api('/delivery/request', { method: 'POST', body: { type: f.type, name: f.name.trim(), phone: f.phone.trim(), address: f.address.trim() } });
+      await api('/delivery/request', { method: 'POST', body: { type: f.type, name: f.name.trim(), phone: f.phone.trim(), address: f.address.trim(), lat: pos?.lat, lng: pos?.lng } });   // 📍 v24 : position carte (optionnelle)
       toast(t('deliv_req_sent'), 'ok');
       nav('/app');
     } catch (ex) { toast(ex.message, 'err'); }
@@ -3116,6 +3118,15 @@ export function DeliveryRequestPage() {
           <label className="label">📍 {t('address')}</label>
           <textarea className="textarea" rows={2} value={f.address} onChange={(e) => set('address', e.target.value)} placeholder="12 rue Saad Zaghloul, Alexandrie" />
         </div>
+        {/* 📍 v2026.10.08.24 : position du magasin sur la carte — ce sera le point de
+            RÉCUPÉRATION des colis de l'espace livraison (lecture seule ensuite). */}
+        <div className="field">
+          <label className="label">📍 {t('deliv_req_map')}</label>
+          <button type="button" className={'btn block' + (pos ? ' primary' : ' ghost')} onClick={() => setMapOpen(true)}>
+            {pos ? '✅ ' + t('loc_set') + ' (' + pos.lat.toFixed(4) + ', ' + pos.lng.toFixed(4) + ')' : '🗺️ ' + t('pick_map')}
+          </button>
+          <div className="muted xsmall mt4">{t('deliv_req_map_note')}</div>
+        </div>
         <div className="field">
           <label className="label">💳 {t('subscription')}</label>
           <select className="select" value="a_definir" disabled>
@@ -3126,6 +3137,17 @@ export function DeliveryRequestPage() {
         <p className="muted small" style={{ margin: '8px 0 0' }}>⏳ {t('deliv_req_note')}</p>
         <button className="btn primary block mt8" disabled={busy} onClick={submit}>{busy ? '…' : '✅ ' + t('deliv_req_submit')}</button>
       </div>
+
+      <Modal open={mapOpen} onClose={() => setMapOpen(false)} title={'🗺️ ' + t('deliv_req_map')}>
+        {mapOpen && (
+          <PickMap initial={pos || { lat: 31.2001, lng: 29.9187 }}
+            onConfirm={({ lat, lng, address }) => {
+              setPos({ lat, lng });
+              setF((x) => (x.address.trim() ? x : { ...x, address: address ? address.split(',').slice(0, 3).join(', ') : '' }));   // pré-remplit l'adresse si vide
+              setMapOpen(false); toast(t('loc_set'), 'ok');
+            }} />
+        )}
+      </Modal>
     </div>
   );
 }
@@ -3141,6 +3163,13 @@ export function ServiceRequestPage() {
   const [prepaid, setPrepaid] = useState(false);   // ✅ déjà payé par l'expéditeur
   const [busy, setBusy] = useState(false);
   const [pPick, setPPick] = useState(false); const [dPick, setDPick] = useState(false);
+  const [acct, setAcct] = useState(null);   // 📦 v2026.10.08.24 : espace livraison confirmé → récupération TOUJOURS le magasin
+  useEffect(() => {
+    api('/delivery/account').then((d) => setAcct(d.account && d.account.status === 'approved' ? d.account : null)).catch(() => setAcct(null));
+  }, []);
+  useEffect(() => {   // le pickup devient l'adresse + la position du magasin (lecture seule)
+    if (acct) { setPAddr(acct.address); if (acct.lat != null && acct.lng != null) setPGps({ lat: acct.lat, lng: acct.lng }); }
+  }, [acct]);
   const pTm = useRef(null); const dTm = useRef(null);
   const pSeq = useRef(0); const dSeq = useRef(0);   // 🛡️ v2026.10.08.8 : anti-réponse-périmée
 
@@ -3220,15 +3249,31 @@ export function ServiceRequestPage() {
           <label className="label">📝 {t('svc_desc')}</label>
           <textarea className="textarea" rows={3} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder={rName ? t('svc_desc_opt') : t('svc_desc_ph')} />
         </div>
-        {addrField('p', '📍 ' + t('svc_pickup'), pAddr, pGps, pSugg)}
-        <button type="button" className="btn ghost sm mb8" onClick={() => {
+        {/* 📦 v2026.10.08.24 — RÉCUPÉRATION : TOUJOURS le magasin de l'espace livraison
+            (adresse + position entrées à la création) — lecture seule, pas de carte. */}
+        {acct && (
+          <div className="field">
+            <label className="label">📍 {t('svc_pickup')}</label>
+            <div className="row" style={{ padding: '10px 12px', background: '#f0fdf4', borderRadius: 10, gap: 8, border: '1px solid #bbf7d0' }}>
+              <span style={{ fontSize: 20 }}>🏬</span>
+              <span className="grow" style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', fontWeight: 800 }} className="small ellipsis">{acct.name}</span>
+                <span className="muted xsmall ellipsis" style={{ display: 'block' }}>{acct.address}</span>
+              </span>
+              {pGps && <span style={{ fontSize: 16 }}>✅</span>}
+            </div>
+            <div className="muted xsmall mt4">{pGps ? '✅ ' + t('loc_set') : '⚠️ ' + t('store_pos_missing')}</div>
+          </div>
+        )}
+        {!acct && addrField('p', '📍 ' + t('svc_pickup'), pAddr, pGps, pSugg)}
+        {!acct && <button type="button" className="btn ghost sm mb8" onClick={() => {
           if (!navigator.geolocation) return toast(t('gps_fail'), 'err');
           navigator.geolocation.getCurrentPosition((p) => {
             setPGps({ lat: p.coords.latitude, lng: p.coords.longitude });
             setPAddr((a) => a || t('my_pos'));
             toast('📍 ' + t('loc_set'), 'ok');
           }, () => toast(t('gps_fail'), 'err'), { timeout: 6000 });
-        }}>📍 {t('my_pos')}</button>
+        }}>📍 {t('my_pos')}</button>}
         {addrField('d', '🏁 ' + t('svc_dropoff') + ' — ' + t('receiver_addr'), dAddr, dGps, dSugg)}
         <div className="field">
           <label className="label">📞 {t('receiver_phone')}</label>
@@ -3252,12 +3297,14 @@ export function ServiceRequestPage() {
         <button className="btn primary block mt8" disabled={busy} onClick={submit}>{busy ? '…' : '🛵 ' + t('svc_send')}</button>
       </div>
 
-      <Modal open={pPick} onClose={() => setPPick(false)} title={'🗺️ ' + t('svc_pickup')}>
-        {pPick && (
-          <PickMap initial={pGps || { lat: 31.2001, lng: 29.9187 }}
-            onConfirm={({ lat, lng, address }) => { setPGps({ lat, lng }); setPAddr((a) => a || (address ? address.split(',').slice(0, 2).join(', ') : '')); setPPick(false); toast(t('loc_set'), 'ok'); }} />
-        )}
-      </Modal>
+      {!acct && (
+        <Modal open={pPick} onClose={() => setPPick(false)} title={'🗺️ ' + t('svc_pickup')}>
+          {pPick && (
+            <PickMap initial={pGps || { lat: 31.2001, lng: 29.9187 }}
+              onConfirm={({ lat, lng, address }) => { setPGps({ lat, lng }); setPAddr((a) => a || (address ? address.split(',').slice(0, 2).join(', ') : '')); setPPick(false); toast(t('loc_set'), 'ok'); }} />
+          )}
+        </Modal>
+      )}
       <Modal open={dPick} onClose={() => setDPick(false)} title={'🗺️ ' + t('svc_dropoff')}>
         {dPick && (
           <PickMap initial={dGps || { lat: 31.2001, lng: 29.9187 }}

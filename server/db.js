@@ -428,9 +428,13 @@ export async function initDb() {
     address TEXT DEFAULT '',
     subscription TEXT DEFAULT 'a_definir',
     status TEXT NOT NULL DEFAULT 'pending',
+    lat REAL,   -- 📍 v2026.10.08.24 : position du magasin (carte à la création) = point de récupération des colis
+    lng REAL,
     created_at BIGINT NOT NULL,
     decided_at BIGINT
   )`).catch(() => {});
+  await run('ALTER TABLE delivery_accounts ADD COLUMN lat REAL').catch(() => {});   // 📍 v2026.10.08.24 (bases v21 existantes)
+  await run('ALTER TABLE delivery_accounts ADD COLUMN lng REAL').catch(() => {});
   await run('ALTER TABLE users ALTER COLUMN email DROP NOT NULL').catch(() => {});   // comptes par telephone (email NULL)
   // 🛍️ v2026.09.26.1 — Marché Phase 1 : sous-catégories, état, attributs, zone, vues, renouvellement, multi-photos
   await run('ALTER TABLE listings ADD COLUMN subcategory TEXT').catch(() => {});

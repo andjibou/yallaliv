@@ -895,11 +895,19 @@ app.post('/api/services', auth, requireRole('client', 'merchant', 'superadmin'),
   if (cod_amount != null) cod_amount = Math.max(0, Math.min(1000000, cod_amount));
   let description = String(req.body.description || '').trim().slice(0, 300);
   if (!description && receiver_name) description = `📦 Colis pour ${receiver_name}` + (prepaid ? ' — ✅ déjà payé' : (cod_amount != null ? ` — 💰 à encaisser : ${cod_amount} EGP` : ''));
-  const pickup_address = String(req.body.pickup_address || '').trim().slice(0, 200);
+  let pickup_address = String(req.body.pickup_address || '').trim().slice(0, 200);   // 🔧 v24 : let — réécrit par l'espace livraison (récupération = le magasin)
   const address = String(req.body.address || '').trim().slice(0, 200);   // point de LIVRAISON
   const phone = String(receiver_phone || req.body.phone || req.user.phone || '').trim();
-  const plat = parseFloat(req.body.pickup_lat); const plng = parseFloat(req.body.pickup_lng);
+  let plat = parseFloat(req.body.pickup_lat); let plng = parseFloat(req.body.pickup_lng);
   const clat = parseFloat(req.body.lat); const clng = parseFloat(req.body.lng);
+  // 📦 v2026.10.08.24 — ESPACE LIVRAISON : le point de RÉCUPÉRATION est TOUJOURS le magasin
+  // (l'adresse + la position entrées à la création de l'espace). Tout pickup envoyé par le
+  // client est IGNORÉ — le colis part du magasin, jamais d'ailleurs.
+  const acc = await get(`SELECT name, address, lat AS alat, lng AS alng FROM delivery_accounts WHERE user_id=? AND status='approved' LIMIT 1`, [req.user.id]);
+  if (acc) {
+    pickup_address = acc.address;
+    if (acc.alat != null && acc.alng != null) { plat = acc.alat; plng = acc.alng; }
+  }
   if (description.length < 5) return res.status(400).json({ error: 'Décrivez la course (5 caractères minimum) — ou donnez le nom du receveur' });
   if (pickup_address.length < 5) return res.status(400).json({ error: 'Adresse de récupération trop courte' });
   if (address.length < 5) return res.status(400).json({ error: 'Adresse de livraison trop courte' });
@@ -980,8 +988,10 @@ app.post('/api/delivery/request', auth, requireRole('client', 'merchant'), h(asy
   if (name.length < 2) return res.status(400).json({ error: 'Nom du magasin requis' });
   if (phone.replace(/\D/g, '').length < 10) return res.status(400).json({ error: 'Téléphone invalide (ex. : 0100 123 4567)' });
   if (address.length < 5) return res.status(400).json({ error: 'Adresse du magasin requise' });
-  const r = await run('INSERT INTO delivery_accounts(user_id,name,type,phone,address,subscription,status,created_at) VALUES(?,?,?,?,?,?,?,?) RETURNING id',
-    [req.user.id, name, type, phone, address, subscription, 'pending', Date.now()]);
+  const lat = parseFloat(req.body.lat), lng = parseFloat(req.body.lng);   // 📍 v2026.10.08.24 : position du magasin (carte — optionnelle)
+  const hasPos = !isNaN(lat) && !isNaN(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+  const r = await run('INSERT INTO delivery_accounts(user_id,name,type,phone,address,subscription,status,lat,lng,created_at) VALUES(?,?,?,?,?,?,?,?,?,?) RETURNING id',
+    [req.user.id, name, type, phone, address, subscription, 'pending', hasPos ? lat : null, hasPos ? lng : null, Date.now()]);
   try {
     const su = await all("SELECT id FROM users WHERE role='superadmin'");
     pushTo(su.map((u) => u.id), '🛵 Nouvelle demande d\'espace livraison', name.slice(0, 60) + ' — à confirmer (onglet 📦 Espaces livraison)', '/admin?tab=daccounts');
