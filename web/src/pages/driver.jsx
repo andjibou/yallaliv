@@ -11,6 +11,17 @@ export default function DriverApp() {
   const { user, logout } = useAuth();
   const [online, setOnline] = useState(!!user.online);
   const [tab, setTab] = useState(user.store_id == null ? 'mine' : 'available');
+  const [view, setView] = useState('home');   // 💰 v2026.10.08.26 : Accueil | $ (caisse du livreur)
+  const [cash, setCash] = useState(null);     // 💰 capital / à encaisser / gains / portefeuille
+  const [cashView, setCashView] = useState(null);   // sous-page : capital | collect | gains | wallet
+  const [codeAsk, setCodeAsk] = useState(null);     // 🔑 saisie du code secret (remise / retrait)
+  const [wdAsk, setWdAsk] = useState(false);        // 👛 demande de retrait
+  const [showSecret, setShowSecret] = useState(false);   // 👁 code secret du portefeuille
+  const [codeVal, setCodeVal] = useState('');   // 🔑 saisie du code secret
+  const [wdAmt, setWdAmt] = useState('');       // 💰 montant du retrait
+  const loadCash = () => api('/driver/cash').then(setCash).catch(() => {});
+  useEffect(() => { if (view === 'cash') loadCash(); }, [view]);
+  usePoll(() => { if (view === 'cash') loadCash(); }, 10000);
   const [avail, setAvail] = useState(null);
   const [mine, setMine] = useState(null);
   const [stats, setStats] = useState(null);
@@ -355,7 +366,7 @@ export default function DriverApp() {
   if (!approved) {
     return (
       <div className="shell">
-        <Top t={t} user={user} logout={logout} online={false} onToggle={() => {}} disabled onAccount={() => setAcct(true)} />
+        <DrvHead t={t} user={user} onAccount={() => setAcct(true)} />
         <div className="banner warn">⏳ {t('waiting_validation')}</div>
         <Empty e="🛵" text={t('waiting_validation')} />
       </div>
@@ -376,7 +387,7 @@ export default function DriverApp() {
 
   return (
     <div className="shell">
-      <Top t={t} user={user} logout={logout} online={online} onToggle={toggleOnline} onAccount={() => setAcct(true)} />
+      <DrvHead t={t} user={user} online={online} onAccount={() => setAcct(true)} />
       {isNative && !YG && (
         <div className="card" style={{ background: '#fee2e2', border: '1px solid #ef4444', padding: '10px 14px', fontSize: 13 }}>
           🔴 <b>APK ANCIEN détecté</b> — cette application ne contient pas le service GPS natif (vérifie : réglages Android → YallaLiv → version doit être <b>3.0</b>). Installe le nouvel APK fourni par l'administrateur, puis reconnecte-toi.
@@ -404,6 +415,7 @@ export default function DriverApp() {
 
             {gpsStatus && (() => {
               const items = [
+                { ok: typeof Notification !== 'undefined' && Notification.permission === 'granted', label: '⓪ 🔔 Notifications de l\'application', act: () => pushSubscribe().catch(() => {}) },   // 🔔 v26 : le livreur doit TOUT activer
                 { ok: !!gpsStatus.permission, label: '③ GPS en temps réel (chaque seconde)', act: () => YG.requestPermission?.().catch(() => {}) },
                 { ok: !!gpsStatus.battery, label: '① Rester éveillé (batterie « Sans restriction »)', act: () => YG.requestBatteryExemption?.().catch(() => {}) },
                 { ok: !!gpsStatus.overlay, label: '② Par-dessus les autres applications', act: () => YG.requestOverlay?.().catch(() => {}) },
@@ -435,6 +447,7 @@ export default function DriverApp() {
           </div>
         );
       })()}
+      {view === 'home' && (<>
       <div className="stat-grid">
         <div className="stat hl"><div className="v" style={{ fontSize: 18 }}>{fmtMoney(stats?.today_earnings || 0)}</div><div className="k">💰 {t('today_earnings')}</div></div>
         <div className="stat"><div className="v" style={{ fontSize: 18 }}>{fmtMoney(stats?.earnings || 0)}</div><div className="k">🏆 {t('total_earnings')}</div></div>
@@ -546,6 +559,7 @@ export default function DriverApp() {
             </div>
           ))}</div>
       )}
+      </>)}
 
       {alarm && (
         <div className="alarm-overlay" role="alertdialog">
@@ -564,10 +578,165 @@ export default function DriverApp() {
 
       {acct && (
         <Modal open onClose={() => setAcct(false)} title={'👤 ' + t('account_settings')}>
+          {/* 🔌 v2026.10.08.26 : le bouton en ligne/hors ligne et la déconnexion sont DANS 👤 */}
+          <div className="card row spread mb12" style={{ padding: '10px 14px' }}>
+            <span style={{ fontWeight: 800 }}>{online ? '🟢 ' + t('online') : '⚪ ' + t('offline')}</span>
+            <button type="button" className={'switch' + (online ? ' on' : '')} onClick={toggleOnline} aria-label="online" />
+          </div>
           <AccountSettings />
+          <button className="btn danger block mt12" onClick={logout}>🚪 {t('logout')}</button>
         </Modal>
       )}
+
+      {/* ═══ 💰 v2026.10.08.26 — PAGE $ : la caisse du livreur (4 grands boutons) ═══ */}
+      {view === 'cash' && (
+        <div>
+          <div className="topbar"><button className="icon-btn yl-back" onClick={() => (cashView ? setCashView(null) : setView('home'))} aria-label="retour">←</button><div className="grow"><div className="brand-name">💱 {t('dcash_title')}</div></div></div>
+          {!cash ? <Spinner /> : (<>
+          {!cashView && (
+            <div className="row wrap" style={{ gap: 8 }}>
+              <CashBig emoji="💼" label={t('dcash_capital')} sub={t('dcash_capital_sub')} val={fmtMoney(cash.capital)} on={() => setCashView('capital')} />
+              <CashBig emoji="💰" label={t('dcash_collect')} sub={t('dcash_collect_sub')} val={fmtMoney(cash.total_to_collect)} on={() => setCashView('collect')} />
+              <CashBig emoji="📈" label={t('dcash_gains')} sub={cash.rate + ' EGP × ' + cash.trips.length + ' ' + t('dcash_trips')} val={fmtMoney(cash.gains)} on={() => setCashView('gains')} />
+              <CashBig emoji="👛" label={t('dcash_wallet')} sub={t('dcash_wallet_sub')} val={fmtMoney(cash.wallet)} on={() => setCashView('wallet')} />
+            </div>
+          )}
+          {cashView === 'capital' && (<>
+            <div className="card mb12" style={{ padding: 14 }}>
+              <div className="row spread"><span className="label" style={{ margin: 0 }}>💼 {t('dcash_capital')}</span><button className="btn ghost sm" onClick={() => setCashView(null)}>←</button></div>
+              <div style={{ fontSize: 26, fontWeight: 900 }}>{fmtMoney(cash.capital)}</div>
+              <div className="muted xsmall">{t('dcash_available_note')} · {t('dcash_given')}: {fmtMoney(cash.capital_given)}{cash.outstanding > 0 ? ' · ' + t('dcash_outstanding') + ': ' + fmtMoney(cash.outstanding) : ''}</div>
+              {cash.pending_return
+                ? <div className="banner ok mt8">🏁 {t('dcash_return_pending')}</div>
+                : <button className="btn primary block mt8" onClick={() => setCodeAsk('return')} disabled={!cash.capital_given}>🏁 {t('dcash_return')}</button>}
+            </div>
+            <div className="card" style={{ padding: 14 }}>
+              <div className="label mb8">🏬 {t('dcash_advances')} ({(cash.advances || []).length})</div>
+              {(cash.advances || []).length === 0 ? <Empty e="🏬" text={t('dcash_no_advances')} /> : (cash.advances).map((o) => (
+                <div key={o.id} className="product-row" style={{ flexWrap: 'wrap' }}>
+                  <div className="avatar" style={{ background: '#f59e0b' }}>🏬</div>
+                  <div className="grow" style={{ minWidth: 130 }}>
+                    <div style={{ fontWeight: 800 }}>#{o.id} · {fmtMoney(o.cod_amount)}</div>
+                    <div className="muted small ellipsis">🏬 {o.pickup_address}</div>
+                    <div className="muted xsmall">👤 {o.receiver_name} · {fmtDate(o.updated_at)}</div>
+                  </div>
+                  <span className="badge" style={{ background: o.status === 'picked_up' ? '#fef3c7' : '#d1fae5', color: o.status === 'picked_up' ? '#92400e' : '#065f46' }}>{o.status === 'picked_up' ? '📤 ' + t('dcash_advanced') : o.status === 'delivered' ? '✅ ' + t('dcash_collected') : '↩️ ' + t('dcash_refunded')}</span>
+                </div>
+              ))}
+            </div>
+          </>)}
+          {cashView === 'collect' && (<>
+            <div className="card mb12" style={{ padding: 14 }}>
+              <div className="row spread"><span className="label" style={{ margin: 0 }}>💰 {t('dcash_collect')}</span><button className="btn ghost sm" onClick={() => setCashView(null)}>←</button></div>
+              <div style={{ fontSize: 26, fontWeight: 900 }}>{fmtMoney(cash.total_to_collect)}</div>
+              <div className="muted xsmall">{t('dcash_collect_note')}</div>
+            </div>
+            <div className="card" style={{ padding: 14 }}>
+              {(cash.to_collect || []).length === 0 ? <Empty e="💰" text={t('dcash_no_collect')} /> : (cash.to_collect).map((o) => (
+                <div key={o.id} className="product-row" style={{ flexWrap: 'wrap' }}>
+                  <div className="avatar" style={{ background: 'linear-gradient(135deg,#f59e0b,#ef4444)' }}>💰</div>
+                  <div className="grow" style={{ minWidth: 130 }}>
+                    <div style={{ fontWeight: 800 }}>#{o.id} · {fmtMoney(o.cod_amount)}</div>
+                    <div className="muted small ellipsis">👤 {o.receiver_name} · 📞 {o.receiver_phone}</div>
+                    <div className="muted xsmall ellipsis">🏁 {o.address}</div>
+                  </div>
+                  <span className="badge" style={{ background: '#e0f2fe', color: '#075985' }}>{o.status === 'picked_up' ? '🚚 ' + t('dcash_on_way') : '📦 ' + t('dcash_to_pick')}</span>
+                </div>
+              ))}
+            </div>
+          </>)}
+          {cashView === 'gains' && (<>
+            <div className="card mb12" style={{ padding: 14 }}>
+              <div className="row spread"><span className="label" style={{ margin: 0 }}>📈 {t('dcash_gains')}</span><button className="btn ghost sm" onClick={() => setCashView(null)}>←</button></div>
+              <div style={{ fontSize: 26, fontWeight: 900 }}>{fmtMoney(cash.gains)}</div>
+              <div className="muted xsmall">{cash.rate} EGP × {cash.trips.length} {t('dcash_trips')} · {t('dcash_gains_note')}</div>
+            </div>
+            <div className="card" style={{ padding: 14 }}>
+              {(cash.trips || []).length === 0 ? <Empty e="📈" text={t('dcash_no_gains')} /> : (cash.trips).map((o) => (
+                <div key={o.id} className="product-row" style={{ flexWrap: 'wrap' }}>
+                  <div className="avatar" style={{ background: 'linear-gradient(135deg,#0e9f6e,#0ea5e9)' }}>🚚</div>
+                  <div className="grow" style={{ minWidth: 130 }}>
+                    <div style={{ fontWeight: 800 }}>#{o.id} · {fmtMoney(cash.rate)}</div>
+                    <div className="muted small ellipsis">👤 {o.receiver_name || '—'}</div>
+                    <div className="muted xsmall">🏬 {o.pickup_address} · {fmtDate(o.updated_at)}</div>
+                  </div>
+                  <span className="badge" style={{ background: o.status === 'delivered' ? '#d1fae5' : '#fef3c7', color: o.status === 'delivered' ? '#065f46' : '#92400e' }}>{o.status === 'delivered' ? '✅ ' + t('dcash_delivered') : '↩️ ' + t('dcash_returned')}</span>
+                </div>
+              ))}
+            </div>
+          </>)}
+          {cashView === 'wallet' && (<>
+            <div className="card mb12" style={{ padding: 14 }}>
+              <div className="row spread"><span className="label" style={{ margin: 0 }}>👛 {t('dcash_wallet')}</span><button className="btn ghost sm" onClick={() => setCashView(null)}>←</button></div>
+              <div style={{ fontSize: 26, fontWeight: 900 }}>{fmtMoney(cash.wallet)}</div>
+              <div className="muted xsmall">{t('dcash_wallet_note')}</div>
+              {/* 🔑 code secret unique — visible ici (et dans le superadmin) */}
+              <div className="row spread mt8" style={{ padding: '10px 12px', background: '#f0fdf4', borderRadius: 10, border: '1px solid #bbf7d0' }} onClick={() => setShowSecret((v) => !v)}>
+                <span style={{ fontWeight: 800 }}>🔑 {t('dcash_secret')}</span>
+                <span style={{ fontSize: 18, fontWeight: 900, letterSpacing: 3, cursor: 'pointer' }} dir="ltr">{showSecret ? cash.secret : '••••••'}</span>
+              </div>
+              <div className="muted xsmall mt4">{t('dcash_secret_note')}</div>
+              <button className="btn primary block mt8" onClick={() => setWdAsk(true)} disabled={cash.wallet <= 0}>👛 {t('dcash_withdraw')}</button>
+            </div>
+            <div className="card" style={{ padding: 14 }}>
+              <div className="label mb8">📋 {t('dcash_wlog')} ({(cash.log || []).filter((l) => l.kind !== 'capital').length})</div>
+              {(cash.log || []).filter((l) => l.kind !== 'capital').length === 0 ? <Empty e="📋" text={t('dcash_no_wlog')} /> : (cash.log).filter((l) => l.kind !== 'capital').map((l) => (
+                <div key={l.id} className="product-row" style={{ flexWrap: 'wrap' }}>
+                  <div className="avatar" style={{ background: l.kind === 'gain' ? '#d1fae5' : '#e0e7ff' }}>{l.kind === 'gain' ? '🏁' : '👛'}</div>
+                  <div className="grow" style={{ minWidth: 130 }}>
+                    <div style={{ fontWeight: 800 }}>{l.kind === 'gain' ? '🏁 ' + t('dcash_day_close') : '👛 ' + t('dcash_wd')} · {fmtMoney(l.amount)}</div>
+                    <div className="muted xsmall">{l.note} · {fmtDate(l.created_at)}</div>
+                  </div>
+                  {l.status !== 'done' && <span className="badge" style={{ background: l.status === 'pending' ? '#fef3c7' : '#fee2e2', color: l.status === 'pending' ? '#92400e' : '#b91c1c' }}>{l.status === 'pending' ? '⏳ ' + t('pending') : '❌'}</span>}
+                </div>
+              ))}
+            </div>
+          </>)}
+          </>)}
+        </div>
+      )}
+
+      {/* 🔑 saisie du code secret (remise de fin de journée) */}
+      <Modal open={!!codeAsk} onClose={() => setCodeAsk(null)} title={'🔑 ' + t('dcash_code_q')}>
+        <p className="muted small" style={{ marginTop: 0 }}>{t('dcash_return_confirm')}</p>
+        <input className="input" dir="ltr" inputMode="numeric" maxLength={6} placeholder="••••••" value={codeVal} onChange={(e) => setCodeVal(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          style={{ fontSize: 26, fontWeight: 800, letterSpacing: 8, textAlign: 'center' }} />
+        <button className="btn primary block mt8" disabled={codeVal.length !== 6} onClick={async () => {
+          try { await api('/driver/cash/return', { method: 'POST', body: { code: codeVal } }); toast('🏁 ' + t('dcash_return_sent'), 'ok'); setCodeAsk(null); setCodeVal(''); loadCash(); }
+          catch (ex) { toast(ex.message, 'err'); }
+        }}>🏁 {t('dcash_return')}</button>
+      </Modal>
+
+      {/* 👛 demande de retrait (code + montant) */}
+      <Modal open={wdAsk} onClose={() => setWdAsk(false)} title={'👛 ' + t('dcash_withdraw')}>
+        <div className="field">
+          <label className="label">💰 {t('dcash_wd_amount')}</label>
+          <input className="input" dir="ltr" type="number" min="0" step="0.5" value={wdAmt} onChange={(e) => setWdAmt(e.target.value)} placeholder={String(Math.min(cash?.wallet || 0, 50))} />
+        </div>
+        <div className="field">
+          <label className="label">🔑 {t('dcash_secret')}</label>
+          <input className="input" dir="ltr" inputMode="numeric" maxLength={6} placeholder="••••••" value={codeVal} onChange={(e) => setCodeVal(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            style={{ fontSize: 22, fontWeight: 800, letterSpacing: 6, textAlign: 'center' }} />
+        </div>
+        <button className="btn primary block mt8" disabled={codeVal.length !== 6 || !(parseFloat(wdAmt) > 0)} onClick={async () => {
+          try { await api('/driver/cash/withdraw', { method: 'POST', body: { code: codeVal, amount: parseFloat(wdAmt) } }); toast('👛 ' + t('dcash_wd_sent'), 'ok'); setWdAsk(false); setCodeVal(''); setWdAmt(''); loadCash(); }
+          catch (ex) { toast(ex.message, 'err'); }
+        }}>👛 {t('dcash_withdraw')}</button>
+      </Modal>
       <ChatModal order={chat} onClose={() => setChat(null)} />
+
+      {/* 🧭 v2026.10.08.26 — barre de navigation bas : Accueil + $ (caisse du livreur) */}
+      <nav className="cnav">
+        <button type="button" className={'cnav-item' + (view === 'home' ? ' on' : '')} onClick={() => { setView('home'); setCashView(null); }}>
+          <span className="ci">🏠</span>{t('home')}
+        </button>
+        <button type="button" className={'cnav-item' + (view === 'cash' ? ' on' : '')} onClick={() => setView('cash')} title={t('dcash_title')}>
+          <span className="ci"><svg width="21" height="21" viewBox="0 0 24 24" style={{ display: 'block' }}>
+            <circle cx="12" cy="12" r="9.5" fill="#fbbf24" stroke="#b45309" strokeWidth="1.6" />
+            <text x="12" y="16.4" textAnchor="middle" fontSize="12.5" fontWeight="900" fill="#7c2d12" fontFamily="Arial, sans-serif">$</text>
+          </svg></span>{t('dcash_title')}
+        </button>
+      </nav>
 
       <Modal open={!!routeView} onClose={() => setRouteView(null)} title={'🗺️ ' + t('route') + ' #' + (routeView?.id || '')}>
         {routeView && (
@@ -738,24 +907,67 @@ const detectBrand = () => {
   return null; // inconnu → sélecteur manuel
 };
 
-function Top({ t, user, logout, online, onToggle, disabled, onAccount }) {
+/* 🟩 v2026.10.08.26 — EN-TÊTE comme l'espace client : dégradé vert + logo + sélecteur
+   de langue ROND (globe svg) + 🔔 notifications + 👤 profil (en ligne/hors ligne et
+   déconnexion sont DEDANS). Le badge en ligne vit dans la barre du bas. */
+function DrvHead({ t, user, online, onAccount }) {
   return (
-    <div className="topbar">
-      <div className="logo">🛵</div>
-      <div className="grow">
-        <div className="brand-name" style={{ fontSize: 18 }}>{t('driver_title')}</div>
-        <div className="muted small ellipsis">{user?.name} · {user?.vehicle}</div>
-      </div>
-      <LangSwitch />
-      <BellButton />
-      {onAccount && <button className="icon-btn" onClick={onAccount} title={t('account_settings')}>👤</button>}
-      {!disabled && (
-        <div className="row" style={{ gap: 7 }}>
-          <span className={'badge ' + (online ? 'b-active' : '')}>{online ? '🟢 ' + t('online') : '⚪ ' + t('offline')}</span>
-          <button className={'switch' + (online ? ' on' : '')} onClick={onToggle} aria-label="online" />
+    <div className="home-head">
+      <div className="row spread mb8">
+        <div className="row" style={{ gap: 10 }}>
+          <div className="logo">🚀</div>
+          <div>
+            <div className="brand-name" style={{ color: '#fff' }}>Yalla<span style={{ color: '#a7f3d0' }}>Liv</span></div>
+            <div className="muted xsmall" style={{ color: '#d1fae5' }}>🛵 {t('driver_title')} · {user?.name}</div>
+          </div>
         </div>
-      )}
-      <button className="icon-btn" onClick={logout} title={t('logout')}>🚪</button>
+        <div className="row" style={{ gap: 6 }}>
+          <DriverLang />
+          <BellButton />
+          <button type="button" className="head-icon" onClick={onAccount} title={t('account_settings')} aria-label={t('account_settings')}>👤</button>
+        </div>
+      </div>
     </div>
   );
 }
+
+/* 🌐 sélecteur de langue ROND (icône globe svg — comme l'espace client) */
+function DriverLang() {
+  const { lang, setLang } = useLang();
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ position: 'relative' }}>
+      <button type="button" className="head-icon" onClick={() => setOpen((v) => !v)} title="Langue · اللغة · Language" aria-label="langue">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.9" strokeLinecap="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M3 12h18" />
+          <ellipse cx="12" cy="12" rx="4.2" ry="9" />
+        </svg>
+      </button>
+      {open && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 150 }} onClick={() => setOpen(false)} />
+          <div className="lang-menu">
+            {[['fr', '🇫🇷 Français'], ['ar', '🇪🇬 العربية'], ['en', '🇬🇧 English']].map(([k, l]) => (
+              <button key={k} type="button" className={'lang-opt' + (lang === k ? ' on' : '')} onClick={() => { setLang(k); setOpen(false); }}>{l} {lang === k ? '✓' : ''}</button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* 💰 v2026.10.08.26 — grand bouton de la page $ (même style que les boutons du hub) */
+function CashBig({ emoji, label, sub, val, on }) {
+  return (
+    <button type="button" className="card dlv-btn" onClick={on}
+      style={{ flex: '1 1 44%', minWidth: 150, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '13px 6px 11px', textAlign: 'center' }}>
+      <span className="dlv-ic" style={{ width: 42, height: 42, fontSize: 21 }}>{emoji}</span>
+      <span style={{ fontWeight: 900, fontSize: 12.5, lineHeight: 1.25 }}>{label}</span>
+      <span style={{ fontWeight: 900, fontSize: 16, color: 'var(--brand-dark)' }}>{val}</span>
+      <span className="muted xsmall" style={{ lineHeight: 1.2 }}>{sub}</span>
+    </button>
+  );
+}
+

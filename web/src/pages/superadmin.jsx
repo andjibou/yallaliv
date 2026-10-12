@@ -19,6 +19,7 @@ export default function AdminApp() {
     { id: 'stores', label: '🏪 ' + t('sa_stores') + (pendStores ? ` 🔴${pendStores}` : '') },
     { id: 'orders', label: '🧾 ' + t('sa_orders') },
     { id: 'gdrivers', label: '🛵 ' + t('general_drivers') },
+    { id: 'dcash', label: '💰 ' + t('dcash_title') },   // 💰 v2026.10.08.26 : caisse des livreurs
     { id: 'daccounts', label: '📦 ' + t('sa_daccounts') + (pendDA ? ` 🔴${pendDA}` : '') },   // 📦 v2026.10.08.21 : demandes d'espaces livraison
     { id: 'promos', label: '🎁 ' + t('promos') },
     { id: 'reports', label: '🚨 ' + t('reports_tab') },   // 🚨 v2026.09.26.2 — modération Marché
@@ -60,6 +61,7 @@ export default function AdminApp() {
         {tab === 'stores' && <Stores />}
         {tab === 'orders' && <Orders />}
         {tab === 'gdrivers' && <GeneralDrivers />}
+        {tab === 'dcash' && <DriversCash />}
         {tab === 'daccounts' && <DeliveryAccounts />}   {/* 📦 v2026.10.08.21 */}
         {tab === 'promos' && <Promos />}
         {tab === 'reports' && <Reports />}
@@ -497,6 +499,101 @@ function Orders() {
 }
 
 /* ---------- Livreurs generaux (Super Admin uniquement) ---------- */
+/* 💰 v2026.10.08.26 — CAISSE LIVREURS : montant du travail, clôture de journée, retraits.
+   Chaque action exige le CODE SECRET du livreur (visible 👁 sur sa carte). */
+function DriversCash() {
+  const t = useT();
+  const [d, setD] = useState(null);
+  const [ask, setAsk] = useState(null);   // { kind: 'capital'|'close'|'withdraw', driver }
+  const [amount, setAmount] = useState('');
+  const [code, setCode] = useState('');
+  const [showCode, setShowCode] = useState(0);   // 👁 code secret révélé pour ce livreur
+  const [rate, setRate] = useState('');
+  const load = () => api('/admin/drivers-cash').then((x) => { setD(x); setRate((r) => r || x.drivers[0]?.rate || ''); }).catch(() => {});
+  usePoll(load, 8000);
+  const open = (kind, driver) => { setAsk({ kind, driver }); setAmount(''); setCode(''); };
+  const send = async () => {
+    const { kind, driver } = ask;
+    try {
+      if (kind === 'capital') await api(`/admin/drivers-cash/${driver.id}/capital`, { method: 'POST', body: { amount: parseFloat(amount), code } });
+      if (kind === 'close') await api(`/admin/drivers-cash/${driver.id}/close-day`, { method: 'POST', body: { code } });
+      if (kind === 'withdraw') await api(`/admin/drivers-cash/${driver.id}/withdraw`, { method: 'POST', body: { amount: parseFloat(amount), code } });
+      toast('✅ ' + t('done')); setAsk(null); load();
+    } catch (ex) { toast(ex.message, 'err'); }
+  };
+  if (!d) return <Spinner />;
+  const pend = d.pending_requests || [];
+  return (
+    <div className="col">
+      {/* ⚙️ gain fixe par trajet (réglable) */}
+      <div className="card row wrap mb12" style={{ padding: 12, gap: 10, alignItems: 'center' }}>
+        <span className="small" style={{ fontWeight: 800 }}>📈 {t('dcash_rate')} :</span>
+        <input className="input" dir="ltr" type="number" min="0" step="0.5" style={{ width: 90 }} value={rate} onChange={(e) => setRate(e.target.value)} />
+        <span className="muted xsmall">EGP</span>
+        <button className="btn primary sm" onClick={async () => { try { await api('/admin/settings', { method: 'PUT', body: { driver_trip_gain: parseFloat(rate) } }); toast('✅ ' + t('done')); } catch (ex) { toast(ex.message, 'err'); } }}>💾</button>
+        <span className="muted xsmall grow">{t('dcash_rate_note')}</span>
+      </div>
+      {/* ⏳ demandes en attente (retraits app + remises) */}
+      {pend.length > 0 && (
+        <div className="card mb12" style={{ padding: 12, border: '2px solid #f59e0b', background: '#fffbeb' }}>
+          <div className="label mb8">⏳ {t('dcash_pending')} ({pend.length})</div>
+          {pend.map((r) => (
+            <div key={r.id} className="row spread wrap" style={{ padding: '7px 0', borderBottom: '1px solid #f1f5f9' }}>
+              <div className="small">
+                <b>{r.name}</b> · {r.kind === 'withdraw_request' ? '👛 ' + t('dcash_wd') : '🏁 ' + t('dcash_return')} · <b>{r.amount} EGP</b>
+              </div>
+              <div className="row" style={{ gap: 6 }}>
+                {r.kind === 'withdraw_request' && <>
+                  <button className="btn primary sm" onClick={async () => { try { await api(`/admin/drivers-cash/log/${r.id}/confirm`, { method: 'PUT' }); toast('✅'); load(); } catch (ex) { toast(ex.message, 'err'); } }}>✅</button>
+                  <button className="btn danger sm" onClick={async () => { try { await api(`/admin/drivers-cash/log/${r.id}/cancel`, { method: 'PUT' }); load(); } catch (ex) { toast(ex.message, 'err'); } }}>❌</button>
+                </>}
+                {r.kind === 'return_request' && <span className="muted xsmall">{t('dcash_close_hint')}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {d.drivers.map((dr) => (
+        <div key={dr.id} className="card row wrap mb12" style={{ gap: 10, ...(dr.pending_return ? { border: '2px solid #f59e0b', background: '#fffbeb' } : {}) }}>
+          <div className="store-emoji" style={{ background: '#0ea5e9', width: 44, height: 44, fontSize: 22 }}>{dr.online ? '🟢' : '⚪'}</div>
+          <div className="grow" style={{ minWidth: 170 }}>
+            <div style={{ fontWeight: 800 }}>{dr.name} {dr.pending_return && <span className="badge" style={{ background: '#fef3c7', color: '#92400e' }}>🏁 {t('dcash_return_pending')}</span>}</div>
+            <div className="muted small">🛵 {dr.vehicle || '—'} · 📞 {dr.phone || '—'}</div>
+            <div className="small mt4" style={{ fontWeight: 700 }}>
+              💼 {t('dcash_capital')} : <b>{dr.capital} EGP</b>
+              {dr.capital > 0 && <span className="muted xsmall"> · 📈 {t('dcash_gains')} : <b>{dr.day_gains} EGP</b> ({dr.day_trips} {t('dcash_trips')})</span>}
+              {' '}· 👛 <b>{dr.wallet} EGP</b>
+            </div>
+          </div>
+          <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+            {/* 🔑 code secret (👁 révélateur) */}
+            <button className="btn ghost sm" onClick={() => setShowCode((v) => (v === dr.id ? 0 : dr.id))} title={t('dcash_secret')}>👁 {showCode === dr.id ? dr.secret : '••••••'}</button>
+            <button className="btn primary sm" onClick={() => open('capital', dr)}>💼 {t('dcash_give')}</button>
+            <button className="btn soft sm" onClick={() => open('close', dr)} disabled={!dr.capital && !dr.day_gains}>🏁 {t('dcash_close')}</button>
+            <button className="btn danger sm" onClick={() => open('withdraw', dr)} disabled={dr.wallet <= 0}>👛 {t('dcash_wd_direct')}</button>
+          </div>
+        </div>
+      ))}
+      <Modal open={!!ask} onClose={() => setAsk(null)} title={'💰 ' + (ask?.kind === 'capital' ? t('dcash_give') : ask?.kind === 'close' ? t('dcash_close') : t('dcash_wd_direct')) + ' — ' + (ask?.driver.name || '')}>
+        {ask?.kind !== 'close' && (
+          <div className="field">
+            <label className="label">💰 {t('dcash_wd_amount')}</label>
+            <input className="input" dir="ltr" type="number" min="0" step="0.5" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="ex. : 500" />
+          </div>
+        )}
+        {ask?.kind === 'close' && <p className="muted small" style={{ marginTop: 0 }}>🏁 {t('dcash_close_confirm')}</p>}
+        <div className="field">
+          <label className="label">🔑 {t('dcash_secret')} — {ask?.driver.name}</label>
+          <input className="input" dir="ltr" inputMode="numeric" maxLength={6} placeholder="••••••" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            style={{ fontSize: 22, fontWeight: 800, letterSpacing: 6, textAlign: 'center' }} />
+          <div className="muted xsmall mt4">{t('dcash_code_note')}</div>
+        </div>
+        <button className="btn primary block mt8" disabled={code.length !== 6 || (ask?.kind !== 'close' && !(parseFloat(amount) > 0))} onClick={send}>✅ {t('confirm')}</button>
+      </Modal>
+    </div>
+  );
+}
+
 function GeneralDrivers() {
   const t = useT();
   const { lang } = useLang();

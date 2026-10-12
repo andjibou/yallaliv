@@ -435,6 +435,26 @@ export async function initDb() {
   )`).catch(() => {});
   await run('ALTER TABLE delivery_accounts ADD COLUMN lat REAL').catch(() => {});   // 📍 v2026.10.08.24 (bases v21 existantes)
   await run('ALTER TABLE delivery_accounts ADD COLUMN lng REAL').catch(() => {});
+
+  // 💰 v2026.10.08.26 — CAISSE LIVREURS : montant du travail (capital), portefeuille, code secret
+  await run(`CREATE TABLE IF NOT EXISTS driver_cash (
+    driver_id INTEGER PRIMARY KEY,
+    capital REAL NOT NULL DEFAULT 0,      -- 💼 montant du travail en cours (donné par le superadmin)
+    wallet REAL NOT NULL DEFAULT 0,       -- 👛 portefeuille (gains confirmés)
+    secret TEXT,                          -- 🔑 code secret unique (6 chiffres, généré auto)
+    day TEXT,                             -- 📅 journée en cours (YYYY-MM-DD) quand le capital est donné
+    pending_return INTEGER NOT NULL DEFAULT 0,   -- 🏁 remise de fin de journée déclarée par le livreur
+    created_at BIGINT NOT NULL
+  )`).catch(() => {});
+  await run(`CREATE TABLE IF NOT EXISTS driver_cash_log (
+    id SERIAL PRIMARY KEY,
+    driver_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,                   -- capital | return_request | gain | withdraw | withdraw_request
+    amount REAL NOT NULL,
+    note TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'done',  -- done | pending | cancelled (demandes de retrait)
+    created_at BIGINT NOT NULL
+  )`).catch(() => {});
   await run('ALTER TABLE users ALTER COLUMN email DROP NOT NULL').catch(() => {});   // comptes par telephone (email NULL)
   // 🛍️ v2026.09.26.1 — Marché Phase 1 : sous-catégories, état, attributs, zone, vues, renouvellement, multi-photos
   await run('ALTER TABLE listings ADD COLUMN subcategory TEXT').catch(() => {});

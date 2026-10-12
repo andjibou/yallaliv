@@ -1868,6 +1868,136 @@ app.post('/api/driver/orders/:id/ack', auth, requireRole('driver'), h(async (req
   res.json({ ok: r.rowCount > 0 });
 }));
 
+// 💰 v2026.10.08.26 — CAISSE LIVREUR : montant du travail, gains du jour, portefeuille, code secret.
+// Scenario : le superadmin donne le « montant du travail » (code secret requis) → le livreur
+// avance le montant des colis NON PAYÉS aux magasins (statut picked_up = avancé) → le récupère
+// chez le receveur à la livraison (delivered) ou se fait rembourser au retour (refused) →
+// chaque trajet terminé (livré OU retourné) rapporte le gain fixe « driver_trip_gain » →
+// fin de journée : le livreur remet le capital (code) → le superadmin clôture → gains au portefeuille.
+const dayStart = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
+const getCash = async (driverId) => {
+  let c = await get('SELECT * FROM driver_cash WHERE driver_id=?', [driverId]);
+  if (!c) {
+    let secret = null;
+    for (let i = 0; i < 30 && !secret; i++) {
+      const cand = String(100000 + Math.floor(Math.random() * 900000));
+      if (!(await get('SELECT 1 AS x FROM driver_cash WHERE secret=?', [cand]))) secret = cand;
+    }
+    await run('INSERT INTO driver_cash(driver_id, capital, wallet, secret, created_at) VALUES(?,0,0,?,?)', [driverId, secret, Date.now()]).catch(() => {});
+    c = await get('SELECT * FROM driver_cash WHERE driver_id=?', [driverId]);
+  }
+  return c;
+};
+const dayGains = async (driverId) => {
+  const rate = parseFloat(await getSetting('driver_trip_gain', '25')) || 25;
+  const trips = await all(`SELECT id, status, receiver_name, address, cod_amount, pickup_address, updated_at FROM orders
+    WHERE driver_id=? AND kind='service' AND status IN ('delivered','refused') AND updated_at >= ? ORDER BY updated_at DESC`, [driverId, dayStart()]);
+  return { rate, trips, gains: Math.round(trips.length * rate * 100) / 100 };
+};
+app.get('/api/driver/cash', auth, requireRole('driver'), h(async (req, res) => {
+  const c = await getCash(req.user.id);
+  const { rate, trips, gains } = await dayGains(req.user.id);
+  // 💼 avances aux magasins : colis NON PAYÉS pris en charge aujourd'hui (et non encore clôturés)
+  const adv = await all(`SELECT id, receiver_name, pickup_address, address, cod_amount, status, updated_at FROM orders
+    WHERE driver_id=? AND kind='service' AND prepaid=0 AND cod_amount > 0 AND status IN ('picked_up','delivered','refused') AND updated_at >= ? ORDER BY updated_at DESC`, [req.user.id, dayStart()]);
+  const outstanding = adv.filter((o) => o.status === 'picked_up').reduce((s2, o) => s2 + (o.cod_amount || 0), 0);
+  // 💰 à encaisser chez les receveurs (livraisons en cours avec montant)
+  const toCollect = await all(`SELECT id, receiver_name, receiver_phone, address, cod_amount, status FROM orders
+    WHERE driver_id=? AND kind='service' AND prepaid=0 AND cod_amount > 0 AND status IN ('assigned','picked_up') ORDER BY created_at DESC`, [req.user.id]);
+  const wlog = await all(`SELECT * FROM driver_cash_log WHERE driver_id=? ORDER BY id DESC LIMIT 50`, [req.user.id]);
+  res.json({
+    capital: Math.round((c.capital - outstanding) * 100) / 100, capital_given: c.capital, outstanding: Math.round(outstanding * 100) / 100,
+    wallet: Math.round(c.wallet * 100) / 100, secret: c.secret, pending_return: !!c.pending_return,
+    rate, trips, gains, advances: adv, to_collect: toCollect, total_to_collect: Math.round(toCollect.reduce((s2, o) => s2 + (o.cod_amount || 0), 0) * 100) / 100,
+    log: wlog,
+  });
+}));
+// 🏁 remise de fin de journée (code secret requis) — le livreur rend le capital
+app.post('/api/driver/cash/return', auth, requireRole('driver'), h(async (req, res) => {
+  const c = await getCash(req.user.id);
+  if (!c.secret || String(req.body.code || '').trim() !== c.secret) return res.status(400).json({ error: 'Code secret incorrect' });
+  await run('UPDATE driver_cash SET pending_return=1 WHERE driver_id=?', [req.user.id]);
+  await run('INSERT INTO driver_cash_log(driver_id,kind,amount,note,status,created_at) VALUES(?,?,?,?,?,?)', [req.user.id, 'return_request', c.capital, 'Remise de fin de journée', 'pending', Date.now()]);
+  try { const su = await all("SELECT id FROM users WHERE role='superadmin'"); pushTo(su.map((u) => u.id), '🏁 Remise de fin de journée', (await get('SELECT name FROM users WHERE id=?', [req.user.id])).name + ' a remis son montant du travail', '/admin?tab=dcash'); } catch {}
+  res.json({ ok: true });
+}));
+// 👛 demande de retrait (code secret requis)
+app.post('/api/driver/cash/withdraw', auth, requireRole('driver'), h(async (req, res) => {
+  const c = await getCash(req.user.id);
+  if (!c.secret || String(req.body.code || '').trim() !== c.secret) return res.status(400).json({ error: 'Code secret incorrect' });
+  const amount = round2(parseFloat(req.body.amount));
+  if (isNaN(amount) || amount <= 0) return res.status(400).json({ error: 'Montant invalide' });
+  if (amount > c.wallet) return res.status(400).json({ error: 'Montant supérieur au portefeuille' });
+  await run('INSERT INTO driver_cash_log(driver_id,kind,amount,note,status,created_at) VALUES(?,?,?,?,?,?)', [req.user.id, 'withdraw_request', amount, 'Demande de retrait', 'pending', Date.now()]);
+  try { const su = await all("SELECT id FROM users WHERE role='superadmin'"); pushTo(su.map((u) => u.id), '👛 Demande de retrait', (await get('SELECT name FROM users WHERE id=?', [req.user.id])).name + ' demande ' + amount + ' EGP', '/admin?tab=dcash'); } catch {}
+  res.json({ ok: true });
+}));
+// 💼 SUPERADMIN : caisse de tous les livreurs
+app.get('/api/admin/drivers-cash', auth, requireRole('superadmin'), h(async (req, res) => {
+  const rows = await all(`SELECT u.id, u.name, u.phone, u.vehicle, u.online, c.capital, c.wallet, c.secret, c.pending_return
+    FROM users u LEFT JOIN driver_cash c ON c.driver_id = u.id WHERE u.role='driver' AND u.status='active' ORDER BY u.name`);
+  const rate = parseFloat(await getSetting('driver_trip_gain', '25')) || 25;
+  const reqs = await all(`SELECT l.*, u.name FROM driver_cash_log l JOIN users u ON u.id=l.driver_id WHERE l.status='pending' ORDER BY l.id DESC LIMIT 50`);
+  const out = [];
+  for (const r of rows) {
+    const g = await dayGains(r.id);
+    out.push({ ...r, capital: r.capital || 0, wallet: r.wallet || 0, rate, day_trips: g.trips.length, day_gains: g.gains, pending_return: !!r.pending_return });
+  }
+  res.json({ drivers: out, pending_requests: reqs });
+}));
+// 💼 donner le montant du travail (code secret du livreur requis)
+app.post('/api/admin/drivers-cash/:id/capital', auth, requireRole('superadmin'), h(async (req, res) => {
+  const c = await getCash(req.params.id);
+  if (!c.secret || String(req.body.code || '').trim() !== c.secret) return res.status(400).json({ error: 'Code secret incorrect' });
+  const amount = round2(parseFloat(req.body.amount));
+  if (isNaN(amount) || amount <= 0) return res.status(400).json({ error: 'Montant invalide' });
+  const d = new Date();
+  await run('UPDATE driver_cash SET capital=capital+?, day=?, pending_return=0 WHERE driver_id=?', [amount, d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'), req.params.id]);
+  await run('INSERT INTO driver_cash_log(driver_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)', [req.params.id, 'capital', amount, 'Montant du travail donné', Date.now()]);
+  try { pushTo([req.params.id], '💼 Montant du travail reçu', amount + ' EGP — bonne journée !', ''); } catch {}
+  res.json({ ok: true });
+}));
+// 🏁 clôturer la journée : capital remis → 0, gains du jour → portefeuille
+app.post('/api/admin/drivers-cash/:id/close-day', auth, requireRole('superadmin'), h(async (req, res) => {
+  const c = await getCash(req.params.id);
+  if (!c.secret || String(req.body.code || '').trim() !== c.secret) return res.status(400).json({ error: 'Code secret incorrect' });
+  const { gains } = await dayGains(req.params.id);
+  await run('UPDATE driver_cash SET wallet=wallet+?, capital=0, day=NULL, pending_return=0 WHERE driver_id=?', [gains, req.params.id]);
+  await run('INSERT INTO driver_cash_log(driver_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)', [req.params.id, 'gain', gains, 'Clôture de journée — gains au portefeuille', Date.now()]);
+  await run(`UPDATE driver_cash_log SET status='done' WHERE driver_id=? AND kind='return_request' AND status='pending'`, [req.params.id]);
+  try { pushTo([req.params.id], '🏁 Journée clôturée', 'Gains du jour (' + gains + ' EGP) ajoutés à votre portefeuille 👛', ''); } catch {}
+  res.json({ ok: true, gains });
+}));
+// 👛 enregistrer un retrait DIRECT (espèces données en main propre — code requis)
+app.post('/api/admin/drivers-cash/:id/withdraw', auth, requireRole('superadmin'), h(async (req, res) => {
+  const c = await getCash(req.params.id);
+  if (!c.secret || String(req.body.code || '').trim() !== c.secret) return res.status(400).json({ error: 'Code secret incorrect' });
+  const amount = round2(parseFloat(req.body.amount));
+  if (isNaN(amount) || amount <= 0) return res.status(400).json({ error: 'Montant invalide' });
+  if (amount > c.wallet) return res.status(400).json({ error: 'Montant supérieur au portefeuille (' + c.wallet + ' EGP)' });
+  await run('UPDATE driver_cash SET wallet=wallet-? WHERE driver_id=?', [amount, req.params.id]);
+  await run('INSERT INTO driver_cash_log(driver_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)', [req.params.id, 'withdraw', amount, 'Retrait payé en main propre', Date.now()]);
+  try { pushTo([req.params.id], '👛 Retrait payé', amount + ' EGP retirés de votre portefeuille', ''); } catch {}
+  res.json({ ok: true });
+}));
+// ✅ confirmer une demande de retrait faite depuis l'app
+app.put('/api/admin/drivers-cash/log/:id/confirm', auth, requireRole('superadmin'), h(async (req, res) => {
+  const l = await get('SELECT * FROM driver_cash_log WHERE id=?', [req.params.id]);
+  if (!l || l.kind !== 'withdraw_request') return res.status(404).json({ error: 'Demande introuvable' });
+  if (l.status !== 'pending') return res.status(400).json({ error: 'Demande déjà traitée' });
+  const c = await getCash(l.driver_id);
+  if (l.amount > c.wallet) return res.status(400).json({ error: 'Portefeuille insuffisant' });
+  await run('UPDATE driver_cash SET wallet=wallet-? WHERE driver_id=?', [l.amount, l.driver_id]);
+  await run("UPDATE driver_cash_log SET status='done' WHERE id=?", [l.id]);
+  try { pushTo([l.driver_id], '👛 Retrait confirmé', l.amount + ' EGP retirés de votre portefeuille', ''); } catch {}
+  res.json({ ok: true });
+}));
+// ❌ annuler une demande de retrait
+app.put('/api/admin/drivers-cash/log/:id/cancel', auth, requireRole('superadmin'), h(async (req, res) => {
+  await run("UPDATE driver_cash_log SET status='cancelled' WHERE id=? AND kind='withdraw_request' AND status='pending'", [req.params.id]);
+  res.json({ ok: true });
+}));
+
 app.get('/api/driver/stats', auth, requireRole('driver'), h(async (req, res) => {
   const r = await get(`SELECT COUNT(*) AS deliveries, COALESCE(SUM(delivery_fee),0) AS earnings FROM orders WHERE driver_id=? AND status='delivered'`, [req.user.id]);
   const today = await get(`SELECT COUNT(*) AS c, COALESCE(SUM(delivery_fee),0) AS sum FROM orders WHERE driver_id=? AND status='delivered' AND updated_at > ?`, [req.user.id, new Date().setHours(0, 0, 0, 0)]);
@@ -2228,13 +2358,14 @@ app.get('/api/admin/orders', auth, requireRole('superadmin'), h(async (req, res)
 }));
 
 app.get('/api/admin/settings', auth, requireRole('superadmin'), h(async (req, res) => {
-  res.json({ app_name: await getSetting('app_name', 'YallaLiv'), commission_rate: await getSetting('commission_rate', '10'), currency: await getSetting('currency', 'EGP') });
+  res.json({ app_name: await getSetting('app_name', 'YallaLiv'), commission_rate: await getSetting('commission_rate', '10'), currency: await getSetting('currency', 'EGP'), driver_trip_gain: await getSetting('driver_trip_gain', '25') });
 }));
 
 app.put('/api/admin/settings', auth, requireRole('superadmin'), h(async (req, res) => {
-  const { app_name, commission_rate, currency } = req.body;
+  const { app_name, commission_rate, currency, driver_trip_gain } = req.body;
   if (app_name) await setSetting('app_name', String(app_name).trim().slice(0, 30));
   if (commission_rate !== undefined) await setSetting('commission_rate', String(Math.max(0, Math.min(50, parseFloat(commission_rate) || 0))));
+  if (driver_trip_gain !== undefined) await setSetting('driver_trip_gain', String(Math.max(0, Math.min(1000, parseFloat(driver_trip_gain) || 0))));   // 💰 v26 : gain fixe par trajet
   if (currency) await setSetting('currency', String(currency).trim().toUpperCase().slice(0, 5));
   res.json({ ok: true });
 }));
