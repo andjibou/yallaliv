@@ -72,7 +72,7 @@ export default function App() {
               <SwapModal />
               {/* Version du front — sert à VÉRIFIER que l'app charge bien la dernière version
                   (badge discret en bas à droite de chaque écran). À incrémenter à chaque déploiement. */}
-              <div style={{ position: 'fixed', bottom: 3, right: 8, fontSize: 10, opacity: 0.45, zIndex: 9999, pointerEvents: 'none' }}>YallaLiv v2026.10.08.24</div>
+              <div style={{ position: 'fixed', bottom: 3, right: 8, fontSize: 10, opacity: 0.45, zIndex: 9999, pointerEvents: 'none' }}>YallaLiv v2026.10.08.25</div>
               <Routes>
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
@@ -91,7 +91,7 @@ export default function App() {
                   <Route path="sales" element={<SalesPage />} />
                   <Route path="service" element={<ServiceRequestPage />} />
                   <Route path="delivery" element={<DeliveryPage />} />   {/* 🛵 v2026.10.08.20 : espace livraison (accès après confirmation) */}
-                  <Route path="delivery-request" element={<DeliveryRequestPage />} />   {/* 📝 v2026.10.08.24 : demande d'espace livraison */}
+                  <Route path="delivery-request" element={<DeliveryRequestPage />} />   {/* 📝 v2026.10.08.25 : demande d'espace livraison */}
                   <Route path="stores/:type" element={<StoresByTypePage />} />
                   <Route path="dept/:id" element={<DepartmentPage />} />
                   <Route path="publish" element={<PublishPage />} />

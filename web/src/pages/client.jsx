@@ -2945,7 +2945,8 @@ export function DeliveryPage() {
   const [acct, setAcct] = useState(null);           // 🛵 v2026.10.08.21 : accès UNIQUEMENT après confirmation du superadmin
   const [view, setView] = useState('ask');          // ask | mine | history
   const [nearby, setNearby] = useState(null);
-  const [mapOpen, setMapOpen] = useState(false);    // 🗺️ carte des livreurs proches
+  const [extra, setExtra] = useState(0);            // 🔄 v25 : livreurs chargés de mes colis AU-DELÀ des 2,5 km
+  const [mapOpen, setMapOpen] = useState(false);    // 🗺️ carte des livreurs proches + chargés de mes colis
   const [dmapOpen, setDmapOpen] = useState(false);  // 🗺️ carte des livreurs de mes livraisons
   const [mine, setMine] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -2964,7 +2965,27 @@ export function DeliveryPage() {
     try {
       const pos = await getPos();
       const d = await api('/delivery/drivers-nearby?lat=' + pos.lat + '&lng=' + pos.lng);
-      setNearby(d.drivers);
+      // 🔄 v2026.10.08.25 — carte FUSIONNÉE : les livreurs généraux à moins de 2,5 km MAIS
+      // AUSSI les livreurs chargés de MES livraisons (venant récupérer un colis chez moi,
+      // en route pour une livraison) — même au-delà de 2,5 km. Dédoublonnés par livreur :
+      // un livreur proche ET chargé garde ses deux infos (🌍 général + 🛵 en course).
+      let myDrv = [];
+      try {
+        const m = await api('/delivery/mine');
+        setMine(m);
+        myDrv = (m?.ongoing || []).filter((o) => o.driver && o.driver_pos).map((o) => ({
+          id: o.driver.id, name: o.driver.name, phone: o.driver.phone, lat: o.driver_pos.lat, lng: o.driver_pos.lng,
+          general: true, online: true, active: [{ id: o.id }],
+        }));
+      } catch {}
+      const merged = [...d.drivers];
+      for (const x of myDrv) {
+        const ex = merged.find((m2) => m2.id === x.id);
+        if (ex) ex.active = [...(ex.active || []), ...x.active];
+        else merged.push(x);
+      }
+      setNearby(merged);
+      setExtra(myDrv.filter((x) => !d.drivers.some((m2) => m2.id === x.id)).length);
       setMapOpen(true);
     } catch (e) { toast(e.message, 'err'); }
     setBusy(false);
@@ -3051,11 +3072,11 @@ export function DeliveryPage() {
       )}
       </>)}
 
-      <Modal open={mapOpen} onClose={() => setMapOpen(false)} title={'🗺️ ' + (nearby ? nearby.length + ' ' + t('drivers_near') : t('open_map'))}>
+      <Modal open={mapOpen} onClose={() => setMapOpen(false)} title={'🗺️ ' + (nearby ? (nearby.length - extra) + ' ' + t('drivers_near') + (extra ? ' · +' + extra + ' 📋' : '') : t('open_map'))}>
         {nearby && nearby.length > 0
           ? <div className="drv-map"><DriversMap drivers={nearby} /></div>
           : <Empty e="🛵" text={t('no_drivers_near')} />}
-        <div className="muted small mt8">📍 {t('drivers_near_hint')}</div>
+        <div className="muted small mt8">📍 {t('drivers_map_hint')}</div>
       </Modal>
       <Modal open={dmapOpen} onClose={() => setDmapOpen(false)} title={'🗺️ ' + t('my_deliveries')}>
         {myDrivers.length > 0
@@ -3240,15 +3261,6 @@ export function ServiceRequestPage() {
       </div>
       <div className="banner ok mb12">💡 {t('svc_pay_note')}</div>
       <div className="card mb12" style={{ padding: 14 }}>
-        {/* 📦 v2026.10.08.20 — ESPACE LIVRAISON : le RECEVEUR (nom + téléphone) et le MONTANT */}
-        <div className="field">
-          <label className="label">👤 {t('receiver_name')}</label>
-          <input className="input" value={rName} onChange={(e) => setRName(e.target.value)} placeholder="ex. : Salma Mahmoud" />
-        </div>
-        <div className="field">
-          <label className="label">📝 {t('svc_desc')}</label>
-          <textarea className="textarea" rows={3} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder={rName ? t('svc_desc_opt') : t('svc_desc_ph')} />
-        </div>
         {/* 📦 v2026.10.08.24 — RÉCUPÉRATION : TOUJOURS le magasin de l'espace livraison
             (adresse + position entrées à la création) — lecture seule, pas de carte. */}
         {acct && (
@@ -3274,11 +3286,18 @@ export function ServiceRequestPage() {
             toast('📍 ' + t('loc_set'), 'ok');
           }, () => toast(t('gps_fail'), 'err'), { timeout: 6000 });
         }}>📍 {t('my_pos')}</button>}
-        {addrField('d', '🏁 ' + t('svc_dropoff') + ' — ' + t('receiver_addr'), dAddr, dGps, dSugg)}
+        {/* 🔢 v2026.10.08.25 — ORDRE DU FORMULAIRE : ① nom du receveur ② téléphone du receveur
+            ③ adresse de livraison ④ montant à payer ou déjà payé ⑤ que doit faire le livreur
+            (informations de plus — optionnel si le receveur est donné). */}
+        <div className="field">
+          <label className="label">👤 {t('receiver_name')}</label>
+          <input className="input" value={rName} onChange={(e) => setRName(e.target.value)} placeholder="ex. : Salma Mahmoud" />
+        </div>
         <div className="field">
           <label className="label">📞 {t('receiver_phone')}</label>
           <input className="input" dir="ltr" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0100 123 4567" />
         </div>
+        {addrField('d', '🏁 ' + t('svc_dropoff') + ' — ' + t('receiver_addr'), dAddr, dGps, dSugg)}
         <div className="field">
           <label className="label">💰 {t('amount_to_pay')}</label>
           <div className="row" style={{ gap: 8 }}>
@@ -3288,6 +3307,10 @@ export function ServiceRequestPage() {
               onClick={() => setPrepaid((v) => !v)}>{prepaid ? '✅ ' + t('already_paid') : '💵 ' + t('cod_btn')}</button>
           </div>
           <div className="muted xsmall mt4">{prepaid ? '✅ ' + t('prepaid_note') : t('cod_note')}</div>
+        </div>
+        <div className="field">
+          <label className="label">📝 {t('svc_desc')} <span className="muted xsmall">· {t('svc_desc_more')}</span></label>
+          <textarea className="textarea" rows={3} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder={rName ? t('svc_desc_opt') : t('svc_desc_ph')} />
         </div>
         <div className="row spread mt8" style={{ padding: '8px 12px', background: '#f0fdf4', borderRadius: 10 }}>
           <span className="small" style={{ fontWeight: 800 }}>🛵 {t('deliver_fee')}</span>
