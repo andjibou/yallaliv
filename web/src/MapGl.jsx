@@ -93,57 +93,13 @@ function createMapboxMap(el, { lang = 'fr', center = [29.9187, 31.2001], zoom = 
  */
 export function createMap(el, opts = {}) {
   const key = GMAPS_KEY();
-  if (key && !gFailed) {
-    const A = createGoogleMap(el, opts);
-    let swapped = false, removed = false;
-    const origRemove = A.remove.bind(A);
-    A.remove = () => { removed = true; if (A.__mb) { A.__mb.remove(); } else origRemove(); };
-    // 🛟 Filet anti-carte-morte : script impossible à charger OU clé rejetée
-    // (gm_authFailure) → on remplace par Mapbox DANS LE MÊME élément, en
-    // re-branchant les écouteurs — l'utilisateur ne voit rien casser.
-    const swapToMapbox = () => {
-      if (swapped || removed || !MB_TOKEN) return;
-      swapped = true;
-      // 🔄 MIGRATION : on transfère sur le Mapbox de remplacement tout ce qui
-      // avait déjà été posé sur la carte Google (marqueurs, lignes, popups) —
-      // la bascule est invisible même quand elle arrive tardivement.
-      const mks = [...(A.__ylMarkers || [])];
-      const lns = [...(A.__ylLines || [])];
-      try { el.innerHTML = ''; } catch {}
-      const mb = createMapboxMap(el, opts);
-      A.__mb = mb;
-      A.__ops = [];   // les opérations Google en attente ne sont pas traduisibles
-      Object.entries(A.__handlers).forEach(([ev, fns]) => fns.forEach((f) => { try { mb.on(ev, f); } catch {} }));
-      mks.forEach((y) => {
-        try {
-          markerRemove(y.__inst); y.__inst = null;
-          y.__tgt = 'mb'; y.__A = null;
-          y.__inst = new mapboxgl.Marker({ element: y.el, anchor: 'center' });
-          if (y.__pos) y.__inst.setLngLat(y.__pos);
-          y.__inst.addTo(mb);
-          if (y.__popupHtml) y.__inst.setPopup(new mapboxgl.Popup({ offset: 22, closeButton: false, maxWidth: '240px' }).setHTML(y.__popupHtml));
-        } catch {}
-      });
-      lns.forEach((W) => {
-        try { W.remove(); } catch {}
-        try {
-          const nid = addLine(mb, W.__ylCoords, W.__ylOpts);   // nid = id source mapbox
-          W.remove = () => { try { rmLine(mb, nid); } catch {} };
-        } catch {}
-      });
-    };
-    loadGoogle(opts.lang || 'fr').catch(swapToMapbox);
-    onAuthFailure(swapToMapbox);
-    A.__onStall = swapToMapbox;   // 🛟 watchdog tuiles (10 s sans tuile → bascule)
-    // délégation post-bascule : tous les appels passent au Mapbox de remplacement
-    for (const k of ['on', 'off', 'getCenter', 'getZoom', 'jumpTo', 'easeTo', 'panTo', 'setBearing', 'getBearing', 'stop', 'resize', 'fitBounds']) {
-      const orig = A[k].bind(A);
-      A[k] = (...a) => (A.__mb ? A.__mb[k](...a) : orig(...a));
-    }
-    const opRaw = A.__op;
-    A.__op = (fn) => { if (A.__mb) return; opRaw(fn); };   // post-bascule : on ignore
-    return A;
-  }
+  // 🟩 v2026.10.13.28 — GOOGLE MAPS UNIQUEMENT quand la clé est configurée :
+  // plus AUCUNE bascule Mapbox (plus de watchdog tuiles, plus de secours) —
+  // l'utilisateur voit Google, point final. Si un écran affiche « © Mapbox »,
+  // c'est le SIGNAL que la clé VITE_GMAPS_KEY manque dans CE build
+  // (local : web/.env.local · prod : variable Vercel + Redeploy).
+  if (key) return createGoogleMap(el, opts);
+  // sans clé (développement hors production) : secours Mapbox → OSM, inchangé
   return createMapboxMap(el, opts);
 }
 

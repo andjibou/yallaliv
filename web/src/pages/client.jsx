@@ -2963,7 +2963,11 @@ export function DeliveryPage() {
   const openNearby = async () => {
     if (busy) return; setBusy(true);
     try {
-      const pos = await getPos();
+      // 🏪 v2026.10.13.28 — ESPACE LIVRAISON : la recherche se fait autour du MAGASIN
+      // (position définie à la création de l'espace), pas autour du GPS du moment.
+      // Le serveur l'impose de toute façon — ici on envoie directement la bonne
+      // position (repli GPS uniquement si l'espace n'a pas de position).
+      const pos = (acct?.lat != null && acct?.lng != null) ? { lat: acct.lat, lng: acct.lng } : await getPos();
       const d = await api('/delivery/drivers-nearby?lat=' + pos.lat + '&lng=' + pos.lng);
       // 🔄 v2026.10.08.25 — carte FUSIONNÉE : les livreurs généraux à moins de 2,5 km MAIS
       // AUSSI les livreurs chargés de MES livraisons (venant récupérer un colis chez moi,

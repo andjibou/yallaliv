@@ -934,7 +934,12 @@ app.post('/api/services', auth, requireRole('client', 'merchant', 'superadmin'),
 // 🛵 v2026.10.08.20 — ESPACE LIVRAISON : livreurs GÉNÉRAUX en ligne à MOINS DE 2,5 km
 // de la position de l'utilisateur (position fraîche < 10 min).
 app.get('/api/delivery/drivers-nearby', auth, requireRole('client', 'merchant', 'superadmin'), h(async (req, res) => {
-  const lat = parseFloat(req.query.lat), lng = parseFloat(req.query.lng);
+  // 🏪 v2026.10.13.28 — ESPACE LIVRAISON : la recherche se fait autour du MAGASIN
+  // (position définie à la création de l'espace), PAS autour de la position GPS du
+  // moment — même connecté à l'autre bout de la ville, l'utilisateur ne voit que
+  // les livreurs à portée (2,5 km) de SON magasin.
+  const acc = await get(`SELECT lat, lng FROM delivery_accounts WHERE user_id=? AND status='approved' AND lat IS NOT NULL AND lng IS NOT NULL ORDER BY id DESC LIMIT 1`, [req.user.id]);
+  const lat = acc ? acc.lat : parseFloat(req.query.lat), lng = acc ? acc.lng : parseFloat(req.query.lng);
   if (isNaN(lat) || isNaN(lng)) return res.status(400).json({ error: 'Position requise' });
   const R = 2500, RAD = 0.0225;   // 2,5 km (± pré-filtre ~2,25°… non : 0.0225° ≈ 2,5 km)
   const rows = await all(`SELECT u.id, u.name, u.phone, u.vehicle, l.lat, l.lng, l.updated_at,
@@ -946,7 +951,7 @@ app.get('/api/delivery/drivers-nearby', auth, requireRole('client', 'merchant', 
     .filter((d) => d.dist <= R)
     .map((d) => ({ id: d.id, name: d.name, phone: d.phone, vehicle: d.vehicle, lat: d.lat, lng: d.lng, dist: Math.round(d.dist), general: true }))
     .sort((a, b) => a.dist - b.dist);
-  res.json({ drivers, radius: R });
+  res.json({ drivers, radius: R, origin: { lat, lng, store: !!acc } });   // 🏪 origin = position réellement cherchée (le magasin si espace approuvé)
 }));
 
 // 📋 v2026.10.08.20 — ESPACE LIVRAISON : MES LIVRAISONS (en cours) + HISTOIRE.
