@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// 🗺️ MapGoogle.jsx — v2026.10.13.31 : moteur GOOGLE MAPS (étage 1 sur 3).
+// 🗺️ MapGoogle.jsx — v2026.10.13.32 : moteur GOOGLE MAPS (étage 1 sur 3).
 // Google Maps JS (cartes) + Geocoder (recherche) + Routes API computeRoutes (itinéraires).
 // Chargement du script par injection manuelle → AUCUNE dépendance npm.
 // La façade MapGl.jsx choisit ce moteur si VITE_GMAPS_KEY est définie, sinon
@@ -235,27 +235,60 @@ export function addGLine(A, coords, { color = '#0e9f6e', width = 5, dashed = fal
   return W;
 }
 
+// ───────────────── 💾 v32 : CACHE LOCAL — rester dans le GRATUIT Google Maps ─────────────────
+// Plafonds 2026 : 10 000/mois PAR API (cartes · géocodage · itinéraires). Les requêtes
+// répétées sont servies depuis localStorage → 0 quota consommé. Une adresse ne change
+// pas (30-90 j de TTL), une géométrie de trajet est stable (12 h).
+const YLC = 'yl|c|';   // préfixe commun (pruning facile)
+function cGet(k, ttl) {
+  try {
+    const raw = localStorage.getItem(YLC + k);
+    if (!raw) return undefined;
+    const v = JSON.parse(raw);
+    if (!v || typeof v.t !== 'number' || Date.now() - v.t > ttl) { localStorage.removeItem(YLC + k); return undefined; }
+    return v.v;
+  } catch { return undefined; }
+}
+function cSet(k, v) {
+  try { localStorage.setItem(YLC + k, JSON.stringify({ t: Date.now(), v })); }
+  catch {   // quota localStorage plein → on purge nos entrées et on retente une fois
+    try { Object.keys(localStorage).filter((x) => x.startsWith(YLC)).slice(0, 60).forEach((x) => localStorage.removeItem(x)); try { localStorage.setItem(YLC + k, JSON.stringify({ t: Date.now(), v })); } catch {} } catch {}
+  }
+}
+
 // ───────────────────────── API Google : recherche / inverse / itinéraires ─────────────────────────
 
 /** 🔎 Recherche d'adresse (Geocoding API — 10k/mois gratuites). [{lat,lng,label}] */
 export async function gForward(q, lang = 'fr', near = null) {
+  // 💾 v32 : cache 30 jours — les recherches répétées ne consomment PLUS de quota
+  const ck = 'geo|2|' + LANG3(lang) + '|' + String(q || '').trim().toLowerCase().replace(/\s+/g, ' ') + '|' + (near ? (+near.lat).toFixed(1) + ',' + (+near.lng).toFixed(1) : '-');
+  const hit = cGet(ck, 30 * 864e5);
+  if (hit) return hit;
   const g = await ensureGoogle(lang);
   if (!g) return [];
   const req = { address: q, region: 'EG' };
   if (near) req.bounds = new g.maps.LatLngBounds({ lat: near.lat - 0.35, lng: near.lng - 0.35 }, { lat: near.lat + 0.35, lng: near.lng + 0.35 });
   const { results } = await new g.maps.Geocoder().geocode(req);
-  return (results || [])
+  const out = (results || [])
     .filter((r) => r.geometry?.location)
     .map((r) => ({ lat: r.geometry.location.lat(), lng: r.geometry.location.lng(), label: r.formatted_address }));
+  if (out.length) cSet(ck, out);
+  return out;
 }
 
 /** Géocodage inverse (coords → adresse) ou null. */
 export async function gReverse(lat, lng, lang = 'fr') {
+  // 💾 v32 : cache 90 jours, arrondi 4 décimales (~11 m) — un point garde la même adresse
+  const ck = 'rev|2|' + LANG3(lang) + '|' + (+lat).toFixed(4) + ',' + (+lng).toFixed(4);
+  const hit = cGet(ck, 90 * 864e5);
+  if (hit !== undefined) return hit;
   const g = await ensureGoogle(lang);
   if (!g) return null;
   try {
     const { results } = await new g.maps.Geocoder().geocode({ location: { lat, lng }, region: 'EG' });
-    return results?.[0]?.formatted_address || null;
+    const addr = results?.[0]?.formatted_address || null;
+    if (addr) cSet(ck, addr);
+    return addr;
   } catch { return null; }
 }
 
@@ -285,6 +318,11 @@ function decodePolyline(str) {
  * Retourne {coords: [[lat,lng]…], distance: m, duration: s} ou null.
  */
 export async function gRoute(from, to) {
+  // 💾 v32 : cache 12 h, extrémités arrondies à ~11 m — les trajets fixes (magasin→client,
+  // tournées) ne consomment PLUS de quota à chaque réaffichage
+  const ck = 'rt|2|' + (+from.lat).toFixed(4) + ',' + (+from.lng).toFixed(4) + '|' + (+to.lat).toFixed(4) + ',' + (+to.lng).toFixed(4);
+  const hit = cGet(ck, 12 * 36e5);
+  if (hit) return hit;
   const key = GMAPS_KEY();
   if (!key) return null;
   const ac = new AbortController();
@@ -309,10 +347,12 @@ export async function gRoute(from, to) {
     if (!res.ok) return null;
     const r = (await res.json())?.routes?.[0];
     if (!r?.polyline?.encodedPolyline) return null;
-    return {
+    const out = {
       coords: decodePolyline(r.polyline.encodedPolyline),
       distance: r.distanceMeters ?? null,
       duration: r.duration ? parseFloat(r.duration) : null,   // "1234s" → 1234
     };
+    cSet(ck, out);
+    return out;
   } catch { return null; } finally { clearTimeout(tm); }
 }

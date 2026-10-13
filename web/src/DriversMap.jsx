@@ -131,7 +131,7 @@ export default function DriversMap({ drivers }) {
       if (!cancelled && grew && all.length) fitPts(m, all, 0.2);
     };
     redraw();
-    const it = setInterval(redraw, 30000);
+    const it = setInterval(redraw, 600000);   // 💾 v32 : géométrie toutes les 10 MIN (était 30 s) — le marqueur livreur reste LIVE (poll 1,5 s), seule la ligne s'actualise moins souvent : ~20× moins de quota Routes API
     return () => { cancelled = true; clearInterval(it); clear(); };
   }, [activeKey]);
 
