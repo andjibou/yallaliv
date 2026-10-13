@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// 🗺️ MapGoogle.jsx — v2026.10.13.30 : moteur GOOGLE MAPS (étage 1 sur 3).
+// 🗺️ MapGoogle.jsx — v2026.10.13.31 : moteur GOOGLE MAPS (étage 1 sur 3).
 // Google Maps JS (cartes) + Geocoder (recherche) + Routes API computeRoutes (itinéraires).
 // Chargement du script par injection manuelle → AUCUNE dépendance npm.
 // La façade MapGl.jsx choisit ce moteur si VITE_GMAPS_KEY est définie, sinon
@@ -8,7 +8,7 @@
 
 const LANG3 = (l) => (l === 'ar' ? 'ar' : l === 'en' ? 'en' : 'fr');
 
-export const GMAPS_KEY = () => String(import.meta.env.VITE_GMAPS_KEY || '').trim();
+export const GMAPS_KEY = () => String(import.meta.env.VITE_GMAPS_KEY || '').trim().replace(/^["']+|["']+$/g, '');   // 🛟 v31 : trim + sans guillemets (copier-coller Vercel)
 
 let loadPromise = null;
 export let gFailed = false;   // le chargement a échoué (clé invalide…) → ne plus réessayer
@@ -32,6 +32,14 @@ try {
 export function loadGoogle(lang = 'fr') {
   const key = GMAPS_KEY();
   if (!key) return Promise.resolve(null);
+  // 🛟 v31 : clé mal COPIÉE (tronquée — ex. 34 caractères au lieu de 39 — ou quotes
+  // oubliées) → diagnostic immédiat SANS interroger Google. C'est l'erreur
+  // InvalidKeyMapError vue en production v30 : la clé du bundle s'arrêtait à « hvc_ ».
+  if (!/^AIza[A-Za-z0-9_-]{32,}$/.test(key)) {
+    const disp = key.length > 12 ? key.slice(0, 6) + '…' + key.slice(-4) : key;
+    gFail('Clé Google invalide dans la configuration du site : « ' + disp + ' » — ' + key.length + ' caractères au lieu de 39. Clé tronquée ou mal copiée : colle la clé ENTIÈRE (VITE_GMAPS_KEY), puis Redeploy.');
+    return Promise.resolve(null);
+  }
   if (loadPromise) return loadPromise;
   if (gFailed) return Promise.resolve(null);   // 🛟 v30 : déjà échoué sur CETTE page → on ne ré-injecte JAMAIS (une 2e injection = « API chargée plusieurs fois » → carte cassée)
   // 🔎 Certaines erreurs de compte (billing non activé…) ne déclenchent NI
@@ -85,17 +93,18 @@ export async function ensureGoogle(lang = 'fr') {
 function gFailEl(el, lang) {
   try {
     const L = {
-      fr: { t: "Google Maps n'a pas pu se charger", r: "🔄 Réessayer", h1: "Ce domaine n'est pas encore autorisé pour la clé Google. Dans Google Cloud Console → APIs & Services → Identifiants → ta clé → « Restrictions des sites de référence », ajoute l'adresse affichée ci-dessus.", h2: "Connexion trop lente ou Google momentanément indisponible. Appuie sur Réessayer." },
-      ar: { t: "تعذّر تحميل خرائط Google", r: "🔄 إعادة المحاولة", h1: "هذا النطاق غير مسموح به لمفتاح Google. في Google Cloud Console → APIs & Services → بيانات الاعتماد → المفتاح → «قيود مواقع الإحالة»، أضف العنوان المعروض أعلاه.", h2: "الاتصال بطيء جدًا أو Google غير متاح مؤقتًا. اضغط إعادة المحاولة." },
-      en: { t: "Google Maps could not load", r: "🔄 Retry", h1: "This domain is not yet allowed for the Google key. In Google Cloud Console → APIs & Services → Credentials → your key → “Website referrer restrictions”, add the address shown above.", h2: "Connection too slow or Google temporarily unavailable. Tap Retry." },
+      fr: { t: "Google Maps n'a pas pu se charger", r: "🔄 Réessayer", h0: "La clé Google intégrée au site est invalide (tronquée ou mal copiée). Ouvre Vercel → Settings → Environment Variables → VITE_GMAPS_KEY et colle la clé ENTIÈRE (39 caractères, commence par AIza, sans espaces ni guillemets), puis Deployments → ⋯ → Redeploy. En local : web/.env.local.", h1: "Ce domaine n'est pas encore autorisé pour la clé Google. Dans Google Cloud Console → APIs & Services → Identifiants → ta clé → « Restrictions des sites de référence », ajoute l'adresse affichée ci-dessus.", h2: "Connexion trop lente ou Google momentanément indisponible. Appuie sur Réessayer." },
+      ar: { t: "تعذّر تحميل خرائط Google", r: "🔄 إعادة المحاولة", h0: "مفتاح Google المدمج في الموقع غير صالح (ناقص أو منسوخ خطأ). افتح Vercel → الإعدادات → متغيرات البيئة → VITE_GMAPS_KEY والصق المفتاح كاملًا (39 حرفًا يبدأ بـ AIza، بدون مسافات أو علامات اقتباس) ثم Deployments → ⋯ → Redeploy. محليًا: web/.env.local.", h1: "هذا النطاق غير مسموح به لمفتاح Google. في Google Cloud Console → APIs & Services → بيانات الاعتماد → المفتاح → «قيود مواقع الإحالة»، أضف العنوان المعروض أعلاه.", h2: "الاتصال بطيء جدًا أو Google غير متاح مؤقتًا. اضغط إعادة المحاولة." },
+      en: { t: "Google Maps could not load", r: "🔄 Retry", h0: "The Google key embedded in the site is invalid (truncated or mis-copied). Open Vercel → Settings → Environment Variables → VITE_GMAPS_KEY and paste the FULL key (39 characters, starts with AIza, no spaces or quotes), then Deployments → ⋯ → Redeploy. Locally: web/.env.local.", h1: "This domain is not yet allowed for the Google key. In Google Cloud Console → APIs & Services → Credentials → your key → “Website referrer restrictions”, add the address shown above.", h2: "Connection too slow or Google temporarily unavailable. Tap Retry." },
     }[LANG3(lang)];
     const err = (gLastErr || '').replace(/</g, '&lt;');
+    const keyErr = /InvalidKey|invalide|au lieu de/i.test(err);   // 🛟 v31
     const refErr = /autoris|authorized|RefererNotAllowed|gm_authFailure/i.test(err);
     el.innerHTML = '<div class="yl-gfail" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;min-height:170px;padding:16px;text-align:center;gap:7px;background:#f8fafc;border-radius:12px">'
       + '<div style="font-size:32px;line-height:1">🗺️</div>'
       + '<div style="font-weight:800;color:#b91c1c">⚠️ ' + L.t + '</div>'
       + (err ? '<div style="font-size:11px;color:#334155;background:#e2e8f0;border-radius:8px;padding:6px 9px;max-width:320px;word-break:break-word">' + err + '</div>' : '')
-      + '<div style="font-size:11.5px;color:#475569;max-width:320px">' + (refErr ? L.h1 : L.h2) + '</div>'
+      + '<div style="font-size:11.5px;color:#475569;max-width:320px">' + (keyErr ? L.h0 : refErr ? L.h1 : L.h2) + '</div>'
       + '<button onclick="location.reload()" style="margin-top:2px;border:0;background:#0e9f6e;color:#fff;font-weight:700;padding:8px 18px;border-radius:999px;font-size:13px">' + L.r + '</button>'
       + '</div>';
   } catch {}
