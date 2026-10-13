@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// 🗺️ MapGoogle.jsx — v2026.10.05.3 : moteur GOOGLE MAPS (étage 1 sur 3).
+// 🗺️ MapGoogle.jsx — v2026.10.13.29 : moteur GOOGLE MAPS (étage 1 sur 3).
 // Google Maps JS (cartes) + Geocoder (recherche) + Routes API computeRoutes (itinéraires).
 // Chargement du script par injection manuelle → AUCUNE dépendance npm.
 // La façade MapGl.jsx choisit ce moteur si VITE_GMAPS_KEY est définie, sinon
@@ -142,7 +142,12 @@ export function attachMarker(A, el, pos) {
     ov.onAdd = function () { this.getPanes().overlayMouseTarget.appendChild(this.el); this.el.style.position = 'absolute'; };
     ov.draw = function () {
       if (!this.pos) return;
-      const pt = this.getProjection().fromLatLngToDivPixel(this.pos);
+      // 🛟 v2026.10.13.29 : avant onAdd, getProjection() est undefined (carte encore
+      // en initialisation — téléphone lent, 1er chargement Google) → on ne dessine
+      // PAS ; l'API rappellera draw() toute seule dès que la projection existera.
+      const pr = this.getProjection();
+      if (!pr) return;
+      const pt = pr.fromLatLngToDivPixel(this.pos);
       if (!pt) return;
       // glisse fluide (sauf pendant un zoom — sinon les marqueurs « nagent »)
       this.el.style.transition = A.__noAnim ? 'none' : (this.el.dataset.glide ? 'transform .55s linear' : 'none');
@@ -156,7 +161,7 @@ export function attachMarker(A, el, pos) {
   return M;
 }
 
-export function markerSetPos(M, lng, lat) { M.__pos = { lng, lat }; if (M.__ov) { M.__ov.pos = M.__pos; M.__ov.draw(); } }
+export function markerSetPos(M, lng, lat) { M.__pos = { lng, lat }; if (M.__ov) { M.__ov.pos = M.__pos; if (M.__ov.getProjection()) M.__ov.draw(); } }   // 🛟 v2026.10.13.29 : sans projection (avant onAdd) on saute — draw() auto ensuite
 export function markerRemove(M) { if (M.__ov) { M.__ov.setMap(null); M.__ov = null; } }
 
 /** Popup Google (InfoWindow) au clic sur le marqueur. */
