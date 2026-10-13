@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// 🗺️ MapGoogle.jsx — v2026.10.13.29 : moteur GOOGLE MAPS (étage 1 sur 3).
+// 🗺️ MapGoogle.jsx — v2026.10.13.30 : moteur GOOGLE MAPS (étage 1 sur 3).
 // Google Maps JS (cartes) + Geocoder (recherche) + Routes API computeRoutes (itinéraires).
 // Chargement du script par injection manuelle → AUCUNE dépendance npm.
 // La façade MapGl.jsx choisit ce moteur si VITE_GMAPS_KEY est définie, sinon
@@ -12,15 +12,17 @@ export const GMAPS_KEY = () => String(import.meta.env.VITE_GMAPS_KEY || '').trim
 
 let loadPromise = null;
 export let gFailed = false;   // le chargement a échoué (clé invalide…) → ne plus réessayer
+export let gLastErr = '';     // 🛟 v30 : dernier code d'erreur Google capté — affiché au lieu d'une carte blanche
 
 // 🔐 Google appelle window.gm_authFailure quand la clé est invalide / l'API
 // désactivée / le quota atteint. On s'y branche pour déclencher la bascule
 // vers Mapbox (la façade s'abonne via onAuthFailure).
 const authFns = new Set();
 export function onAuthFailure(fn) { authFns.add(fn); return () => authFns.delete(fn); }
+const gFail = (code) => { gFailed = true; if (!gLastErr) gLastErr = String(code || '').slice(0, 220); authFns.forEach((f) => { try { f(); } catch {} }); };   // 🛟 v30
 try {
   const prev = window.gm_authFailure;
-  window.gm_authFailure = function () { gFailed = true; authFns.forEach((f) => { try { f(); } catch {} }); try { prev?.(); } catch {} };
+  window.gm_authFailure = function () { gFail("Clé refusée par Google (gm_authFailure) — domaine non autorisé, API désactivée ou facturation/quota"); try { prev?.(); } catch {} };
 } catch {}
 
 /**
@@ -31,6 +33,7 @@ export function loadGoogle(lang = 'fr') {
   const key = GMAPS_KEY();
   if (!key) return Promise.resolve(null);
   if (loadPromise) return loadPromise;
+  if (gFailed) return Promise.resolve(null);   // 🛟 v30 : déjà échoué sur CETTE page → on ne ré-injecte JAMAIS (une 2e injection = « API chargée plusieurs fois » → carte cassée)
   // 🔎 Certaines erreurs de compte (billing non activé…) ne déclenchent NI
   // gm_authFailure NI l'absence de tuiles — Google les signale uniquement en
   // console : « Google Maps JavaScript API error: … ». On intercepte ce message
@@ -41,25 +44,27 @@ export function loadGoogle(lang = 'fr') {
       const origErr = console.error.bind(console);
       console.error = (...a) => {
         try {
-          if (/Google Maps JavaScript API error/i.test(String(a?.[0] || ''))) {
-            gFailed = true;
-            authFns.forEach((f) => { try { f(); } catch {} });
-          }
+          const msg = a.map((x) => (typeof x === 'string' ? x : '')).join(' ');
+          if (/Google Maps (JavaScript )?API error/i.test(msg)) gFail(msg);   // 🛟 v30 : capture le code ET « Your site URL to be authorized: … »
         } catch {}
         origErr(...a);
       };
     }
   } catch {}
-  const cb = '___ylGmapsReady' + Date.now();
+  const cb = '___ylGmapsReady';   // 🛟 v30 : nom STABLE → URL identique à chaque chargement
+  let settled = false;
   loadPromise = new Promise((resolve, reject) => {
-    window[cb] = () => { resolve(window.google); };
+    window[cb] = () => { if (!settled) { settled = true; clearTimeout(tm); resolve(window.google); } };
     const s = document.createElement('script');
     s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&language=${LANG3(lang)}&region=EG&v=weekly&loading=async&callback=${cb}`;
     s.async = true;
-    s.onerror = () => reject(new Error('Google Maps non chargé'));
+    s.onerror = () => { if (settled) return; settled = true; clearTimeout(tm); s.remove(); loadPromise = null; gFail("Réseau : le script Google n'a pas pu être téléchargé (connexion coupée, bloqueur de pub ou pare-feu)"); reject(new Error('Google Maps non chargé')); };
     document.head.appendChild(s);
-    setTimeout(() => reject(new Error('Google Maps: délai dépassé')), 12000);
-  }).catch((e) => { gFailed = true; loadPromise = null; throw e; });
+    // 🛟 v30 : 30 s (était 12 s) — sur connexion mobile lente, le bootstrap Google + ses chunks
+    // dépassent 12 s ; l'ancien délai annulait puis une 2e injection sur la même page
+    // provoquait « Google Maps chargé plusieurs fois » → le message « Petit problème… ».
+    const tm = setTimeout(() => { if (settled) return; settled = true; s.remove(); loadPromise = null; gFail("Délai dépassé : Google Maps n'a pas fini de charger en 30 s (connexion très lente — rafraîchis la page)"); reject(new Error('Google Maps: délai dépassé')); }, 30000);
+  }).catch(() => null);   // 🛟 v30 : ne rejette plus jamais — la carte affichera le diagnostic
   return loadPromise;
 }
 
@@ -73,6 +78,29 @@ export async function ensureGoogle(lang = 'fr') {
 // cet adaptateur traduit vers Google Maps, en file d'attente tant que le
 // script n'est pas prêt (les composants n'attendent jamais).
 
+// ── 🛟 v30 : échec Google = MESSAGE VISIBLE (jamais une carte blanche silencieuse) ──
+// Affiche le code d'erreur exact capté (console/gm_authFailure — y compris
+// « Your site URL to be authorized: … » quand le domaine n'est pas autorisé)
+// + la marche à suivre + un bouton Réessayer. fr / ar / en.
+function gFailEl(el, lang) {
+  try {
+    const L = {
+      fr: { t: "Google Maps n'a pas pu se charger", r: "🔄 Réessayer", h1: "Ce domaine n'est pas encore autorisé pour la clé Google. Dans Google Cloud Console → APIs & Services → Identifiants → ta clé → « Restrictions des sites de référence », ajoute l'adresse affichée ci-dessus.", h2: "Connexion trop lente ou Google momentanément indisponible. Appuie sur Réessayer." },
+      ar: { t: "تعذّر تحميل خرائط Google", r: "🔄 إعادة المحاولة", h1: "هذا النطاق غير مسموح به لمفتاح Google. في Google Cloud Console → APIs & Services → بيانات الاعتماد → المفتاح → «قيود مواقع الإحالة»، أضف العنوان المعروض أعلاه.", h2: "الاتصال بطيء جدًا أو Google غير متاح مؤقتًا. اضغط إعادة المحاولة." },
+      en: { t: "Google Maps could not load", r: "🔄 Retry", h1: "This domain is not yet allowed for the Google key. In Google Cloud Console → APIs & Services → Credentials → your key → “Website referrer restrictions”, add the address shown above.", h2: "Connection too slow or Google temporarily unavailable. Tap Retry." },
+    }[LANG3(lang)];
+    const err = (gLastErr || '').replace(/</g, '&lt;');
+    const refErr = /autoris|authorized|RefererNotAllowed|gm_authFailure/i.test(err);
+    el.innerHTML = '<div class="yl-gfail" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;min-height:170px;padding:16px;text-align:center;gap:7px;background:#f8fafc;border-radius:12px">'
+      + '<div style="font-size:32px;line-height:1">🗺️</div>'
+      + '<div style="font-weight:800;color:#b91c1c">⚠️ ' + L.t + '</div>'
+      + (err ? '<div style="font-size:11px;color:#334155;background:#e2e8f0;border-radius:8px;padding:6px 9px;max-width:320px;word-break:break-word">' + err + '</div>' : '')
+      + '<div style="font-size:11.5px;color:#475569;max-width:320px">' + (refErr ? L.h1 : L.h2) + '</div>'
+      + '<button onclick="location.reload()" style="margin-top:2px;border:0;background:#0e9f6e;color:#fff;font-weight:700;padding:8px 18px;border-radius:999px;font-size:13px">' + L.r + '</button>'
+      + '</div>';
+  } catch {}
+}
+
 export function createGoogleMap(el, { lang = 'fr', center = [29.9187, 31.2001], zoom = 13 } = {}) {
   const A = {
     __yl: 'google', __g: null, __map: null, __ready: false, __dead: false,
@@ -81,8 +109,10 @@ export function createGoogleMap(el, { lang = 'fr', center = [29.9187, 31.2001], 
   const emit = (ev, ...a) => (A.__handlers[ev] || []).forEach((f) => { try { f(...a); } catch {} });
   const op = (fn) => { if (A.__dead) return; if (A.__ready) { try { fn(A.__g, A.__map); } catch {} } else A.__ops.push(fn); };
 
+  const unAuth = onAuthFailure(() => { if (!A.__dead) gFailEl(el, lang); });   // 🛟 v30 : échec TARDIF (clé refusée après rendu) → message, pas de carte blanche
   loadGoogle(lang).then((google) => {
-    if (A.__dead || !google) return;
+    if (A.__dead) return;
+    if (!google || !google.maps) { gFailEl(el, lang); return; }   // 🛟 v30 : plus JAMAIS de carte blanche silencieuse
     A.__g = google;
     A.__map = new google.maps.Map(el, {
       center: { lat: center[1], lng: center[0] },
@@ -106,7 +136,7 @@ export function createGoogleMap(el, { lang = 'fr', center = [29.9187, 31.2001], 
     let tilesLoaded = false;
     try { A.__map.addListener('tilesloaded', () => { tilesLoaded = true; }); } catch {}
     setTimeout(() => { if (!tilesLoaded && !A.__dead && A.__onStall) { try { A.__onStall(); } catch {} } }, 10000);
-  }).catch(() => { A.__dead = true; });   // la façade bascule sur Mapbox
+  }).catch(() => { if (!A.__dead) gFailEl(el, lang); });   // 🛟 v30
 
   A.__op = op;
   A.on = (ev, fn) => { (A.__handlers[ev] = A.__handlers[ev] || []).push(fn); return A; };
@@ -126,7 +156,7 @@ export function createGoogleMap(el, { lang = 'fr', center = [29.9187, 31.2001], 
   A.getBearing = () => { try { return (A.__map && A.__map.getHeading()) || 0; } catch { return 0; } };
   A.resize = () => { try { A.__g?.maps?.event?.trigger(A.__map, 'resize'); } catch {} };
   A.fitBounds = (b, opts = {}) => op((g, m) => { m.fitBounds(b, opts.padding ?? 40); if (opts.maxZoom) g.maps.event.addListenerOnce(m, 'idle', () => { if (m.getZoom() > opts.maxZoom) m.setZoom(opts.maxZoom); }); });
-  A.remove = () => { A.__dead = true; A.__ops = []; try { A.__g?.maps?.event?.clearInstanceListeners(A.__map); } catch {} try { el.innerHTML = ''; } catch {} A.__map = null; };
+  A.remove = () => { A.__dead = true; A.__ops = []; try { unAuth(); } catch {} try { A.__g?.maps?.event?.clearInstanceListeners(A.__map); } catch {} try { el.innerHTML = ''; } catch {} A.__map = null; };
   return A;
 }
 
