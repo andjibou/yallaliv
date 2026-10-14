@@ -373,6 +373,20 @@ CREATE TABLE IF NOT EXISTS ads (
   active INTEGER NOT NULL DEFAULT 1,
   created_at BIGINT NOT NULL
 );
+
+-- 🗺️ v33 : cache Google Maps CROISÉ (partagé entre TOUS les appareils)
+CREATE TABLE IF NOT EXISTS gmaps_cache (
+  k TEXT PRIMARY KEY,
+  v JSONB NOT NULL,
+  t BIGINT NOT NULL
+);
+-- 🧮 v33 : compteurs de consommation (1 ligne par jour et par API : maps/geo/rev/rt/hits)
+CREATE TABLE IF NOT EXISTS gmaps_usage (
+  day TEXT NOT NULL,
+  sku TEXT NOT NULL,
+  n INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, sku)
+);
 `;
 
 // ---------- Initialisation (appelée au démarrage) ----------

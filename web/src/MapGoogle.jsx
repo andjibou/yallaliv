@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// 🗺️ MapGoogle.jsx — v2026.10.13.32 : moteur GOOGLE MAPS (étage 1 sur 3).
+// 🗺️ MapGoogle.jsx — v2026.10.13.33 : moteur GOOGLE MAPS (étage 1 sur 3).
 // Google Maps JS (cartes) + Geocoder (recherche) + Routes API computeRoutes (itinéraires).
 // Chargement du script par injection manuelle → AUCUNE dépendance npm.
 // La façade MapGl.jsx choisit ce moteur si VITE_GMAPS_KEY est définie, sinon
@@ -130,6 +130,7 @@ export function createGoogleMap(el, { lang = 'fr', center = [29.9187, 31.2001], 
       clickableIcons: false, gestureHandling: 'greedy',
       ...(google.maps.RenderingType ? { renderingType: google.maps.RenderingType.VECTOR } : {}),   // cartes vectorielles → rotation possible
     });
+    gBump('maps');   // 🧮 v33 : 1 chargement de carte = 1 unité de quota
     A.__ready = true;
     A.__ops.forEach((f) => { try { f(A.__g, A.__map); } catch {} });
     A.__ops = [];
@@ -256,6 +257,37 @@ function cSet(k, v) {
   }
 }
 
+// ── 🧮 v33 : COMPTEURS DE CONSOMMATION + CACHE CROISÉ (tous les appareils) ──
+// Chaque appel Google réel est compté puis reporté au serveur (toutes les 10 s) →
+// le dashboard superadmin affiche la consommation du jour par API. Les lectures
+// servies du cache (local OU serveur) sont comptées « hits » = appels évités.
+export const gUsage = { maps: 0, geo: 0, rev: 0, rt: 0, hits: 0 };
+let gSent = { maps: 0, geo: 0, rev: 0, rt: 0, hits: 0 };
+const gBump = (k) => { gUsage[k]++; };
+function gFlush() {
+  try {
+    const d = {}; let any = false;
+    for (const k of ['maps', 'geo', 'rev', 'rt', 'hits']) { d[k] = Math.max(0, gUsage[k] - gSent[k]); if (d[k]) any = true; }
+    if (!any) return;
+    const prev = { ...gSent };
+    gSent = { ...gUsage };
+    const tok = (typeof localStorage !== 'undefined' && localStorage.getItem('yl_token')) || '';
+    fetch('/api/gmaps/usage', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify(d), keepalive: true })
+      .catch(() => { gSent = prev; });   // échec → le delta sera renvoyé au prochain cycle
+  } catch {}
+}
+try { setInterval(gFlush, 10000); document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') gFlush(); }); } catch {}
+
+// 🗄️ cache L2 — BASE DE DONNÉES du serveur : le marchand, le livreur et le client
+// qui regardent le MÊME trajet ne déclenchent qu'UN SEUL appel Google au total.
+const l2Get = async (k) => { try { const r = await fetch('/api/gmaps/cache?k=' + encodeURIComponent(k)); const d = await r.json(); return (d && d.v !== undefined) ? d.v : undefined; } catch { return undefined; } };
+const l2Put = (k, v) => {
+  try {
+    const tok = (typeof localStorage !== 'undefined' && localStorage.getItem('yl_token')) || '';
+    fetch('/api/gmaps/cache', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify({ k, v }), keepalive: true }).catch(() => {});
+  } catch {}
+};
+
 // ───────────────────────── API Google : recherche / inverse / itinéraires ─────────────────────────
 
 /** 🔎 Recherche d'adresse (Geocoding API — 10k/mois gratuites). [{lat,lng,label}] */
@@ -263,16 +295,19 @@ export async function gForward(q, lang = 'fr', near = null) {
   // 💾 v32 : cache 30 jours — les recherches répétées ne consomment PLUS de quota
   const ck = 'geo|2|' + LANG3(lang) + '|' + String(q || '').trim().toLowerCase().replace(/\s+/g, ' ') + '|' + (near ? (+near.lat).toFixed(1) + ',' + (+near.lng).toFixed(1) : '-');
   const hit = cGet(ck, 30 * 864e5);
-  if (hit) return hit;
+  if (hit) { gBump('hits'); return hit; }
+  const l2 = await l2Get(ck);   // 🗄️ v33 : cache croisé serveur — TOUS les appareils
+  if (l2) { gBump('hits'); cSet(ck, l2); return l2; }
   const g = await ensureGoogle(lang);
   if (!g) return [];
+  gBump('geo');   // 🧮 appel réseau réel = 1 unité de quota
   const req = { address: q, region: 'EG' };
   if (near) req.bounds = new g.maps.LatLngBounds({ lat: near.lat - 0.35, lng: near.lng - 0.35 }, { lat: near.lat + 0.35, lng: near.lng + 0.35 });
   const { results } = await new g.maps.Geocoder().geocode(req);
   const out = (results || [])
     .filter((r) => r.geometry?.location)
     .map((r) => ({ lat: r.geometry.location.lat(), lng: r.geometry.location.lng(), label: r.formatted_address }));
-  if (out.length) cSet(ck, out);
+  if (out.length) { cSet(ck, out); l2Put(ck, out); }
   return out;
 }
 
@@ -281,13 +316,16 @@ export async function gReverse(lat, lng, lang = 'fr') {
   // 💾 v32 : cache 90 jours, arrondi 4 décimales (~11 m) — un point garde la même adresse
   const ck = 'rev|2|' + LANG3(lang) + '|' + (+lat).toFixed(4) + ',' + (+lng).toFixed(4);
   const hit = cGet(ck, 90 * 864e5);
-  if (hit !== undefined) return hit;
+  if (hit !== undefined) { gBump('hits'); return hit; }
+  const l2 = await l2Get(ck);   // 🗄️ v33 : cache croisé serveur — TOUS les appareils
+  if (l2 !== undefined && l2 !== null) { gBump('hits'); cSet(ck, l2); return l2; }
   const g = await ensureGoogle(lang);
   if (!g) return null;
+  gBump('rev');   // 🧮 appel réseau réel = 1 unité de quota
   try {
     const { results } = await new g.maps.Geocoder().geocode({ location: { lat, lng }, region: 'EG' });
     const addr = results?.[0]?.formatted_address || null;
-    if (addr) cSet(ck, addr);
+    if (addr) { cSet(ck, addr); l2Put(ck, addr); }
     return addr;
   } catch { return null; }
 }
@@ -322,9 +360,12 @@ export async function gRoute(from, to) {
   // tournées) ne consomment PLUS de quota à chaque réaffichage
   const ck = 'rt|2|' + (+from.lat).toFixed(4) + ',' + (+from.lng).toFixed(4) + '|' + (+to.lat).toFixed(4) + ',' + (+to.lng).toFixed(4);
   const hit = cGet(ck, 12 * 36e5);
-  if (hit) return hit;
+  if (hit) { gBump('hits'); return hit; }
+  const l2 = await l2Get(ck);   // 🗄️ v33 : cache croisé serveur — le trajet vu par le marchand, le livreur ET le client = 1 seul appel
+  if (l2) { gBump('hits'); cSet(ck, l2); return l2; }
   const key = GMAPS_KEY();
   if (!key) return null;
+  gBump('rt');   // 🧮 appel réseau réel = 1 unité de quota
   const ac = new AbortController();
   const tm = setTimeout(() => ac.abort(), 5000);
   try {
@@ -352,7 +393,7 @@ export async function gRoute(from, to) {
       distance: r.distanceMeters ?? null,
       duration: r.duration ? parseFloat(r.duration) : null,   // "1234s" → 1234
     };
-    cSet(ck, out);
+    cSet(ck, out); l2Put(ck, out);
     return out;
   } catch { return null; } finally { clearTimeout(tm); }
 }

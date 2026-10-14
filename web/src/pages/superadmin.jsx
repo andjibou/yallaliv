@@ -184,10 +184,12 @@ function Dash() {
   const { lang } = useLang();
   const [s, setS] = useState(null);
   const [series, setSeries] = useState(null);
+  const [gm, setGm] = useState(null);
   usePoll(() => api('/admin/stats').then(setS).catch(() => {}), 8000);
   useEffect(() => {
     api('/admin/sales-daily').then((d) => setSeries(d.series)).catch(() => setSeries([]));
   }, []);
+  usePoll(() => api('/admin/gmaps-usage').then(setGm).catch(() => {}), 15000);   // 🗺️ v33 : consommation Google Maps
   if (!s) return <Spinner />;
   return (
     <>
@@ -209,6 +211,25 @@ function Dash() {
         <div className="stat"><div className="v">{(s.usersByRole.driver || 0)}</div><div className="k">🛵 {t('total_drivers')}</div></div>
         <div className="stat"><div className="v" style={{ fontSize: 18 }}>{fmtMoney(s.driver_payouts)}</div><div className="k">🛵 {t('payouts')}</div></div>
       </div>
+      {gm && (
+        <div className="card mb16 sa-gmaps">
+          <div className="h2 mb8">🗺️ Google Maps — consommation des API</div>
+          <div className="small muted mb8">Aujourd'hui · plafond 200/jour par API (gratuit : 10 000/mois) — compté par l'application</div>
+          {[['maps', '🗺️ Cartes (chargements)'], ['geo', '🔎 Recherche d\'adresses'], ['rev', '📍 Adresse depuis position'], ['rt', '🛣️ Itinéraires']].map(([sku, label]) => {
+            const today = (gm.days.find((d) => d.day === new Date().toISOString().slice(0, 10) && d.sku === sku) || {}).n || 0;
+            const week = gm.days.filter((d) => d.sku === sku).reduce((a, b) => a + (b.n || 0), 0);
+            const pct = Math.min(100, Math.round((today / (gm.quota || 200)) * 100));
+            const col = pct >= 90 ? '#b91c1c' : pct >= 70 ? '#b45309' : '#0e9f6e';
+            return (
+              <div key={sku} data-sku={sku} style={{ marginBottom: 9 }}>
+                <div className="row spread"><span className="small">{label}</span><span className="small"><b>{today}</b>/{gm.quota || 200} · 7 j : {week}</span></div>
+                <div style={{ height: 6, background: '#eef2f7', borderRadius: 999, overflow: 'hidden' }}><div style={{ width: pct + '%', height: '100%', background: col, borderRadius: 999 }} /></div>
+              </div>
+            );
+          })}
+          <div className="small" style={{ marginTop: 4 }}>💰 Économies cache (appels Google évités) : <b>{(gm.days.find((d) => d.day === new Date().toISOString().slice(0, 10) && d.sku === 'hits') || {}).n || 0}</b> aujourd'hui · <b>{gm.days.filter((d) => d.sku === 'hits').reduce((a, b) => a + (b.n || 0), 0)}</b> sur 7 j</div>
+        </div>
+      )}
       <div className="row wrap mb16" style={{ gap: 6 }}>
         {Object.entries(s.ordersByStatus).map(([k, v]) => <span key={k}><StatusBadge status={k} /> <b>{v}</b>&nbsp;&nbsp;</span>)}
       </div>

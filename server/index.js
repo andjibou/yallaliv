@@ -2400,6 +2400,39 @@ if (dist) {
 export default app; // Vercel : importé par api/index.js (export au niveau module)
 
 // ---------- Démarrage ----------
+// ── 🗺️ v2026.10.13.33 : cache Google Maps CROISÉ (tous appareils) + compteurs de consommation ──
+const GMAPS_TTL = { geo: 30 * 864e5, rev: 90 * 864e5, rt: 12 * 36e5 };   // mêmes durées que le cache navigateur
+app.get('/api/gmaps/cache', rateLimit(60, 60000, 'Trop de requêtes.'), h(async (req, res) => {
+  const k = String(req.query.k || '').slice(0, 160);
+  const ttl = GMAPS_TTL[k.split('|')[0]];
+  if (!ttl) return res.json({});
+  const row = await get('SELECT v, t FROM gmaps_cache WHERE k=$1', [k]);
+  if (!row || Date.now() - Number(row.t) > ttl) return res.json({});
+  res.json({ v: row.v });
+}));
+app.post('/api/gmaps/cache', rateLimit(30, 10 * 60000, 'Trop de requêtes.'), h(async (req, res) => {
+  const k = String(req.body?.k || '').slice(0, 160);
+  if (!GMAPS_TTL[k.split('|')[0]]) return res.status(400).json({ error: 'clé inconnue' });
+  const raw = JSON.stringify(req.body?.v);
+  if (!raw || raw.length > 6000) return res.status(400).json({ error: 'valeur trop grande' });
+  await run('INSERT INTO gmaps_cache(k, v, t) VALUES($1, $2::jsonb, $3) ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v, t = EXCLUDED.t', [k, raw, Date.now()]);
+  res.json({ ok: true });
+}));
+app.post('/api/gmaps/usage', rateLimit(30, 10 * 60000, 'Trop de requêtes.'), h(async (req, res) => {
+  const b = req.body || {};
+  const day = new Date().toISOString().slice(0, 10);
+  for (const sku of ['maps', 'geo', 'rev', 'rt', 'hits']) {
+    const n = Math.max(0, Math.min(500, Math.floor(Number(b[sku]) || 0)));
+    if (!n) continue;
+    await run('INSERT INTO gmaps_usage(day, sku, n) VALUES($1, $2, $3) ON CONFLICT (day, sku) DO UPDATE SET n = gmaps_usage.n + EXCLUDED.n', [day, sku, n]);
+  }
+  res.json({ ok: true });
+}));
+app.get('/api/admin/gmaps-usage', auth, requireRole('superadmin'), h(async (req, res) => {
+  const rows = await all(`SELECT day, sku, n FROM gmaps_usage WHERE day >= to_char(now() - interval '6 days', 'YYYY-MM-DD') ORDER BY day DESC`);
+  res.json({ days: rows, quota: 200 });
+}));
+
 initDb()
   .then(initVapid)
   .then(() => {
