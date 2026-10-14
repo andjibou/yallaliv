@@ -1,15 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useT, useLang, toast } from './lib.jsx';
-import { createMap, gForward, gReverse, mbForward, mbReverse, fetchT, LANG3 } from './MapGl.jsx';
+import { createMap, gReverse, mbForward, mbReverse, fetchT, LANG3 } from './MapGl.jsx';   // 🆓 v35 : gForward retiré — l'autocomplétion n'interroge plus Google
 
 // ================= 📍 v2026.10.14.34 — Géocodage CINQ-SOURCES (économie de quota) =================
-// 🐢 v34 : Google n'est PLUS interrogé à chaque frappe ni à chaque déplacement de carte :
-//  · recherche tapée : les 4 moteurs GRATUITS répondent aussitôt ; Google ne démarre
-//    qu'après 900 ms SANS nouvelle frappe (les préfixes partiels n'atteignent JAMAIS
-//    Google → 1 seul appel par adresse finale, au lieu d'un par lettre) ;
-//  · « Choisir sur la carte » : l'exploration (déplacer la carte) est GRATUITE
-//    (Esri/Mapbox/Nominatim) ; Google n'est consulté qu'UNE FOIS, à la confirmation,
-//    pour l'adresse ENREGISTRÉE (meilleure qualité, cache 90 j partagé).
+// 🆓 v35 : l'AUTOCOMPLÉTION n'interroge PLUS JAMAIS Google — rapport utilisateur :
+// « la consommation ne devrait avoir lieu que lorsque l'utilisateur clique sur une
+// adresse suggérée ». Mieux encore : cliquer une suggestion ne consomme RIEN non plus
+// (chaque suggestion porte DÉJÀ ses coordonnées). Donc :
+//  · frappe (autocomplétion) : 100% GRATUITE — Mapbox/Esri/Photon/Nominatim seuls ;
+//  · clic sur une suggestion : 0 appel (position = celle de la suggestion) ;
+//  · « Choisir sur la carte » : exploration GRATUITE + Google UNE SEULE FOIS à la
+//    confirmation, pour l'adresse ENREGISTRÉE (meilleure qualité, cache 90 j partagé
+//    entre tous les appareils) — seul point de consommation restant.
 // Le champ « Adresse de livraison » du panier propose AUTOMATIQUEMENT des
 // adresses pendant la frappe ; toucher une suggestion pose le point de livraison.
 // CINQ bases sont interrogées EN PARALLÈLE (chaque étage tombe en douceur si sa
@@ -76,26 +78,19 @@ export async function reverseGeocodeFree(lat, lng, lang = 'fr') {
  * « near » (Alexandrie par défaut côté appelants).
  * Retourne [{lat, lng, label}].
  */
-let gSeq = 0;   // 🐢 v34 : génération de frappe — une nouvelle frappe annule la requête Google en attente
-export async function geocodeSearch(q, lang = 'fr', near = null) {
+export async function geocodeSearch(q, lang = 'fr', near = null) {   // 🆓 v35 : 100% gratuit
   const l = LANG3(lang);
   const s = String(q || '').trim();
   if (s.length < 3) return [];
-  const gen = ++gSeq;
   // 🥇 ordre de pertinence : adresse COMPLÈTE → Google puis Mapbox/Esri ; frappe
   // PARTIELLE (un seul mot) → Photon d'abord (« smou » trouve déjà Smouha).
-  const order = s.includes(' ') ? [0, 1, 2, 3, 4] : [3, 0, 2, 1, 4];
+  const order = s.includes(' ') ? [1, 2, 3, 4] : [3, 1, 2, 4];   // 🆓 v35 : plus de src 0 (Google absent de l'autocomplétion)
   const acc = [];   // chaque moteur dépose ses résultats DÈS qu'il répond
   const jobs = [
-    (async () => {   // ① Google Geocoder — 🐢 v34 : VOIE LENTE. Les 4 moteurs gratuits
-      // répondent aussitôt ; Google n'est contacté que si la frappe SURVIT 900 ms sans
-      // être remplacée → les préfixes partiels (« 12 ru », « 12 rue sa »…) ne consomment
-      // JAMAIS de quota : 1 seul appel Google par adresse finale.
-      await new Promise((r2) => setTimeout(r2, 900));
-      if (gen !== gSeq) return;   // supersedé par une frappe plus récente → PAS d'appel Google
-      const r = await gForward(s, l, near).catch(() => []);
-      r.forEach((x) => acc.push({ ...x, src: 0 }));
-    })(),
+    // 🆓 v35 : PLUS AUCUN appel Google ici — l'autocomplétion est 100% gratuite
+    // (Google Geocoding restait consommé à chaque pause de frappe, avant même le clic ;
+    // les 4 moteurs gratuits suffisent pour suggérer, et la suggestion cliquée porte
+    // déjà ses coordonnées → 0 appel au clic aussi).
     (async () => {   // ② Mapbox Geocoding v6
       const r = await mbForward(s, l, near).catch(() => []);
       r.forEach((x) => acc.push({ ...x, src: 1 }));
@@ -123,11 +118,17 @@ export async function geocodeSearch(q, lang = 'fr', near = null) {
   // ⏱️ 2,8 s GRAND MAX tout compris : un moteur lent ne retarde JAMAIS l'affichage —
   // on fusionne ce qui est déjà arrivé, les traînards sont simplement ignorés.
   await Promise.race([Promise.allSettled(jobs), new Promise((r) => setTimeout(r, 2800))]);
-  const all = acc.slice().sort((a, b) => order.indexOf(a.src) - order.indexOf(b.src));   // tri stable : pertinence conservée au sein de chaque source
+  // 🧭 v35 : RECENTRAGE LOCAL — sans Google dans l'autocomplétion, il faut garantir la
+  // pertinence : les résultats à moins de ~40 km du point de référence (near) passent
+  // EN PREMIER, ceux du pays (jusqu'à ~400 km) ensuite, le reste (autre pays…) tout en
+  // bas. Le tri est stable : l'ordre des sources est conservé au sein de chaque palier.
+  const km = (r) => (near ? Math.hypot((r.lat - near.lat) * 111, (r.lng - near.lng) * 100) : 0);
+  const tier = (r) => (near ? (km(r) < 40 ? 0 : km(r) < 400 ? 1 : 2) : 1);
+  const all = acc.slice().sort((a, b) => tier(a) - tier(b) || order.indexOf(a.src) - order.indexOf(b.src));
   const out = [], seen = [];
   for (const r of all) {
     if (out.length >= 7) break;
-    if (seen.some((p) => Math.abs(p.lat - r.lat) < 0.00015 && Math.abs(p.lng - r.lng) < 0.00015)) continue;   // doublon ≈ même position
+    if (seen.some((p) => Math.abs(p.lat - r.lat) < 0.001 && Math.abs(p.lng - r.lng) < 0.001)) continue;   // 🧭 v35 : doublon ≈ même position (~100 m — les moteurs décrivent la même rue)
     seen.push(r); out.push(r);
   }
   return out;
