@@ -32,7 +32,7 @@ export default function DriversMap({ drivers }) {
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    map.current = createMap(el.current, { zoom: 12 });
+    map.current = createMap(el.current, { zoom: 12, poolKey: 'drivers' });   // 🏊 v37 : survit en arrière-plan ≤ 12 h
     return () => { map.current?.remove(); map.current = null; mks.current = {}; stKeys.current = {}; };
   }, []);
 

@@ -181,7 +181,7 @@ export default function PickMap({ initial, onConfirm }) {
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    map.current = createMap(el.current, { lang: langRef.current, center: [initial.lng, initial.lat], zoom: 16 });
+    map.current = createMap(el.current, { lang: langRef.current, center: [initial.lng, initial.lat], zoom: 16, poolKey: 'pick' });   // 🏊 v37 : survit en arrière-plan ≤ 12 h (réouverture GRATUITE)
 
     const upd = () => {
       const c = map.current.getCenter();

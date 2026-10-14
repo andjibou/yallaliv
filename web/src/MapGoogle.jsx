@@ -219,7 +219,8 @@ export function bindGPopup(A, M, html) {
 // ───────────────────────── Lignes (polylines) ─────────────────────────
 
 export function addGLine(A, coords, { color = '#0e9f6e', width = 5, dashed = false, opacity = 0.85 } = {}) {
-  const W = { __yl: 'g', remove: () => {} };
+  const W = { __yl: 'g', remove: () => { try { A.__ylLines?.delete(W); } catch {} } };
+  (A.__ylLines = A.__ylLines || new Set()).add(W);   // 🏊 v37 : suivi pour le détachement (pool de cartes)
   A.__op((google, map) => {
     const poly = new google.maps.Polyline({
       path: (coords || []).map(([lat, lng]) => ({ lat, lng })),
@@ -231,7 +232,7 @@ export function addGLine(A, coords, { color = '#0e9f6e', width = 5, dashed = fal
     });
     poly.setMap(map);
     W.__poly = poly;   // exposition pour tests
-    W.remove = () => poly.setMap(null);
+    W.remove = () => { poly.setMap(null); try { A.__ylLines?.delete(W); } catch {} };
   });
   return W;
 }

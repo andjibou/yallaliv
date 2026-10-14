@@ -91,6 +91,10 @@ function createMapboxMap(el, { lang = 'fr', center = [29.9187, 31.2001], zoom = 
  * token Mapbox existe, la carte Google est REMPLACÉE par Mapbox dans le même
  * élément, avec re-branchement des écouteurs — l'utilisateur ne voit rien.
  */
+// 🏊 v37 : pool de cartes en arrière-plan (≤ 12 h, LRU 4) — key → { A, div, t }
+const MPOOL = new Map();
+try { window.__ylMPool = MPOOL; } catch {}   // sonde (tests)
+
 export function createMap(el, opts = {}) {
   const key = GMAPS_KEY();
   // 🟩 v2026.10.13.28 — GOOGLE MAPS UNIQUEMENT quand la clé est configurée :
@@ -98,6 +102,47 @@ export function createMap(el, opts = {}) {
   // l'utilisateur voit Google, point final. Si un écran affiche « © Mapbox »,
   // c'est le SIGNAL que la clé VITE_GMAPS_KEY manque dans CE build
   // (local : web/.env.local · prod : variable Vercel + Redeploy).
+  // 🏊 v37 : POOL DE CARTES — idée utilisateur : la carte ouverte UNE FOIS survit en
+  // arrière-plan jusqu'à 12 h. Réouvrir la carte / revoir un trajet = RÉUTILISATION de
+  // l'instance → 0 nouveau chargement facturé (Google ne facture qu'à la CRÉATION).
+  // Marche pendant toute la session du site ET dans l'APK en arrière-plan (le processus
+  // survit). Limite honnête : onglet navigateur fermé = tout est détruit (impossible d'y
+  // survivre sur le web) → à la réouverture du site, 1 création (la page se recharge de
+  // toute façon). Garde-fous : max 4 cartes en vie (LRU, mémoire téléphones modestes) +
+  // TTL 12 h + marqueurs/lignes/handlers nettoyés à chaque détachement.
+  if (key && opts.poolKey) {
+    const pk = opts.poolKey;
+    const hit = MPOOL.get(pk);
+    if (hit && !hit.A.__dead && Date.now() - hit.t < 12 * 36e5) {
+      hit.A.__handlers = {}; hit.A.__ops = [];   // handlers du composant précédent abandonnés
+      try { el.appendChild(hit.div); } catch {}
+      for (const c of [...el.children]) if (c !== hit.div) c.style.display = 'none';   // 🎨 v37 : google.maps.Map() vidait le conteneur → le ⛶ n'apparaissait jamais sur les cartes Google — UI rétablie
+      try { hit.A.resize(); } catch {}
+      setTimeout(() => { try { hit.A.resize(); } catch {} }, 200);
+      hit.t = Date.now();
+      return hit.A;   // 🏊 réutilisé — AUCUN nouveau chargement facturé
+    }
+    if (hit) { try { (hit.A.__destroy || hit.A.remove.bind(hit.A))(); } catch {} MPOOL.delete(pk); }
+    const div = document.createElement('div');
+    div.style.cssText = 'width:100%;height:100%';
+    try { el.appendChild(div); } catch {}
+    for (const c of [...el.children]) if (c !== div) c.style.display = 'none';   // 🎨 v37 : idem — ⛶ réservé au moteur Mapbox (sans clé)
+    const A = createGoogleMap(div, opts);
+    const rec = { A, div, t: Date.now() };
+    MPOOL.set(pk, rec);
+    if (MPOOL.size > 4) {   // 🧠 LRU : plus ancienne carte hors pool (vraie destruction)
+      const oldest = [...MPOOL.entries()].filter(([k]) => k !== pk).sort((a, b) => a[1].t - b[1].t)[0];
+      if (oldest) { try { (oldest[1].A.__destroy || oldest[1].A.remove.bind(oldest[1].A))(); } catch {} MPOOL.delete(oldest[0]); }
+    }
+    A.__destroy = A.remove.bind(A);   // vraie destruction (LRU/TTL)
+    A.remove = () => {   // 🏊 le composant croit détruire → on DÉTACHE : la carte survit
+      try { [...(A.__ylMarkers || new Set())].forEach((mk) => { try { mk.remove(); } catch {} }); } catch {}
+      try { [...(A.__ylLines || new Set())].forEach((ln) => { try { ln.remove(); } catch {} }); } catch {}
+      A.__handlers = {}; A.__ops = [];
+      try { rec.div.remove(); } catch {}   // sortie du DOM — l'instance Google continue en arrière-plan
+    };
+    return A;
+  }
   if (key) return createGoogleMap(el, opts);
   // sans clé (développement hors production) : secours Mapbox → OSM, inchangé
   return createMapboxMap(el, opts);

@@ -19,7 +19,7 @@ export default function TrackMap({ storePos, clientPos, driverPos }) {
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    map.current = createMap(el.current, { zoom: 13 });
+    map.current = createMap(el.current, { zoom: 13, poolKey: 'track' });   // 🏊 v37 : survit en arrière-plan ≤ 12 h
     return () => { map.current?.remove(); map.current = null; markers.current = {}; };
   }, []);
 
