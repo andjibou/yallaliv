@@ -2,7 +2,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useT, useLang, toast } from './lib.jsx';
 import { createMap, gForward, gReverse, mbForward, mbReverse, fetchT, LANG3 } from './MapGl.jsx';
 
-// ================= 📍 v2026.10.05.3 — Géocodage CINQ-SOURCES (Google en tête) =================
+// ================= 📍 v2026.10.14.34 — Géocodage CINQ-SOURCES (économie de quota) =================
+// 🐢 v34 : Google n'est PLUS interrogé à chaque frappe ni à chaque déplacement de carte :
+//  · recherche tapée : les 4 moteurs GRATUITS répondent aussitôt ; Google ne démarre
+//    qu'après 900 ms SANS nouvelle frappe (les préfixes partiels n'atteignent JAMAIS
+//    Google → 1 seul appel par adresse finale, au lieu d'un par lettre) ;
+//  · « Choisir sur la carte » : l'exploration (déplacer la carte) est GRATUITE
+//    (Esri/Mapbox/Nominatim) ; Google n'est consulté qu'UNE FOIS, à la confirmation,
+//    pour l'adresse ENREGISTRÉE (meilleure qualité, cache 90 j partagé).
 // Le champ « Adresse de livraison » du panier propose AUTOMATIQUEMENT des
 // adresses pendant la frappe ; toucher une suggestion pose le point de livraison.
 // CINQ bases sont interrogées EN PARALLÈLE (chaque étage tombe en douceur si sa
@@ -20,10 +27,17 @@ import { createMap, gForward, gReverse, mbForward, mbReverse, fetchT, LANG3 } fr
  * la plus propre, avec numéro), sinon Esri + Nominatim en parallèle et on garde
  * l'adresse la plus détaillée (rue + numéro + quartier = score le plus haut).
  */
-export async function reverseGeocode(lat, lng, lang = 'fr') {
+export async function reverseGeocode(lat, lng, lang = 'fr') {   // 🥇 à la CONFIRMATION (1 appel, caché 90 j)
   const l = LANG3(lang);
   const g = await gReverse(lat, lng, l).catch(() => null);   // 🥇 Google d'abord
   if (g) return g;
+  return reverseGeocodeFree(lat, lng, lang);
+}
+
+/** 🆓 v34 : géocodage inverse SANS Google (Esri/Mapbox/Nominatim) — pour l'EXPLORATION
+ *  de la carte : déplacer l'épingle 20 fois = 0 quota consommé. */
+export async function reverseGeocodeFree(lat, lng, lang = 'fr') {
+  const l = LANG3(lang);
   const mb = await mbReverse(lat, lng, l).catch(() => null);   // 🥈 Mapbox
   if (mb) return mb;
   const jobs = [
@@ -62,16 +76,23 @@ export async function reverseGeocode(lat, lng, lang = 'fr') {
  * « near » (Alexandrie par défaut côté appelants).
  * Retourne [{lat, lng, label}].
  */
+let gSeq = 0;   // 🐢 v34 : génération de frappe — une nouvelle frappe annule la requête Google en attente
 export async function geocodeSearch(q, lang = 'fr', near = null) {
   const l = LANG3(lang);
   const s = String(q || '').trim();
   if (s.length < 3) return [];
+  const gen = ++gSeq;
   // 🥇 ordre de pertinence : adresse COMPLÈTE → Google puis Mapbox/Esri ; frappe
   // PARTIELLE (un seul mot) → Photon d'abord (« smou » trouve déjà Smouha).
   const order = s.includes(' ') ? [0, 1, 2, 3, 4] : [3, 0, 2, 1, 4];
   const acc = [];   // chaque moteur dépose ses résultats DÈS qu'il répond
   const jobs = [
-    (async () => {   // ① Google Geocoder (🥇 Égypte — renvoie [] sans clé)
+    (async () => {   // ① Google Geocoder — 🐢 v34 : VOIE LENTE. Les 4 moteurs gratuits
+      // répondent aussitôt ; Google n'est contacté que si la frappe SURVIT 900 ms sans
+      // être remplacée → les préfixes partiels (« 12 ru », « 12 rue sa »…) ne consomment
+      // JAMAIS de quota : 1 seul appel Google par adresse finale.
+      await new Promise((r2) => setTimeout(r2, 900));
+      if (gen !== gSeq) return;   // supersedé par une frappe plus récente → PAS d'appel Google
       const r = await gForward(s, l, near).catch(() => []);
       r.forEach((x) => acc.push({ ...x, src: 0 }));
     })(),
@@ -140,10 +161,12 @@ export default function PickMap({ initial, onConfirm }) {
     map.current.on('moveend', () => {
       setAddr(null);
       clearTimeout(tm.current);
+      // 🆓 v34 : l'EXPLORATION est GRATUITE — jamais Google ici (était : 1 appel Google à
+      // CHAQUE arrêt de déplacement !). Google n'est consulté qu'au bouton Confirmer.
       tm.current = setTimeout(async () => {
         const c = map.current.getCenter();
-        setAddr(await reverseGeocode(c.lat, c.lng, langRef.current));
-      }, 350);
+        setAddr(await reverseGeocodeFree(c.lat, c.lng, langRef.current));
+      }, 700);
     });
     setTimeout(() => map.current?.resize(), 60);
     return () => { clearTimeout(tm.current); map.current?.remove(); map.current = null; };
@@ -160,7 +183,10 @@ export default function PickMap({ initial, onConfirm }) {
 
   const confirm = async () => {
     setBusy(true);
-    const address = addr || (await reverseGeocode(pos.lat, pos.lng, langRef.current));
+    // 🐢 v34 : UN SEUL appel Google ici (cache 90 j + partagé entre appareils) pour
+    // l'adresse ENREGISTRÉE — l'exploration gratuite ci-dessus a affiché une
+    // approximation entre-temps ; on ne garde que la meilleure adresse au final.
+    const address = (await reverseGeocode(pos.lat, pos.lng, langRef.current)) || addr;
     setBusy(false);
     onConfirm({ ...pos, address });
   };
