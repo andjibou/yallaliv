@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useT, useLang, toast } from './lib.jsx';
-import { createMap, gReverse, mbForward, mbReverse, fetchT, LANG3 } from './MapGl.jsx';   // 🆓 v35 : gForward retiré — l'autocomplétion n'interroge plus Google
+import { createMap, gReverse, gAutocomplete, gPlaceDetails, mbForward, mbReverse, fetchT, LANG3 } from './MapGl.jsx';   // 🎯 v36 : Places Autocomplete en session + Place Details à la sélection
 
 // ================= 📍 v2026.10.14.34 — Géocodage CINQ-SOURCES (économie de quota) =================
 // 🆓 v35 : l'AUTOCOMPLÉTION n'interroge PLUS JAMAIS Google — rapport utilisateur :
@@ -78,19 +78,48 @@ export async function reverseGeocodeFree(lat, lng, lang = 'fr') {
  * « near » (Alexandrie par défaut côté appelants).
  * Retourne [{lat, lng, label}].
  */
-export async function geocodeSearch(q, lang = 'fr', near = null) {   // 🆓 v35 : 100% gratuit
+// 🔐 v36 : TOKEN DE SESSION — toute la frappe d'une adresse = UNE session Google ;
+// clôturée à la sélection (pickPlace → Place Details) : c'est LÀ, et seulement là,
+// que la session est facturée. Champ vidé → session suivante = nouveau token.
+let acTok = null;
+const acNewTok = () => { try { acTok = (crypto.randomUUID ? crypto.randomUUID() : 'yl' + Date.now() + Math.random().toString(36).slice(2)); } catch { acTok = 'yl' + Date.now(); } return acTok; };
+
+/** 📌 À la SÉLECTION d'une suggestion — clôt la session (l'unique facturation) et
+ *  récupère les coordonnées exactes. Moteurs gratuits : coordonnées déjà présentes. */
+export async function pickPlace(pred, lang = 'fr') {
+  if (pred?.placeId) {
+    const d = await gPlaceDetails(pred.placeId, acTok, lang).catch(() => null);
+    acTok = null;   // la prochaine frappe ouvrira une NOUVELLE session
+    if (d) return { lat: d.lat, lng: d.lng, label: d.address || pred.label };
+    const alts = await freeSearch(String(pred.label || ''), LANG3(lang), null).catch(() => []);   // 🧯 repli rare (quota/panne) : géocodage gratuit de l'étiquette
+    const alt = (alts || []).find((x) => x.lat != null);
+    if (alt) return { lat: alt.lat, lng: alt.lng, label: pred.label };
+    return { lat: null, lng: null, label: pred.label };
+  }
+  return { lat: pred?.lat, lng: pred?.lng, label: pred?.label };
+}
+
+export async function geocodeSearch(q, lang = 'fr', near = null) {
   const l = LANG3(lang);
   const s = String(q || '').trim();
-  if (s.length < 3) return [];
+  if (s.length < 3) { acTok = null; return []; }
+  // 🎯 v36 : suggestions 100% GOOGLE (Places Autocomplete — le moteur de Google Maps),
+  // groupées en SESSION : la frappe n'est PAS facturée unitairement, c'est la sélection
+  // (pickPlace → Place Details) qui clôt et facture la session, une seule fois.
+  const gp = await gAutocomplete(s, l, near, acTok || acNewTok()).catch(() => null);
+  if (gp !== null) return gp;   // exactement les suggestions de Google Maps ([] = aucun résultat, comme Google)
+  return freeSearch(s, l, near);   // 🧯 repli : Places API pas encore activée / quota / panne
+}
+
+async function freeSearch(s, l, near) {   // 🧯 moteurs GRATUITS (repli de l'autocomplétion Google)
   // 🥇 ordre de pertinence : adresse COMPLÈTE → Google puis Mapbox/Esri ; frappe
   // PARTIELLE (un seul mot) → Photon d'abord (« smou » trouve déjà Smouha).
-  const order = s.includes(' ') ? [1, 2, 3, 4] : [3, 1, 2, 4];   // 🆓 v35 : plus de src 0 (Google absent de l'autocomplétion)
+  const order = s.includes(' ') ? [1, 2, 3, 4] : [3, 1, 2, 4];
   const acc = [];   // chaque moteur dépose ses résultats DÈS qu'il répond
   const jobs = [
-    // 🆓 v35 : PLUS AUCUN appel Google ici — l'autocomplétion est 100% gratuite
-    // (Google Geocoding restait consommé à chaque pause de frappe, avant même le clic ;
-    // les 4 moteurs gratuits suffisent pour suggérer, et la suggestion cliquée porte
-    // déjà ses coordonnées → 0 appel au clic aussi).
+    // 🧯 v36 : ces moteurs GRATUITS servent de REPLI quand Places (Google) est
+    // indisponible — et l'appui avant activation. Les suggestions Google (cliquées)
+    // passent par pickPlace → Place Details en session.
     (async () => {   // ② Mapbox Geocoding v6
       const r = await mbForward(s, l, near).catch(() => []);
       r.forEach((x) => acc.push({ ...x, src: 1 }));

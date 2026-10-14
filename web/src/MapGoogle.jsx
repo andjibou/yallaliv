@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// 🗺️ MapGoogle.jsx — v2026.10.13.33 : moteur GOOGLE MAPS (étage 1 sur 3).
+// 🗺️ MapGoogle.jsx — v2026.10.14.36 : moteur GOOGLE MAPS (étage 1 sur 3).
 // Google Maps JS (cartes) + Geocoder (recherche) + Routes API computeRoutes (itinéraires).
 // Chargement du script par injection manuelle → AUCUNE dépendance npm.
 // La façade MapGl.jsx choisit ce moteur si VITE_GMAPS_KEY est définie, sinon
@@ -261,13 +261,13 @@ function cSet(k, v) {
 // Chaque appel Google réel est compté puis reporté au serveur (toutes les 10 s) →
 // le dashboard superadmin affiche la consommation du jour par API. Les lectures
 // servies du cache (local OU serveur) sont comptées « hits » = appels évités.
-export const gUsage = { maps: 0, geo: 0, rev: 0, rt: 0, hits: 0 };
-let gSent = { maps: 0, geo: 0, rev: 0, rt: 0, hits: 0 };
+export const gUsage = { maps: 0, geo: 0, rev: 0, rt: 0, hits: 0, ac: 0, pd: 0 };
+let gSent = { maps: 0, geo: 0, rev: 0, rt: 0, hits: 0, ac: 0, pd: 0 };
 const gBump = (k) => { gUsage[k]++; };
 function gFlush() {
   try {
     const d = {}; let any = false;
-    for (const k of ['maps', 'geo', 'rev', 'rt', 'hits']) { d[k] = Math.max(0, gUsage[k] - gSent[k]); if (d[k]) any = true; }
+    for (const k of ['maps', 'geo', 'rev', 'rt', 'hits', 'ac', 'pd']) { d[k] = Math.max(0, gUsage[k] - gSent[k]); if (d[k]) any = true; }
     if (!any) return;
     const prev = { ...gSent };
     gSent = { ...gUsage };
@@ -395,5 +395,64 @@ export async function gRoute(from, to) {
     };
     cSet(ck, out); l2Put(ck, out);
     return out;
+  } catch { return null; } finally { clearTimeout(tm); }
+}
+
+// ── 🎯 v36 : PLACES AUTOCOMPLETE (New) EN SESSION — les VRAIES suggestions Google Maps ──
+// Modèle 2026 : toute la frappe partage un token de SESSION ; c'est la requête Place
+// Details (à la SÉLECTION) qui clôt la session — la facturation a lieu là, pas pendant
+// la frappe. Sessions abandonnées = quota « Autocomplete Requests » SÉPARÉ (10k/mois
+// gratuits, indépendant du Geocoding). Si l'utilisateur n'a pas encore activé Places
+// API (New) sur sa clé → 403 → gPlacesOk = false → repli moteurs gratuits, sans spam.
+export let gPlacesOk = true;
+
+/** 🔎 Suggestions en frappant (le moteur d'autocomplétion de Google Maps). null = indisponible. */
+export async function gAutocomplete(input, lang = 'fr', near = null, sessionToken = null) {
+  const key = GMAPS_KEY();
+  if (!key || !gPlacesOk) return null;
+  const ac = new AbortController();
+  const tm = setTimeout(() => ac.abort(), 4500);
+  try {
+    const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+      method: 'POST', signal: ac.signal,
+      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key },
+      body: JSON.stringify({
+        input: String(input).slice(0, 200),
+        ...(sessionToken ? { sessionToken } : {}),
+        languageCode: LANG3(lang),
+        ...(near ? { locationBias: { circle: { center: { latitude: +near.lat, longitude: +near.lng }, radius: 25000 } } } : {}),
+      }),
+    });
+    if (!res.ok) { if (res.status === 403 || res.status === 429) gPlacesOk = false; return null; }   // Places désactivée / quota → repli silencieux
+    gBump('ac');   // 🧮 frappe = 1 requête Autocomplete (quota SÉPARÉ — la session est facturée à la sélection)
+    const d = await res.json();
+    return (d?.suggestions || [])
+      .map((x) => x?.placePrediction).filter(Boolean)
+      .map((p) => ({
+        placeId: p.placeId || (p.place ? String(p.place).split('/').pop() : null),
+        label: [p.structuredFormat?.mainText?.text || p.text?.text, p.structuredFormat?.secondaryText?.text].filter(Boolean).join(', '),
+        lat: null, lng: null, src: 'g',   // coordonnées obtenues à la SÉLECTION (Place Details)
+      }))
+      .filter((r) => r.placeId && r.label);
+  } catch { return null; } finally { clearTimeout(tm); }
+}
+
+/** 📌 Place Details (Essentials : adresse + coordonnées) — clôt la session = l'unique facturation. */
+export async function gPlaceDetails(placeId, sessionToken = null, lang = 'fr') {
+  const key = GMAPS_KEY();
+  if (!key) return null;
+  const ac = new AbortController();
+  const tm = setTimeout(() => ac.abort(), 4500);
+  try {
+    const q = new URLSearchParams({ languageCode: LANG3(lang), ...(sessionToken ? { sessionToken } : {}) });
+    const res = await fetch('https://places.googleapis.com/v1/places/' + encodeURIComponent(placeId) + '?' + q, {
+      headers: { 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'location,formattedAddress' },   // champs Essentials → session clôturée proprement
+      signal: ac.signal,
+    });
+    if (!res.ok) return null;
+    gBump('pd');   // 🧮 LA sélection — c'est ICI que la session est facturée
+    const d = await res.json();
+    if (d?.location?.latitude == null) return null;
+    return { lat: d.location.latitude, lng: d.location.longitude, address: d.formattedAddress || null };
   } catch { return null; } finally { clearTimeout(tm); }
 }

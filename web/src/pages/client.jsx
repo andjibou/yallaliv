@@ -4,7 +4,7 @@ import TrackMap from '../TrackMap.jsx';
 import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage, gmapsNavUrl, gmapsSearchUrl, COLOR_HEX, fmtMoney2, fmtMoneyN, isRestaurantType } from '../lib.jsx';
 import { BottomNav, CartBar, StatusBadge, PayBadge, Stepper, Empty, Spinner, BackBtn, LangSwitch, Modal, Stars, SuggestBox, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
-import PickMap, { reverseGeocode, geocodeSearch } from '../PickMap.jsx';
+import PickMap, { reverseGeocode, geocodeSearch, pickPlace } from '../PickMap.jsx';
 import DriversMap from '../DriversMap.jsx';   // 🛵 v2026.10.08.20 : espace livraison — carte des livreurs
 import AccountSettings from '../AccountSettings.jsx';
 import { StoresMap } from '../RouteMap.jsx';
@@ -1390,9 +1390,10 @@ export function CartPage() {
       catch { if (suggSeq.current === seq) setSugg(null); }
     }, 500);
   };
-  const pickSugg = (r) => {
-    setAddress(r.label.split(',').slice(0, 3).join(', '));
-    setGps({ lat: r.lat, lng: r.lng });
+  const pickSugg = async (r) => {   // 🎯 v36 : la sélection clôt la SESSION Google (l'unique facturation)
+    const p = await pickPlace(r, lang);
+    setAddress((p.label || r.label).split(',').slice(0, 3).join(', '));
+    if (p.lat != null) setGps({ lat: p.lat, lng: p.lng });
     setSugg(null);
     toast(t('loc_defined'));
   };
@@ -3211,9 +3212,11 @@ export function ServiceRequestPage() {
     }, 500);
     if (which === 'p') pTm.current = tm; else dTm.current = tm;
   };
-  const pick = (which, r) => {
-    if (which === 'p') { setPAddr(r.label.split(',').slice(0, 3).join(', ')); setPGps({ lat: r.lat, lng: r.lng }); setPSugg(null); }
-    else { setDAddr(r.label.split(',').slice(0, 3).join(', ')); setDGps({ lat: r.lat, lng: r.lng }); setDSugg(null); }
+  const pick = async (which, r) => {   // 🎯 v36 : la sélection clôt la SESSION Google (l'unique facturation)
+    const p = await pickPlace(r, lang);
+    const lbl = (p.label || r.label || '').split(',').slice(0, 3).join(', ');
+    if (which === 'p') { setPAddr(lbl); if (p.lat != null) setPGps({ lat: p.lat, lng: p.lng }); setPSugg(null); }
+    else { setDAddr(lbl); if (p.lat != null) setDGps({ lat: p.lat, lng: p.lng }); setDSugg(null); }
   };
   const feeEst = pGps && dGps
     ? Math.max(15, Math.min(80, Math.round(20 + Math.max(0, distM(pGps.lat, pGps.lng, dGps.lat, dGps.lng) / 1000 - 2) * 2.5)))

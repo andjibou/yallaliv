@@ -2421,7 +2421,7 @@ app.post('/api/gmaps/cache', rateLimit(30, 10 * 60000, 'Trop de requêtes.'), h(
 app.post('/api/gmaps/usage', rateLimit(30, 10 * 60000, 'Trop de requêtes.'), h(async (req, res) => {
   const b = req.body || {};
   const day = new Date().toISOString().slice(0, 10);
-  for (const sku of ['maps', 'geo', 'rev', 'rt', 'hits']) {
+  for (const sku of ['maps', 'geo', 'rev', 'rt', 'hits', 'ac', 'pd']) {   // 🎯 v36 : + ac (frappe Places) / pd (sélection Place Details)
     const n = Math.max(0, Math.min(500, Math.floor(Number(b[sku]) || 0)));
     if (!n) continue;
     await run('INSERT INTO gmaps_usage(day, sku, n) VALUES($1, $2, $3) ON CONFLICT (day, sku) DO UPDATE SET n = gmaps_usage.n + EXCLUDED.n', [day, sku, n]);

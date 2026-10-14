@@ -215,7 +215,7 @@ function Dash() {
         <div className="card mb16 sa-gmaps">
           <div className="h2 mb8">🗺️ Google Maps — consommation des API</div>
           <div className="small muted mb8">Aujourd'hui · plafond 200/jour par API (gratuit : 10 000/mois) — compté par l'application</div>
-          {[['maps', '🗺️ Cartes (chargements)'], ['geo', '🔎 Recherche d\'adresses'], ['rev', '📍 Adresse depuis position'], ['rt', '🛣️ Itinéraires']].map(([sku, label]) => {
+          {[['maps', '🗺️ Cartes (chargements)'], ['geo', '🔎 Recherche d\'adresses'], ['ac', '🔤 Suggestions en frappant (Places)'], ['pd', '📌 Adresse sélectionnée (lieu)'], ['rev', '📍 Adresse depuis position'], ['rt', '🛣️ Itinéraires']].map(([sku, label]) => {
             const today = (gm.days.find((d) => d.day === new Date().toISOString().slice(0, 10) && d.sku === sku) || {}).n || 0;
             const week = gm.days.filter((d) => d.sku === sku).reduce((a, b) => a + (b.n || 0), 0);
             const pct = Math.min(100, Math.round((today / (gm.quota || 200)) * 100));
