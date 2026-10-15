@@ -115,7 +115,7 @@ export default function DriversMap({ drivers }) {
           };
           if (o.status === 'assigned') {
             line(await fetchRoute(dp, sp).catch(() => null), dp, sp, '#ef4444');
-            line(await fetchRoute(sp, cp).catch(() => null), sp, cp, '#0e9f6e');
+            line(await fetchRoute(sp, cp, o.id).catch(() => null), sp, cp, '#0e9f6e');   // v39 : jambe magasin-client PARTAGEE via la commande (ort|id)
           } else {
             line(await fetchRoute(dp, cp).catch(() => null), dp, cp, '#0e9f6e');
           }

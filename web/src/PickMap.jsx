@@ -106,27 +106,37 @@ const AC_TTL = 5 * 60e3;
 const acCache = new Map();   // ck → { t, r }
 const acCk = (s, l, near) => 'ac|' + l + '|' + s.toLowerCase() + '|' + (near ? (+near.lat).toFixed(2) + ',' + (+near.lng).toFixed(2) : '-');
 
+/** ⚡ v39 (option B) : passage RAPIDE (≈500 ms) — 100% GRATUIT (moteurs gratuits), dès 6 caractères.
+ *  Google n'intervient QUE sur la PAUSE de frappe (1,2 s) via geocodeSearchGoogle :
+ *  1 seule requête Autocomplete par saisie au lieu d'une par frappe. */
 export async function geocodeSearch(q, lang = 'fr', near = null) {
   const l = LANG3(lang);
   const s = String(q || '').trim();
-  if (s.length < 6) { acTok = null; return []; }   // 🎯 v38 : Google seulement à partir de 6 caractères — RIEN en dessous (économie)
+  if (s.length < 6) { acTok = null; return []; }   // 🎯 choix utilisateur : RIEN sous 6 caractères
+  return freeSearch(s, l, near);
+}
+
+/** 🎯 v39 (option B) : passage GOOGLE — déclenché à la PAUSE (≈1,2 s après la dernière frappe).
+ *  Caches local 5 min + serveur 24 h : retaper / 2ᵉ utilisateur = 0 appel. null = Places
+ *  indisponible → l'appelant garde les suggestions gratuites affichées. */
+export async function geocodeSearchGoogle(q, lang = 'fr', near = null) {
+  const l = LANG3(lang);
+  const s = String(q || '').trim();
+  if (s.length < 6) return null;
   const ck = acCk(s, l, near);
   const hit = acCache.get(ck);
-  if (hit && Date.now() - hit.t < AC_TTL) return hit.r;   // 💾 v38 : retaper la même requête = 0 appel
+  if (hit && Date.now() - hit.t < AC_TTL) return hit.r;   // 💾 retaper la même requête = 0 appel
   if (hit) acCache.delete(ck);
-  const l2 = await l2Get(ck).catch(() => undefined);   // 🗄️ v38 : déjà cherché par UN AUTRE utilisateur → 0 appel
+  const l2 = await l2Get(ck).catch(() => undefined);   // 🗄️ déjà cherché par UN AUTRE utilisateur = 0 appel
   if (Array.isArray(l2)) { acCache.set(ck, { t: Date.now(), r: l2 }); return l2; }
-  // 🎯 v36 : suggestions 100% GOOGLE (Places Autocomplete — le moteur de Google Maps),
-  // groupées en SESSION : la frappe n'est PAS facturée unitairement, c'est la sélection
-  // (pickPlace → Place Details) qui clôt et facture la session, une seule fois.
-  const gp = await gAutocomplete(s, l, near, acTok || acNewTok()).catch(() => null);
-  if (gp !== null) {   // exactement les suggestions de Google Maps ([] = aucun résultat, comme Google)
+  const gp = await gAutocomplete(s, l, near, acTok || acNewTok()).catch(() => null);   // 🎯 session (v36)
+  if (gp !== null) {
     acCache.set(ck, { t: Date.now(), r: gp });
-    if (acCache.size > 30) acCache.delete(acCache.keys().next().value);   // LRU : 30 requêtes max en mémoire
+    if (acCache.size > 30) acCache.delete(acCache.keys().next().value);   // LRU 30 requêtes
     l2Put(ck, gp);
     return gp;
   }
-  return freeSearch(s, l, near);   // 🧯 repli : Places API pas encore activée / quota / panne
+  return null;
 }
 
 async function freeSearch(s, l, near) {   // 🧯 moteurs GRATUITS (repli de l'autocomplétion Google)
