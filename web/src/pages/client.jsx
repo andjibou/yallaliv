@@ -4,7 +4,7 @@ import TrackMap from '../TrackMap.jsx';
 import { api, useT, useLang, useAuth, useCart, usePoll, fmtMoney, fmtDate, toast, notif, pushSubscribe , ph as photoUrl , trErr, distM, etaRange, FieldErr, V, runV, hasErr, UpdatesBanner, NotifNag, BellButton, ApkUpdateBanner, processImage, gmapsNavUrl, gmapsSearchUrl, COLOR_HEX, fmtMoney2, fmtMoneyN, isRestaurantType } from '../lib.jsx';
 import { BottomNav, CartBar, StatusBadge, PayBadge, Stepper, Empty, Spinner, BackBtn, LangSwitch, Modal, Stars, SuggestBox, NoPhoto } from '../ui.jsx';
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
-import PickMap, { reverseGeocode, geocodeSearch, geocodeSearchGoogle, pickPlace } from '../PickMap.jsx';   // + geocodeSearchGoogle (v39 option B : Google a la pause)
+import PickMap, { reverseGeocode, geocodeSearchGoogle, pickPlace } from '../PickMap.jsx';   // v40 : GOOGLE SEUL (choix utilisateur)
 import DriversMap from '../DriversMap.jsx';   // 🛵 v2026.10.08.20 : espace livraison — carte des livreurs
 import AccountSettings from '../AccountSettings.jsx';
 import { StoresMap } from '../RouteMap.jsx';
@@ -1350,7 +1350,7 @@ export function CartPage() {
   const [gps, setGps] = useState(null);
   const [pickOpen, setPickOpen] = useState(false);
   const [sugg, setSugg] = useState(null);       // 📍 v2026.09.23.10 : propositions d'adresses (frappe)
-  const suggTm = useRef(null); const suggGTm = useRef(null);   // GTm = minuteur Google (v39 : pause 1,2 s)
+  const suggTm = useRef(null);   // v40 : minuteur GOOGLE SEUL (pause ~1,2 s)
   const suggSeq = useRef(0);   // 🛡️ v2026.10.08.8 : une réponse tardive d'une frappe précédente ne peut plus écraser les résultats courants
   const [done, setDone] = useState(null); // 🔑 confirmation finale avec le code de remise
   const [coErr, setCoErr] = useState({});  // ⚠️ erreurs par champ du checkout
@@ -1386,19 +1386,13 @@ export function CartPage() {
   const onAddr = (e) => {
     const v = e.target.value;
     setAddress(v);
-    clearTimeout(suggTm.current); clearTimeout(suggGTm.current);
+    clearTimeout(suggTm.current);
     if (v.trim().length < 6) { suggSeq.current++; setSugg(null); return; }   // RIEN sous 6 caracteres (choix utilisateur)
     const near = gps || (store?.lat != null ? { lat: store.lat, lng: store.lng } : { lat: 31.2001, lng: 29.9187 });
-    const gShown = { v: false };   // v39 : le gratuit plus lent ne doit pas écraser la liste Google
-    suggTm.current = setTimeout(async () => {
-      const seq = ++suggSeq.current;
-      try { const r = (await geocodeSearch(v.trim(), lang, near)).slice(0, 6); if (suggSeq.current === seq && !gShown.v) setSugg(r); }
-      catch { if (suggSeq.current === seq && !gShown.v) setSugg(null); }
-    }, 500);
-    suggGTm.current = setTimeout(async () => {   // v39 (option B) : PAUSE ~1,2 s -> 1 SEULE requete Google affine la liste (EN PARALLÈLE du gratuit)
+    suggTm.current = setTimeout(async () => {   // v40 : GOOGLE SEUL — à la PAUSE (~1,2 s), plus AUCUN moteur gratuit pendant la frappe
       const seq = ++suggSeq.current;
       const g = (await geocodeSearchGoogle(v.trim(), lang, near).catch(() => null) || []).slice(0, 6);
-      if (suggSeq.current === seq && g.length) { gShown.v = true; setSugg(g); }
+      if (suggSeq.current === seq) setSugg(g.length ? g : null);
     }, 1200);
   };
   const pickSugg = async (r) => {   // 🎯 v36 : la sélection clôt la SESSION Google (l'unique facturation)
@@ -2266,7 +2260,7 @@ export function ListingDetailPage() {
   const [dGps, setDGps] = useState(null);
   const [dSugg, setDSugg] = useState(null);
   const [dBusy, setDBusy] = useState(false);
-  const dTm = useRef(null); const dGTm = useRef(null);   // GTm = minuteur Google (v39 : pause 1,2 s)
+  const dTm = useRef(null);   // v40 : minuteur GOOGLE SEUL (pause ~1,2 s)
   const dSeq = useRef(0);   // 🛡️ v2026.10.08.8 : anti-réponse-périmée
   const subLbl = (k) => (SUB_LBL[k] ? (SUB_LBL[k][lang] || SUB_LBL[k].fr) : k);
   const condLbl = (k) => (COND_LBL[k] ? (COND_LBL[k][lang] || COND_LBL[k].fr) : '');
@@ -2287,19 +2281,13 @@ export function ListingDetailPage() {
   const onDAddr = (e) => {   // 📍 autocomplétion adresse de livraison (même mécanisme que le panier)
     const v = e.target.value;
     setDAddr(v);
-    clearTimeout(dTm.current); clearTimeout(dGTm.current);
+    clearTimeout(dTm.current);
     if (v.trim().length < 6) { dSeq.current++; setDSugg(null); return; }   // RIEN sous 6 caracteres (choix utilisateur)
     const near = dGps || (l.lat != null ? { lat: l.lat, lng: l.lng } : { lat: 31.2001, lng: 29.9187 });
-    const gShown = { v: false };   // v39 : le gratuit plus lent ne doit pas écraser la liste Google
-    dTm.current = setTimeout(async () => {
-      const seq = ++dSeq.current;
-      try { const r = (await geocodeSearch(v.trim(), lang, near)).slice(0, 6); if (dSeq.current === seq && !gShown.v) setDSugg(r); }
-      catch { if (dSeq.current === seq && !gShown.v) setDSugg(null); }
-    }, 500);
-    dGTm.current = setTimeout(async () => {   // v39 (option B) : PAUSE ~1,2 s -> 1 SEULE requete Google affine la liste (EN PARALLÈLE du gratuit)
+    dTm.current = setTimeout(async () => {   // v40 : GOOGLE SEUL — à la PAUSE (~1,2 s), plus AUCUN moteur gratuit pendant la frappe
       const seq = ++dSeq.current;
       const g = (await geocodeSearchGoogle(v.trim(), lang, near).catch(() => null) || []).slice(0, 6);
-      if (dSeq.current === seq && g.length) { gShown.v = true; setDSugg(g); }
+      if (dSeq.current === seq) setDSugg(g.length ? g : null);
     }, 1200);
   };
   const pickDSugg = (r) => { setDAddr(r.label.split(',').slice(0, 3).join(', ')); setDGps({ lat: r.lat, lng: r.lng }); setDSugg(null); };
@@ -3214,28 +3202,22 @@ export function ServiceRequestPage() {
   useEffect(() => {   // le pickup devient l'adresse + la position du magasin (lecture seule)
     if (acct) { setPAddr(acct.address); if (acct.lat != null && acct.lng != null) setPGps({ lat: acct.lat, lng: acct.lng }); }
   }, [acct]);
-  const pTm = useRef(null); const dTm = useRef(null); const pGTm = useRef(null); const dGTm = useRef(null);   // GTm = minuteurs Google (v39 : pause 1,2 s)
+  const pTm = useRef(null); const dTm = useRef(null);   // v40 : minuteurs GOOGLE SEUL (pause ~1,2 s)
   const pSeq = useRef(0); const dSeq = useRef(0);   // 🛡️ v2026.10.08.8 : anti-réponse-périmée
 
   const onAddr = (which) => (e) => {
     const v = e.target.value;
     if (which === 'p') setPAddr(v); else setDAddr(v);
-    clearTimeout(which === 'p' ? pTm.current : dTm.current); clearTimeout(which === 'p' ? pGTm.current : dGTm.current);
+    clearTimeout(which === 'p' ? pTm.current : dTm.current);
     const seqObj = which === 'p' ? pSeq : dSeq;
     if (v.trim().length < 6) { seqObj.current++; if (which === 'p') setPSugg(null); else setDSugg(null); return; }   // RIEN sous 6 caractères (choix utilisateur)
     const setS = (x) => { if (which === 'p') setPSugg(x); else setDSugg(x); };
-    const gShown = { v: false };   // v39 : le gratuit plus lent ne doit pas écraser la liste Google
-    const tm = setTimeout(async () => {
-      const seq = ++seqObj.current;
-      try { const r = (await geocodeSearch(v.trim(), lang, { lat: 31.2001, lng: 29.9187 })).slice(0, 6); if (seqObj.current === seq && !gShown.v) setS(r); }
-      catch { if (seqObj.current === seq && !gShown.v) setS(null); }
-    }, 500);
-    const gtm = setTimeout(async () => {   // v39 (option B) : PAUSE ~1,2 s -> 1 SEULE requete Google affine la liste (EN PARALLÈLE du gratuit)
+    const tm = setTimeout(async () => {   // v40 : GOOGLE SEUL — à la PAUSE (~1,2 s), plus AUCUN moteur gratuit pendant la frappe
       const seq = ++seqObj.current;
       const g = (await geocodeSearchGoogle(v.trim(), lang, { lat: 31.2001, lng: 29.9187 }).catch(() => null) || []).slice(0, 6);
-      if (seqObj.current === seq && g.length) { gShown.v = true; setS(g); }
+      if (seqObj.current === seq) setS(g.length ? g : null);
     }, 1200);
-    if (which === 'p') { pTm.current = tm; pGTm.current = gtm; } else { dTm.current = tm; dGTm.current = gtm; }
+    if (which === 'p') pTm.current = tm; else dTm.current = tm;
   };
   const pick = async (which, r) => {   // 🎯 v36 : la sélection clôt la SESSION Google (l'unique facturation)
     const p = await pickPlace(r, lang);

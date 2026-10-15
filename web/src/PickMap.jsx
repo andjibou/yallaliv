@@ -106,16 +106,6 @@ const AC_TTL = 5 * 60e3;
 const acCache = new Map();   // ck → { t, r }
 const acCk = (s, l, near) => 'ac|' + l + '|' + s.toLowerCase() + '|' + (near ? (+near.lat).toFixed(2) + ',' + (+near.lng).toFixed(2) : '-');
 
-/** ⚡ v39 (option B) : passage RAPIDE (≈500 ms) — 100% GRATUIT (moteurs gratuits), dès 6 caractères.
- *  Google n'intervient QUE sur la PAUSE de frappe (1,2 s) via geocodeSearchGoogle :
- *  1 seule requête Autocomplete par saisie au lieu d'une par frappe. */
-export async function geocodeSearch(q, lang = 'fr', near = null) {
-  const l = LANG3(lang);
-  const s = String(q || '').trim();
-  if (s.length < 6) { acTok = null; return []; }   // 🎯 choix utilisateur : RIEN sous 6 caractères
-  return freeSearch(s, l, near);
-}
-
 /** 🎯 v39 (option B) : passage GOOGLE — déclenché à la PAUSE (≈1,2 s après la dernière frappe).
  *  Caches local 5 min + serveur 24 h : retaper / 2ᵉ utilisateur = 0 appel. null = Places
  *  indisponible → l'appelant garde les suggestions gratuites affichées. */
@@ -136,7 +126,10 @@ export async function geocodeSearchGoogle(q, lang = 'fr', near = null) {
     l2Put(ck, gp);
     return gp;
   }
-  return null;
+  // 🧯 v40 : secours UNIQUEMENT si Google est indisponible (quota / panne / clé bloquée) —
+  // choix utilisateur : GOOGLE SEUL → les moteurs gratuits ne s'affichent JAMAIS sinon.
+  const free = await freeSearch(s, l, near).catch(() => null);
+  return free && free.length ? free.slice(0, 6) : null;
 }
 
 async function freeSearch(s, l, near) {   // 🧯 moteurs GRATUITS (repli de l'autocomplétion Google)
