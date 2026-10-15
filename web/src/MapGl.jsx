@@ -2,7 +2,7 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import {
   GMAPS_KEY, createGoogleMap, attachMarker, markerSetPos, markerRemove, bindGPopup,
-  addGLine, gForward, gReverse, gRoute, gAutocomplete, gPlaceDetails, loadGoogle, gFailed, onAuthFailure,
+  addGLine, gForward, gReverse, gRoute, gOrderRoute, gAutocomplete, gPlaceDetails, loadGoogle, gFailed, onAuthFailure, l2Get, l2Put,
 } from './MapGoogle.jsx';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -152,7 +152,7 @@ export function createMap(el, opts = {}) {
 // Chaque étage tombe en douceur : Google → Mapbox → moteurs gratuits (PickMap)
 // → OSRM (RouteMap).
 
-export { gForward, gReverse, gRoute, gAutocomplete, gPlaceDetails };   // 🎯 v36 : Places Autocomplete (session) + Place Details
+export { gForward, gReverse, gRoute, gOrderRoute, gAutocomplete, gPlaceDetails, l2Get, l2Put };   // 🎯 v36 session + 🤝 v38 : gOrderRoute (trajet par commande) + cache L2 exposés
 
 /** Recherche : Google d'abord, sinon Mapbox. [{lat,lng,label}] */
 export async function geoForward(q, lang = 'fr', near = null) {

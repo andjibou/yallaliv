@@ -281,8 +281,8 @@ try { setInterval(gFlush, 10000); document.addEventListener('visibilitychange', 
 
 // 🗄️ cache L2 — BASE DE DONNÉES du serveur : le marchand, le livreur et le client
 // qui regardent le MÊME trajet ne déclenchent qu'UN SEUL appel Google au total.
-const l2Get = async (k) => { try { const r = await fetch('/api/gmaps/cache?k=' + encodeURIComponent(k)); const d = await r.json(); return (d && d.v !== undefined) ? d.v : undefined; } catch { return undefined; } };
-const l2Put = (k, v) => {
+export const l2Get = async (k) => { try { const r = await fetch('/api/gmaps/cache?k=' + encodeURIComponent(k)); const d = await r.json(); return (d && d.v !== undefined) ? d.v : undefined; } catch { return undefined; } };
+export const l2Put = (k, v) => {
   try {
     const tok = (typeof localStorage !== 'undefined' && localStorage.getItem('yl_token')) || '';
     fetch('/api/gmaps/cache', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify({ k, v }), keepalive: true }).catch(() => {});
@@ -397,6 +397,23 @@ export async function gRoute(from, to) {
     cSet(ck, out); l2Put(ck, out);
     return out;
   } catch { return null; } finally { clearTimeout(tm); }
+}
+
+/**
+ * 🤝 v38 : trajet MAGASIN→CLIENT attaché à la COMMANDE (clé serveur ort|<id>).
+ * Le 1ᵉʳ visiteur (client, livreur, magasin, admin) qui ouvre CE trajet le calcule
+ * UNE fois (souvent déjà en cache rt| → 0 appel) et le range côté serveur ; tous les
+ * autres le relisent → 0 appel Routes API. TTL 12 h : si la route change (travaux),
+ * le premier visiteur après expiration déclenche UN SEUL recalcul, partagé par tous.
+ */
+export async function gOrderRoute(orderId, from, to) {
+  if (!orderId) return gRoute(from, to);
+  const ck = 'ort|' + orderId;
+  const l2 = await l2Get(ck).catch(() => undefined);
+  if (l2) { gBump('hits'); return l2; }
+  const r = await gRoute(from, to);   // 💾 réutilise le cache rt| (12 h) si dispo
+  if (r) l2Put(ck, r);
+  return r;
 }
 
 // ── 🎯 v36 : PLACES AUTOCOMPLETE (New) EN SESSION — les VRAIES suggestions Google Maps ──

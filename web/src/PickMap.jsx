@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useT, useLang, toast } from './lib.jsx';
-import { createMap, gReverse, gAutocomplete, gPlaceDetails, mbForward, mbReverse, fetchT, LANG3 } from './MapGl.jsx';   // 🎯 v36 : Places Autocomplete en session + Place Details à la sélection
+import { createMap, gReverse, gAutocomplete, gPlaceDetails, mbForward, mbReverse, fetchT, LANG3, l2Get, l2Put } from './MapGl.jsx';   // v36 : Places session + v38 : l2Get/l2Put (cache suggestions partage)   // 🎯 v36 : Places Autocomplete en session + Place Details à la sélection
 
 // ================= 📍 v2026.10.14.34 — Géocodage CINQ-SOURCES (économie de quota) =================
 // 🆓 v35 : l'AUTOCOMPLÉTION n'interroge PLUS JAMAIS Google — rapport utilisateur :
@@ -99,15 +99,33 @@ export async function pickPlace(pred, lang = 'fr') {
   return { lat: pred?.lat, lng: pred?.lng, label: pred?.label };
 }
 
+// 🧠 v38 : cache des suggestions — LOCAL (5 min, 30 entrées LRU) + PARTAGÉ sur le
+// serveur (24 h, clé ac|lang|requête|zone). Effacer un caractère et le retaper, ou
+// deux utilisateurs qui cherchent la même rue = 0 appel Google.
+const AC_TTL = 5 * 60e3;
+const acCache = new Map();   // ck → { t, r }
+const acCk = (s, l, near) => 'ac|' + l + '|' + s.toLowerCase() + '|' + (near ? (+near.lat).toFixed(2) + ',' + (+near.lng).toFixed(2) : '-');
+
 export async function geocodeSearch(q, lang = 'fr', near = null) {
   const l = LANG3(lang);
   const s = String(q || '').trim();
-  if (s.length < 3) { acTok = null; return []; }
+  if (s.length < 6) { acTok = null; return []; }   // 🎯 v38 : Google seulement à partir de 6 caractères — RIEN en dessous (économie)
+  const ck = acCk(s, l, near);
+  const hit = acCache.get(ck);
+  if (hit && Date.now() - hit.t < AC_TTL) return hit.r;   // 💾 v38 : retaper la même requête = 0 appel
+  if (hit) acCache.delete(ck);
+  const l2 = await l2Get(ck).catch(() => undefined);   // 🗄️ v38 : déjà cherché par UN AUTRE utilisateur → 0 appel
+  if (Array.isArray(l2)) { acCache.set(ck, { t: Date.now(), r: l2 }); return l2; }
   // 🎯 v36 : suggestions 100% GOOGLE (Places Autocomplete — le moteur de Google Maps),
   // groupées en SESSION : la frappe n'est PAS facturée unitairement, c'est la sélection
   // (pickPlace → Place Details) qui clôt et facture la session, une seule fois.
   const gp = await gAutocomplete(s, l, near, acTok || acNewTok()).catch(() => null);
-  if (gp !== null) return gp;   // exactement les suggestions de Google Maps ([] = aucun résultat, comme Google)
+  if (gp !== null) {   // exactement les suggestions de Google Maps ([] = aucun résultat, comme Google)
+    acCache.set(ck, { t: Date.now(), r: gp });
+    if (acCache.size > 30) acCache.delete(acCache.keys().next().value);   // LRU : 30 requêtes max en mémoire
+    l2Put(ck, gp);
+    return gp;
+  }
   return freeSearch(s, l, near);   // 🧯 repli : Places API pas encore activée / quota / panne
 }
 

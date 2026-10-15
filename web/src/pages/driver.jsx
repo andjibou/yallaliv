@@ -763,6 +763,8 @@ export default function DriverApp() {
                 storePos={{ lat: routeView.store_lat, lng: routeView.store_lng }}
                 clientPos={{ lat: routeView.client_lat, lng: routeView.client_lng }}
                 live={liveCtl}
+                poolKey="drout"   // 🤝 v38 : UNE seule carte pour toutes les vues trajet du livreur (0 création à la réouverture)
+                orderId={routeView.id}   // 🤝 v38 : jambe magasin→client partagée via la commande (0 appel Routes)
               />
             ) : (
               <RouteMap
@@ -773,6 +775,9 @@ export default function DriverApp() {
                 fromEmoji={routeView.status === 'picked_up' && (pos || lastPos.current) ? '🛵' : '🏪'}
                 toEmoji="🏠"
                 live={routeView.status === 'picked_up' && (pos || lastPos.current) ? liveCtl : null}
+              
+                poolKey="drout"   // v38 : la MEME carte que DualRouteMap (0 creation a la reouverture)
+                orderId={routeView.status === 'picked_up' ? null : routeView.id}   // v38 : trajet magasin-client partage via la commande
               />
             )}
             <div className="mt12" style={{ background: '#f8fafc', borderRadius: 12, padding: 10 }}>

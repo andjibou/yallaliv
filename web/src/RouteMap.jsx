@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useT } from './lib.jsx';
 import {
   createMap, emojiMarker, arrowMarker, stopMarker, storeMarker,
-  arrowSetHeading, glideMarker, updateArrowStatus, addLine, rmLine, fitPts, bindPopup, gRoute, mbRoute,
+  arrowSetHeading, glideMarker, updateArrowStatus, addLine, rmLine, fitPts, bindPopup, gRoute, gOrderRoute, mbRoute,
 } from './MapGl.jsx';
 import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';
 
@@ -17,8 +17,8 @@ export { arrowSetHeading, glideMarker };   // compat : DriversMap les importe d'
  * réel, 10k/mois gratuits) → Mapbox Directions (100k/mois) → OSRM public
  * (gratuit, sans clé). Retourne {coords: [[lat,lng]…], distance: m, duration: s} ou null.
  */
-export async function fetchRoute(from, to) {
-  const g = await gRoute(from, to).catch(() => null);   // 🥇 Google Directions
+export async function fetchRoute(from, to, orderId = null) {
+  const g = await (orderId ? gOrderRoute(orderId, from, to) : gRoute(from, to)).catch(() => null);   // 🥇 Google Directions (🤝 v38 : trajet de COMMANDE partagé si orderId)
   if (g) return g;
   const mb = await mbRoute(from, to).catch(() => null); // 🥈 Mapbox Directions
   if (mb) return mb;
@@ -127,7 +127,7 @@ function LiveBtns({ navApi, pos }) {
  * Carte avec itinéraire routier de `from` à `to` (Mapbox Directions, repli OSRM).
  * Fallback : ligne droite pointillée si aucune réponse (hors ligne).
  */
-export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠', height = 300, live = null }) {
+export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠', height = 300, live = null, poolKey = 'nav', orderId = null }) {
   const el = useRef(null);
   const map = useRef(null);
   const { full, toggle } = useMapFullscreen(map);
@@ -142,7 +142,7 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
   useEffect(() => {
     if (!el.current || map.current) return;
     // 🧭 live (livreur) : rotation auto sur son cap (native GL JS)
-    map.current = createMap(el.current, { zoom: 13, poolKey: 'nav' });   // 🏊 v37 : survit en arrière-plan ≤ 12 h
+    map.current = createMap(el.current, { zoom: 13, poolKey });   // 🏊 v37 : survit en arrière-plan ≤ 12 h · 🔑 v38 : clé paramétrable (vue unifiée)
     return () => { map.current?.remove(); map.current = null; markers.current = {}; };
   }, []);
 
@@ -165,7 +165,7 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
     // itinéraire réel (ou ligne droite en secours)
     setInfo(null);
     coordsRef.current = null;
-    fetchRoute(from, to).then((r) => {
+    fetchRoute(from, to, orderId).then((r) => {
       if (cancelled || !map.current) return;
       if (r) {
         lineId.current = addLine(map.current, r.coords, { color: '#0e9f6e', width: 5, opacity: 0.85 });
@@ -240,7 +240,7 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
  * Trajet double du livreur : sa position → magasin (ROUGE) puis magasin → client (VERT).
  * Affiché automatiquement à l'acceptation d'une livraison.
  */
-export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, live = null }) {
+export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, live = null, poolKey = 'route', orderId = null }) {
   const el = useRef(null);
   const map = useRef(null);
   const { full, toggle } = useMapFullscreen(map);
@@ -254,7 +254,7 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    map.current = createMap(el.current, { zoom: 13, poolKey: 'route' });   // 🏊 v37 : survit en arrière-plan ≤ 12 h
+    map.current = createMap(el.current, { zoom: 13, poolKey });   // 🏊 v37 : survit en arrière-plan ≤ 12 h
     return () => { map.current?.remove(); map.current = null; marks.current = {}; };
   }, []);
 
@@ -274,7 +274,7 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
     setLegs(null);
     leg1Ref.current = null;
 
-    Promise.all([fetchRoute(driverPos, storePos), fetchRoute(storePos, clientPos)]).then(([r1, r2]) => {
+    Promise.all([fetchRoute(driverPos, storePos), fetchRoute(storePos, clientPos, orderId)]).then(([r1, r2]) => {   // 🤝 v38 : jambe magasin→client partagée via la COMMANDE (0 appel pour les suivants)
       if (cancelled || !map.current) return;
       leg1Ref.current = r1 ? r1.coords : null;
       l1.current = addLine(m,

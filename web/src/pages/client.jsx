@@ -631,7 +631,7 @@ function AutoScroll({ children, className = '', mode = 'loop', delay = 3500 }) {
    Dans l'APK : depuis le HAUT de l'accueil (ou de la page Statuts), tirer la page vers le bas
    → actualisation SANS fermer/rouvrir l'application.
    Sur le site web : aucun changement (le navigateur a déjà sa propre actualisation).
-   - accueil : rechargement complet (comme rouvrir l'app → tout est frais)
+   - accueil & statuts : re-fetch DOUX des données (v38 — JAMAIS de reload complet : le pool de cartes v37 survit)
    - statuts : simple re-chargement de la liste (on reste sur la page) */
 function usePullToRefresh(onRefresh) {
   const indRef = useRef(null);
@@ -676,7 +676,7 @@ function usePullToRefresh(onRefresh) {
         busy = true; paint(TH, true);
         const done = () => { busy = false; paint(0, false); };
         if (cb.current) Promise.resolve(cb.current()).catch(() => {}).then(done);   // statuts : rechargement doux
-        else setTimeout(() => window.location.reload(), 420);                        // accueil : tout recharger
+        else setTimeout(() => window.location.reload(), 420);                        // securite : plus utilise (accueil = re-fetch doux v38)
       } else paint(0, false);
       engaged = false; dist = 0;
     };
@@ -718,8 +718,11 @@ export function ClientHome() {
   const [unread, setUnread] = useState(0);        // 🔔 cloche de l'en-tête
   usePoll(() => api('/notifications').then((d) => setUnread(d.unread || 0)).catch(() => {}), 15000);
 
-  const ptrInd = usePullToRefresh(null);   // 🔄 v2026.10.04.1 : tirer vers le bas = actualiser (APK)
-  useEffect(() => {
+  // 🔄 v38 : rechargement DOUX de l'accueil — remplace le window.location.reload()
+  // complet qui DÉTRUISAIT le pool de cartes v37 : chaque tirer-pour-actualiser dans
+  // l'APK recréait toutes les cartes (= nouvelles créations Maps JavaScript facturées).
+  // On re-fetch les données, la page ne se recharge jamais → le pool survit.
+  const loadHome = () => {
     api('/stores').then((d) => setStores(d.stores)).catch(() => setStores([]));
     api('/products').then((d) => setProducts(d.products)).catch(() => setProducts([]));
     api('/ads').then((d) => setAds(d.ads)).catch(() => setAds([]));   // 📣 pubs du superadmin
@@ -727,7 +730,9 @@ export function ClientHome() {
     Promise.all([api('/listings?cat=property'), api('/listings?cat=auto')])
       .then(([p, a2]) => setImmo([...p.listings, ...a2.listings]))
       .catch(() => setImmo([]));
-  }, []);
+  };
+  const ptrInd = usePullToRefresh(loadHome);   // 🔄 v38 : tirer vers le bas = re-fetch (le pool de cartes SURVIT)
+  useEffect(() => { loadHome(); }, []);
   // 🟩 v2026.09.28.2 : le vert couvre UNIQUEMENT la partie supérieure restante de l'en-tête —
   // la barre d'état / barre d'adresse du téléphone (theme-color) + la zone d'étirement du navigateur.
   // Le reste de la page reste clair.
@@ -1382,7 +1387,7 @@ export function CartPage() {
     const v = e.target.value;
     setAddress(v);
     clearTimeout(suggTm.current);
-    if (v.trim().length < 4) { suggSeq.current++; setSugg(null); return; }
+    if (v.trim().length < 6) { suggSeq.current++; setSugg(null); return; }   // v38 : Google seulement a partir de 6 caracteres
     suggTm.current = setTimeout(async () => {
       const seq = ++suggSeq.current;
       const near = gps || (store?.lat != null ? { lat: store.lat, lng: store.lng } : { lat: 31.2001, lng: 29.9187 });
@@ -2276,7 +2281,7 @@ export function ListingDetailPage() {
     const v = e.target.value;
     setDAddr(v);
     clearTimeout(dTm.current);
-    if (v.trim().length < 4) { dSeq.current++; setDSugg(null); return; }
+    if (v.trim().length < 6) { dSeq.current++; setDSugg(null); return; }   // v38 : Google seulement a partir de 6 caracteres
     dTm.current = setTimeout(async () => {
       const seq = ++dSeq.current;
       const near = dGps || (l.lat != null ? { lat: l.lat, lng: l.lng } : { lat: 31.2001, lng: 29.9187 });
@@ -3204,7 +3209,7 @@ export function ServiceRequestPage() {
     if (which === 'p') setPAddr(v); else setDAddr(v);
     clearTimeout(which === 'p' ? pTm.current : dTm.current);
     const seqObj = which === 'p' ? pSeq : dSeq;
-    if (v.trim().length < 4) { seqObj.current++; if (which === 'p') setPSugg(null); else setDSugg(null); return; }
+    if (v.trim().length < 6) { seqObj.current++; if (which === 'p') setPSugg(null); else setDSugg(null); return; }   // 🎯 v38 : Google seulement à partir de 6 caractères
     const tm = setTimeout(async () => {
       const seq = ++seqObj.current;
       try { const r = (await geocodeSearch(v.trim(), lang, { lat: 31.2001, lng: 29.9187 })).slice(0, 6); if (seqObj.current !== seq) return; if (which === 'p') setPSugg(r); else setDSugg(r); }

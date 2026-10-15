@@ -2401,7 +2401,7 @@ export default app; // Vercel : importé par api/index.js (export au niveau modu
 
 // ---------- Démarrage ----------
 // ── 🗺️ v2026.10.13.33 : cache Google Maps CROISÉ (tous appareils) + compteurs de consommation ──
-const GMAPS_TTL = { geo: 30 * 864e5, rev: 90 * 864e5, rt: 12 * 36e5 };   // mêmes durées que le cache navigateur
+const GMAPS_TTL = { geo: 30 * 864e5, rev: 90 * 864e5, rt: 12 * 36e5, ort: 12 * 36e5, ac: 24 * 36e5 };   // v38 : + ort (trajet par COMMANDE, 12 h) + ac (suggestions partagées, 24 h)
 app.get('/api/gmaps/cache', rateLimit(60, 60000, 'Trop de requêtes.'), h(async (req, res) => {
   const k = String(req.query.k || '').slice(0, 160);
   const ttl = GMAPS_TTL[k.split('|')[0]];
