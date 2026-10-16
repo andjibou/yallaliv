@@ -14,18 +14,17 @@ import {
 //     rend lat/lng, tracés TELS QUELS sur la carte OSM (même WGS84, même point).
 //   · ITINÉRAIRES : OSRM public (gratuit, sans clé) + cache partagé serveur.
 //   · GÉOCODAGE INVERSE : Esri + Nominatim (gratuits, sans clé).
+// 🚫 v44 : plus AUCUNE trace du service Mapbox (clé supprimée) — la bibliothèque
+//   open-source mapbox-gl ne sert qu'à DESSINER les tuiles OpenStreetMap.
 // Les 8 composants carte (PickMap, RouteMap, DualRouteMap, TourMap, StoresMap,
 // TrackMap, DriversMap, MapFullscreen) ne parlent qu'à cette façade.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// 🔑 Clés via VARIABLES D'ENVIRONNEMENT (jamais dans le code → jamais de push
-// bloqué par GitHub Push Protection) :
-//   · Google : VITE_GMAPS_KEY (Vercel + web/.env.local)
-//   · Mapbox : VITE_MAPBOX_TOKEN (Vercel + web/.env.local)
-export const MB_TOKEN = String(import.meta.env.VITE_MAPBOX_TOKEN || '').trim();
+// 🔑 Clé Google via VARIABLE D'ENVIRONNEMENT (jamais dans le code) : VITE_GMAPS_KEY
+// (Vercel + web/.env.local) — utilisée UNIQUEMENT pour la recherche d'adresse (Places).
+// 🚫 v44 : PLUS AUCUNE CLÉ MAPBOX — les cartes affichent uniquement OpenStreetMap.
 
-// Style signature Mapbox (secours) + fond OSM raster (dernier recours).
-const MB_STYLE = 'mapbox://styles/mapbox/standard';
+// 🗺️ v44 : LE style de carte unique — tuiles raster OpenStreetMap (gratuites, sans clé).
 export const FALLBACK_STYLE = {
   version: 8,
   sources: {
@@ -49,25 +48,12 @@ export const LANG3 = (l) => (l === 'ar' ? 'ar' : l === 'en' ? 'en' : 'fr');
 
 // ───────────────────────────── Création de carte ─────────────────────────────
 
-// Plugin RTL Mapbox (texte arabe du style vectoriel Mapbox)
-let rtlTried = false;
-const ensureRtl = () => {
-  if (rtlTried || !MB_TOKEN) return;
-  rtlTried = true;
-  try {
-    mapboxgl.setRTLTextPlugin(
-      'https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-rtl-text/v0.3.0/mapbox-gl-rtl-text.js',
-      () => {},
-      (e) => console.warn('plugin RTL non chargé :', e),
-    );
-  } catch {}
-};
+// (🚫 v44 : plus de plugin RTL Mapbox — inutile pour des tuiles raster OSM,
+//  les libellés sont déjà dans les images de tuiles.)
 
-/** Carte MAPBOX (avec fond OSM de secours si pas de token Mapbox). */
 function createMapboxMap(el, { center = [29.9187, 31.2001], zoom = 13, bearing = 0 } = {}) {
-  // 🆓 v43 : tuiles OpenStreetMap raster UNIQUEMENT — gratuites, sans clé, sans
-  // compte. Le token Mapbox n'est plus utilisé pour l'AFFICHAGE (le style Standard
-  // serait compté). Rotation NATIVE conservée (setBearing / geste à deux doigts) ;
+  // 🆓 v43/v44 : tuiles OpenStreetMap raster UNIQUEMENT — gratuites, sans clé, sans
+  // compte. Rotation NATIVE conservée (setBearing / geste à deux doigts) ;
   // inclinaison désactivée : la carte reste PLATE (zéro bâtiment 3D — choix v42).
   const map = new mapboxgl.Map({
     container: el,
@@ -90,11 +76,11 @@ const MLIVE = new Set();
 try { window.__ylMaps = MLIVE; } catch {}   // sonde (tests)
 
 /**
- * Crée la carte — v43 : TOUJOURS OpenStreetMap (mapbox-gl + tuiles OSM gratuites).
- * Plus AUCUN appel Maps JavaScript API : Google ne sert plus qu'à la RECHERCHE
+ * Crée la carte — v43/v44 : TOUJOURS OpenStreetMap (bibliothèque mapbox-gl +
+ * tuiles OSM gratuites, SANS AUCUNE clé). Google ne sert qu'à la RECHERCHE
  * D'ADRESSE (Places Autocomplete → PickMap). Filet de sécurité : si la carte ne
- * peut pas s'initialiser (WebGL indisponible), un message clair remplace la carte
- * au lieu de casser la page.
+ * peut pas s'initialiser (WebGL indisponible), un message clair remplace la
+ * carte au lieu de casser la page.
  */
 export function createMap(el, opts = {}) {
   try {
@@ -117,8 +103,7 @@ export function createMap(el, opts = {}) {
 }
 
 // ───────────────────────── API recherche / inverse / itinéraires (chaînes) ─────────────────────────
-// Chaque étage tombe en douceur : Google → Mapbox → moteurs gratuits (PickMap)
-// → OSRM (RouteMap).
+// 🆓 v44 : 100 % gratuit — Photon/Nominatim (recherche), Esri/Nominatim (inverse), OSRM (itinéraires).
 
 export { gForward, gReverse, gRoute, gOrderRoute, gAutocomplete, gPlaceDetails, l2Get, l2Put, snapToRoute };   // + 📐 v41 snapToRoute (pastille collée + trajet parcouru gris)
 
@@ -146,35 +131,6 @@ export async function geoReverse(lat, lng, lang = 'fr') {
     const d = await (await fetchT(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=${LANG3(lang)}&zoom=18&addressdetails=1`, 5000)).json();
     return d?.display_name || null;
   } catch { return null; }
-}
-
-/** Mapbox Geocoding v6 (secours — 100k/mois gratuits) ou [] sans token. */
-export async function mbForward(q, lang = 'fr', near = null) {
-  if (!MB_TOKEN) return [];
-  const p = near ? `&proximity=${near.lng},${near.lat}` : '';
-  const d = await (await fetchT(`https://api.mapbox.com/search/geocode/v6/forward?q=${encodeURIComponent(q)}&language=${LANG3(lang)}&limit=5${p}&access_token=${MB_TOKEN}`, 4000)).json();
-  return (d?.features || [])
-    .filter((f) => f?.geometry?.coordinates)
-    .map((f) => ({ lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], label: f.properties?.full_address || f.properties?.name || '' }))
-    .filter((r) => r.label);
-}
-
-/** Mapbox géocodage inverse (secours) ou null. */
-export async function mbReverse(lat, lng, lang = 'fr') {
-  if (!MB_TOKEN) return null;
-  try {
-    const d = await (await fetchT(`https://api.mapbox.com/search/geocode/v6/reverse?longitude=${lng}&latitude=${lat}&language=${LANG3(lang)}&access_token=${MB_TOKEN}`, 4000)).json();
-    return d?.features?.[0]?.properties?.full_address || null;
-  } catch { return null; }
-}
-
-/** Mapbox Directions (secours — trafic réel) ou null. */
-export async function mbRoute(from, to) {
-  if (!MB_TOKEN) return null;
-  const d = await (await fetchT(`https://api.mapbox.com/directions/v5/mapbox/driving/${from.lng},${from.lat};${to.lng},${to.lat}?geometries=geojson&overview=full&access_token=${MB_TOKEN}`, 4500)).json();
-  const r = d?.routes?.[0];
-  if (!r) return null;
-  return { coords: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]), distance: r.distance, duration: r.duration };
 }
 
 // ───────────────────────────── Marqueurs (bi-moteur) ─────────────────────────────
