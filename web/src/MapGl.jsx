@@ -6,12 +6,14 @@ import {
 } from './MapGoogle.jsx';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 🗺️ MapGl.jsx — v2026.10.05.3 : FAÇADE CARTES À 3 ÉTAGES pour toute l'app.
-//   ① GOOGLE MAPS (si VITE_GMAPS_KEY) — cartes, recherche, itinéraires
-//   ② MAPBOX GL (si VITE_MAPBOX_TOKEN) — secours complet
-//   ③ Fond OpenStreetMap raster — dernier recours (sans clé, sans compte)
-// Une clé absente / un quota atteint / une erreur → bascule AUTOMATIQUE à
-// l'étage suivant : l'app n'a JAMAIS de carte morte.
+// 🗺️ MapGl.jsx — v2026.10.16.43 : CARTES 100 % OPENSTREETMAP (GRATUITES).
+//   · AFFICHAGE : bibliothèque mapbox-gl (libre) + tuiles tile.openstreetmap.org
+//     → PLUS AUCUNE carte Google : 0 Maps JavaScript API, 0 facturation au chargement.
+//   · RECHERCHE D'ADRESSE : Google Places Autocomplete en session (la SEULE API
+//     Google conservée — choix utilisateur v43) ; la sélection (Place Details)
+//     rend lat/lng, tracés TELS QUELS sur la carte OSM (même WGS84, même point).
+//   · ITINÉRAIRES : OSRM public (gratuit, sans clé) + cache partagé serveur.
+//   · GÉOCODAGE INVERSE : Esri + Nominatim (gratuits, sans clé).
 // Les 8 composants carte (PickMap, RouteMap, DualRouteMap, TourMap, StoresMap,
 // TrackMap, DriversMap, MapFullscreen) ne parlent qu'à cette façade.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -62,21 +64,18 @@ const ensureRtl = () => {
 };
 
 /** Carte MAPBOX (avec fond OSM de secours si pas de token Mapbox). */
-function createMapboxMap(el, { lang = 'fr', center = [29.9187, 31.2001], zoom = 13, bearing = 0 } = {}) {
-  ensureRtl();
-  if (MB_TOKEN) mapboxgl.accessToken = MB_TOKEN;
-  const lg = LANG3(lang);
+function createMapboxMap(el, { center = [29.9187, 31.2001], zoom = 13, bearing = 0 } = {}) {
+  // 🆓 v43 : tuiles OpenStreetMap raster UNIQUEMENT — gratuites, sans clé, sans
+  // compte. Le token Mapbox n'est plus utilisé pour l'AFFICHAGE (le style Standard
+  // serait compté). Rotation NATIVE conservée (setBearing / geste à deux doigts) ;
+  // inclinaison désactivée : la carte reste PLATE (zéro bâtiment 3D — choix v42).
   const map = new mapboxgl.Map({
     container: el,
-    style: MB_TOKEN ? MB_STYLE : FALLBACK_STYLE,
+    style: FALLBACK_STYLE,
     center, zoom, bearing,
+    pitchWithRotate: false,   // ⛔ jamais d'inclinaison — carte plate
     attributionControl: { compact: true },
   });
-  // ⚠️ ne l'appliquer qu'UNE FOIS : le réglage de langue du style Standard
-  // déclenche un nouveau cycle style.load — sans garde, boucle infinie de
-  // rechargement (couches vides, lignes jamais tracées). Bug .2 corrigé.
-  let langDone = false;
-  if (MB_TOKEN) map.on('style.load', () => { if (langDone) return; langDone = true; try { map.setConfigProperty('basemap', 'language', lg); } catch {} });
   map.on('styledata', () => {
     const p = map._ylPend;
     if (!p) return;
@@ -85,67 +84,36 @@ function createMapboxMap(el, { lang = 'fr', center = [29.9187, 31.2001], zoom = 
   return map;
 }
 
-/**
- * Crée la carte : Google si clé disponible, sinon Mapbox, sinon OSM.
- * Filet anti-carte-morte : si le script Google échoue (clé invalide…) et qu'un
- * token Mapbox existe, la carte Google est REMPLACÉE par Mapbox dans le même
- * élément, avec re-branchement des écouteurs — l'utilisateur ne voit rien.
- */
-// 🏊 v37 : pool de cartes en arrière-plan (≤ 12 h, LRU 4) — key → { A, div, t }
-const MPOOL = new Map();
-try { window.__ylMPool = MPOOL; } catch {}   // sonde (tests)
+// 🆓 v43 : registre des cartes vivantes (sonde pour les tests) — remplace le pool
+// Google v37, devenu inutile : OpenStreetMap ne facture RIEN au chargement.
+const MLIVE = new Set();
+try { window.__ylMaps = MLIVE; } catch {}   // sonde (tests)
 
+/**
+ * Crée la carte — v43 : TOUJOURS OpenStreetMap (mapbox-gl + tuiles OSM gratuites).
+ * Plus AUCUN appel Maps JavaScript API : Google ne sert plus qu'à la RECHERCHE
+ * D'ADRESSE (Places Autocomplete → PickMap). Filet de sécurité : si la carte ne
+ * peut pas s'initialiser (WebGL indisponible), un message clair remplace la carte
+ * au lieu de casser la page.
+ */
 export function createMap(el, opts = {}) {
-  const key = GMAPS_KEY();
-  // 🟩 v2026.10.13.28 — GOOGLE MAPS UNIQUEMENT quand la clé est configurée :
-  // plus AUCUNE bascule Mapbox (plus de watchdog tuiles, plus de secours) —
-  // l'utilisateur voit Google, point final. Si un écran affiche « © Mapbox »,
-  // c'est le SIGNAL que la clé VITE_GMAPS_KEY manque dans CE build
-  // (local : web/.env.local · prod : variable Vercel + Redeploy).
-  // 🏊 v37 : POOL DE CARTES — idée utilisateur : la carte ouverte UNE FOIS survit en
-  // arrière-plan jusqu'à 12 h. Réouvrir la carte / revoir un trajet = RÉUTILISATION de
-  // l'instance → 0 nouveau chargement facturé (Google ne facture qu'à la CRÉATION).
-  // Marche pendant toute la session du site ET dans l'APK en arrière-plan (le processus
-  // survit). Limite honnête : onglet navigateur fermé = tout est détruit (impossible d'y
-  // survivre sur le web) → à la réouverture du site, 1 création (la page se recharge de
-  // toute façon). Garde-fous : max 4 cartes en vie (LRU, mémoire téléphones modestes) +
-  // TTL 12 h + marqueurs/lignes/handlers nettoyés à chaque détachement.
-  if (key && opts.poolKey) {
-    const pk = opts.poolKey;
-    const hit = MPOOL.get(pk);
-    if (hit && !hit.A.__dead && Date.now() - hit.t < 12 * 36e5) {
-      hit.A.__handlers = {}; hit.A.__ops = [];   // handlers du composant précédent abandonnés
-      try { el.appendChild(hit.div); } catch {}
-      // ⛶ v42 : PLUS de display:none sur les autres enfants — le bouton plein écran (FsBtn), l'épingle PickMap et les boutons live doivent rester VISIBLES par-dessus la carte (vérifié : new google.maps.Map() ne vide PAS le conteneur)
-      try { hit.A.resize(); } catch {}
-      setTimeout(() => { try { hit.A.resize(); } catch {} }, 200);
-      hit.t = Date.now();
-      return hit.A;   // 🏊 réutilisé — AUCUN nouveau chargement facturé
-    }
-    if (hit) { try { (hit.A.__destroy || hit.A.remove.bind(hit.A))(); } catch {} MPOOL.delete(pk); }
-    const div = document.createElement('div');
-    div.style.cssText = 'width:100%;height:100%';
-    try { el.appendChild(div); } catch {}
-    // ⛶ v42 : idem — les enfants React (FsBtn, épingle…) restent visibles par-dessus la carte
-    const A = createGoogleMap(div, opts);
-    const rec = { A, div, t: Date.now() };
-    MPOOL.set(pk, rec);
-    if (MPOOL.size > 4) {   // 🧠 LRU : plus ancienne carte hors pool (vraie destruction)
-      const oldest = [...MPOOL.entries()].filter(([k]) => k !== pk).sort((a, b) => a[1].t - b[1].t)[0];
-      if (oldest) { try { (oldest[1].A.__destroy || oldest[1].A.remove.bind(oldest[1].A))(); } catch {} MPOOL.delete(oldest[0]); }
-    }
-    A.__destroy = A.remove.bind(A);   // vraie destruction (LRU/TTL)
-    A.remove = () => {   // 🏊 le composant croit détruire → on DÉTACHE : la carte survit
-      try { [...(A.__ylMarkers || new Set())].forEach((mk) => { try { mk.remove(); } catch {} }); } catch {}
-      try { [...(A.__ylLines || new Set())].forEach((ln) => { try { ln.remove(); } catch {} }); } catch {}
-      A.__handlers = {}; A.__ops = [];
-      try { rec.div.remove(); } catch {}   // sortie du DOM — l'instance Google continue en arrière-plan
-    };
-    return A;
+  try {
+    const m = createMapboxMap(el, opts);
+    MLIVE.add(m);
+    const origRemove = m.remove.bind(m);
+    m.remove = () => { MLIVE.delete(m); try { origRemove(); } catch {} };   // sonde propre
+    return m;
+  } catch (ex) {
+    // 🧯 carte indisponible → message visible, page intacte (objet no-op)
+    try {
+      const msg = document.createElement('div');
+      msg.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;text-align:center;color:#64748b;font-weight:700;font-size:14px;background:#eef2f7;border-radius:14px';
+      msg.textContent = '🗺️ Carte indisponible sur cet appareil';
+      el.appendChild(msg);
+    } catch {}
+    const noop = () => {};
+    return { __dead: true, on: noop, off: noop, once: noop, remove: noop, jumpTo: noop, easeTo: noop, stop: noop, resize: noop, getBearing: () => 0, setBearing: noop, getPitch: () => 0, setPitch: noop, getZoom: () => 13, setZoom: noop, getCenter: () => ({ lat: 31.2001, lng: 29.9187 }), setCenter: noop, getCanvas: () => null, getStyle: () => ({ layers: [] }), fitBounds: noop, project: () => ({ x: 0, y: 0 }), addSource: noop, addLayer: noop, getSource: () => null, removeLayer: noop, removeSource: noop, _ylPend: {} };
   }
-  if (key) return createGoogleMap(el, opts);
-  // sans clé (développement hors production) : secours Mapbox → OSM, inchangé
-  return createMapboxMap(el, opts);
 }
 
 // ───────────────────────── API recherche / inverse / itinéraires (chaînes) ─────────────────────────
@@ -154,18 +122,30 @@ export function createMap(el, opts = {}) {
 
 export { gForward, gReverse, gRoute, gOrderRoute, gAutocomplete, gPlaceDetails, l2Get, l2Put, snapToRoute };   // + 📐 v41 snapToRoute (pastille collée + trajet parcouru gris)
 
-/** Recherche : Google d'abord, sinon Mapbox. [{lat,lng,label}] */
+/** Recherche GRATUITE (🆓 v43 : plus de géocodage Google/Mapbox) : Photon puis Nominatim. [{lat,lng,label}] */
 export async function geoForward(q, lang = 'fr', near = null) {
-  const g = await gForward(q, lang, near).catch(() => []);
-  if (g && g.length) return g;
-  return mbForward(q, lang, near).catch(() => []);
+  const l = LANG3(lang);
+  try {
+    const bias = near ? `&lat=${near.lat}&lon=${near.lng}` : '';
+    const d = await (await fetchT(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=6&lang=${l}${bias}`, 4500)).json();
+    const out = (d?.features || []).filter((f) => f?.geometry?.coordinates)
+      .map((f) => ({ lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], label: [f.properties?.name, f.properties?.street, f.properties?.city, f.properties?.state].filter(Boolean).join(', ') }))
+      .filter((r) => r.label);
+    if (out.length) return out;
+  } catch {}
+  try {
+    const vb = near ? `&viewbox=${near.lng - 0.35},${near.lat + 0.35},${near.lng + 0.35},${near.lat - 0.35}` : '';
+    const d = await (await fetchT(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&accept-language=${l}${vb}`, 4500)).json();
+    return (d || []).map((r) => ({ lat: +r.lat, lng: +r.lon, label: r.display_name }));
+  } catch { return []; }
 }
 
-/** Géocodage inverse : Google d'abord, sinon Mapbox. */
+/** Géocodage inverse GRATUIT (🆓 v43) : Nominatim (OpenStreetMap). */
 export async function geoReverse(lat, lng, lang = 'fr') {
-  const g = await gReverse(lat, lng, lang).catch(() => null);
-  if (g) return g;
-  return mbReverse(lat, lng, lang).catch(() => null);
+  try {
+    const d = await (await fetchT(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=${LANG3(lang)}&zoom=18&addressdetails=1`, 5000)).json();
+    return d?.display_name || null;
+  } catch { return null; }
 }
 
 /** Mapbox Geocoding v6 (secours — 100k/mois gratuits) ou [] sans token. */

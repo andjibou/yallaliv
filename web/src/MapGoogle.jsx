@@ -351,53 +351,33 @@ function decodePolyline(str) {
 }
 
 /**
- * 🛣️ Itinéraire — Routes API « computeRoutes » (10k/mois gratuites, SKU
- * Essentials). ⚠️ L'ancienne Directions API est passée Legacy le 05/10/2026 :
- * elle n'est PLUS activable sur un nouveau projet Google Cloud — d'où ce
- * endpoint moderne, appelé directement depuis le navigateur (CORS vérifié) :
- * pas besoin que la carte Google elle-même soit chargée. Field mask minimal
- * (on ne paie que les champs demandés) + TRAFFIC_AWARE (Essentials, pas Pro).
- * Retourne {coords: [[lat,lng]…], distance: m, duration: s} ou null.
+ * 🛣️ v43 : Itinéraire OSRM PUBLIC (gratuit, sans clé — plus AUCUN appel Google
+ * Routes, plus aucun risque de facturation). Appelé depuis le navigateur (CORS
+ * autorisé). Retourne {coords: [[lat,lng]…], distance: m, duration: s} ou null.
  */
 export async function gRoute(from, to, live = false) {
-  // 💾 v32 : cache 12 h, extrémités FIXES arrondies à ~11 m — les trajets magasin→client ne
-  // consomment PLUS de quota à chaque réaffichage. 🤝 v41 : extrémité LIVE (le livreur, qui
-  // bouge) arrondie à ~100 m → TOUS les observateurs (client, magasin, livreur) d'une même
-  // cellule partagent LE MÊME trajet mis en cache serveur = 1 SEUL appel Google pour tous.
+  // 💾 v32 : cache 12 h, extrémités FIXES arrondies à ~11 m. 🤝 v41 : extrémité LIVE
+  // (le livreur) arrondie à ~100 m → TOUS les observateurs d'une même cellule
+  // partagent LE MÊME trajet mis en cache serveur = 1 SEUL appel réseau pour tous.
+  // 🆓 v43 : le moteur devient OSRM public (1 req/s conseillé — le cache partagé
+  // le respecte naturellement).
   const ck = 'rt|' + (live ? '3' : '2') + '|' + (+from.lat).toFixed(live ? 3 : 4) + ',' + (+from.lng).toFixed(live ? 3 : 4) + '|' + (+to.lat).toFixed(4) + ',' + (+to.lng).toFixed(4);
   const hit = cGet(ck, 12 * 36e5);
   if (hit) { gBump('hits'); return hit; }
   const l2 = await l2Get(ck);   // 🗄️ v33 : cache croisé serveur — le trajet vu par le marchand, le livreur ET le client = 1 seul appel
   if (l2) { gBump('hits'); cSet(ck, l2); return l2; }
-  const key = GMAPS_KEY();
-  if (!key) return null;
-  gBump('rt');   // 🧮 appel réseau réel = 1 unité de quota
+  gBump('rt');   // 🧮 appel réseau réel (OSRM)
   const ac = new AbortController();
-  const tm = setTimeout(() => ac.abort(), 5000);
+  const tm = setTimeout(() => ac.abort(), 6000);
   try {
-    const res = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
-      method: 'POST',
-      signal: ac.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': key,
-        'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline',
-      },
-      body: JSON.stringify({
-        origin: { location: { latLng: { latitude: from.lat, longitude: from.lng } } },
-        destination: { location: { latLng: { latitude: to.lat, longitude: to.lng } } },
-        travelMode: 'DRIVE',
-        routingPreference: 'TRAFFIC_AWARE',   // SKU Essentials (10k/mois gratuits)
-        computeAlternativeRoutes: false,
-      }),
-    });
+    const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`, { signal: ac.signal });
     if (!res.ok) return null;
     const r = (await res.json())?.routes?.[0];
-    if (!r?.polyline?.encodedPolyline) return null;
+    if (!r?.geometry?.coordinates?.length) return null;
     const out = {
-      coords: decodePolyline(r.polyline.encodedPolyline),
-      distance: r.distanceMeters ?? null,
-      duration: r.duration ? parseFloat(r.duration) : null,   // "1234s" → 1234
+      coords: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
+      distance: r.distance ?? null,
+      duration: r.duration ?? null,
     };
     cSet(ck, out); l2Put(ck, out);
     return out;

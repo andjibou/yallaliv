@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useT } from './lib.jsx';
 import {
   createMap, emojiMarker, arrowMarker, stopMarker, storeMarker,
-  arrowSetHeading, glideMarker, updateArrowStatus, addLine, rmLine, fitPts, bindPopup, gRoute, gOrderRoute, mbRoute, snapToRoute,
-} from './MapGl.jsx';
+  arrowSetHeading, glideMarker, updateArrowStatus, addLine, rmLine, fitPts, bindPopup, gRoute, gOrderRoute, snapToRoute,
+} from './MapGl.jsx';   // 🆓 v43 : mbRoute retiré (plus de Mapbox Directions)
 import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';
 
 // 🗺️ v2026.10.05.2 — TOUTES les cartes de ce fichier sont passées de Leaflet à
@@ -13,29 +13,15 @@ import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';
 export { arrowSetHeading, glideMarker };   // compat : DriversMap les importe d'ici
 
 /**
- * Itinéraire routier réel — chaîne à 3 étages : Google Directions (trafic
- * réel, 10k/mois gratuits) → Mapbox Directions (100k/mois) → OSRM public
- * (gratuit, sans clé). Retourne {coords: [[lat,lng]…], distance: m, duration: s} ou null.
+ * 🛣️ v43 : Itinéraire OSRM PUBLIC (gratuit, sans clé) — cache 12 h local +
+ * serveur PARTAGÉ (rt|2|/rt|3|/ort|<id>), extrémité LIVE arrondie ~100 m :
+ * tous les observateurs d'un même trajet = 1 SEUL appel réseau (🤝 v38/v41
+ * conservés, moteur changé — plus aucune API Google/Mapbox ici).
+ * Retourne {coords: [[lat,lng]…], distance: m, duration: s} ou null.
  */
 export async function fetchRoute(from, to, orderId = null, live = false) {
-  const g = await (orderId ? gOrderRoute(orderId, from, to) : gRoute(from, to, live)).catch(() => null);   // 🥇 Google Directions (🤝 v38 trajet de COMMANDE · 🤝 v41 clé LIVE ~100 m partagée)
-  if (g) return g;
-  const mb = await mbRoute(from, to).catch(() => null); // 🥈 Mapbox Directions
-  if (mb) return mb;
-  try {   // 🛟 secours OSRM
-    const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data.code === 'Ok' && data.routes && data.routes[0]) {
-      const r = data.routes[0];
-      return {
-        coords: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
-        distance: r.distance,
-        duration: r.duration
-      };
-    }
-  } catch {}
-  return null;
+  const r = await (orderId ? gOrderRoute(orderId, from, to) : gRoute(from, to, live)).catch(() => null);
+  return r || null;
 }
 
 export const fmtKm = (m) => (m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m');

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useT, useLang, toast } from './lib.jsx';
-import { createMap, gReverse, gAutocomplete, gPlaceDetails, mbForward, mbReverse, fetchT, LANG3, l2Get, l2Put } from './MapGl.jsx';
+import { createMap, gAutocomplete, gPlaceDetails, fetchT, LANG3, l2Get, l2Put } from './MapGl.jsx';   // 🆓 v43 : Google UNIQUEMENT pour l'autocomplétion + Place Details (géocodage inverse 100 % gratuit)
 import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';   // ⛶ v42 : plein écran PARTOUT où il y a une carte   // v36 : Places session + v38 : l2Get/l2Put (cache suggestions partage)   // 🎯 v36 : Places Autocomplete en session + Place Details à la sélection
 
 // ================= 📍 v2026.10.14.34 — Géocodage CINQ-SOURCES (économie de quota) =================
@@ -26,14 +26,11 @@ import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';   // �
 // Fusion + dédoublonnage ≈15 m.
 
 /**
- * Géocodage inverse (coordonnées → adresse lisible) : Mapbox d'abord (adresse
- * la plus propre, avec numéro), sinon Esri + Nominatim en parallèle et on garde
- * l'adresse la plus détaillée (rue + numéro + quartier = score le plus haut).
+ * Géocodage inverse (coordonnées → adresse lisible) — 🆓 v43 : Esri + Nominatim
+ * en parallèle (gratuits, sans clé), on garde l'adresse la plus détaillée
+ * (rue + numéro + quartier = score le plus haut).
  */
 export async function reverseGeocode(lat, lng, lang = 'fr') {   // 🥇 à la CONFIRMATION (1 appel, caché 90 j)
-  const l = LANG3(lang);
-  const g = await gReverse(lat, lng, l).catch(() => null);   // 🥇 Google d'abord
-  if (g) return g;
   return reverseGeocodeFree(lat, lng, lang);
 }
 
@@ -41,9 +38,7 @@ export async function reverseGeocode(lat, lng, lang = 'fr') {   // 🥇 à la CO
  *  de la carte : déplacer l'épingle 20 fois = 0 quota consommé. */
 export async function reverseGeocodeFree(lat, lng, lang = 'fr') {
   const l = LANG3(lang);
-  const mb = await mbReverse(lat, lng, l).catch(() => null);   // 🥈 Mapbox
-  if (mb) return mb;
-  const jobs = [
+  const jobs = [   // 🆓 v43 : Esri + Nominatim — gratuits et sans clé
     // Esri World Geocoder (sans clé)
     (async () => {
       const d = await (await fetchT(`https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/reverseGeocode?f=json&location=${lng},${lat}&langCode=${l}`)).json();
@@ -142,10 +137,6 @@ async function freeSearch(s, l, near) {   // 🧯 moteurs GRATUITS (repli de l'a
     // 🧯 v36 : ces moteurs GRATUITS servent de REPLI quand Places (Google) est
     // indisponible — et l'appui avant activation. Les suggestions Google (cliquées)
     // passent par pickPlace → Place Details en session.
-    (async () => {   // ② Mapbox Geocoding v6
-      const r = await mbForward(s, l, near).catch(() => []);
-      r.forEach((x) => acc.push({ ...x, src: 1 }));
-    })(),
     (async () => {   // ③ Esri
       const esri = near ? `&location=${near.lng},${near.lat}&distance=25000` : '';
       const d = await (await fetchT(`https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?f=json&singleLine=${encodeURIComponent(s)}&maxLocations=6&langCode=${l}${esri}`, 4500)).json();
