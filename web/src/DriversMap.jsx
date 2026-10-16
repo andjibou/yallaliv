@@ -114,10 +114,10 @@ export default function DriversMap({ drivers }) {
               r ? { color, width: 4, opacity: 0.85 } : { color, width: 4, opacity: 0.85, dashed: true }));
           };
           if (o.status === 'assigned') {
-            line(await fetchRoute(dp, sp).catch(() => null), dp, sp, '#ef4444');
+            line(await fetchRoute(dp, sp, null, true).catch(() => null), dp, sp, '#ef4444');   // v41 : jambe LIVE ~100 m PARTAGEE
             line(await fetchRoute(sp, cp, o.id).catch(() => null), sp, cp, '#0e9f6e');   // v39 : jambe magasin-client PARTAGEE via la commande (ort|id)
           } else {
-            line(await fetchRoute(dp, cp).catch(() => null), dp, cp, '#0e9f6e');
+            line(await fetchRoute(dp, cp, null, true).catch(() => null), dp, cp, '#0e9f6e');   // v41 : jambe LIVE ~100 m PARTAGEE
           }
           const sm = emojiMarker('🏪').setLngLat([sp.lng, sp.lat]).addTo(m);
           bindPopup(sm, `Commande #${o.id} — récupération`);

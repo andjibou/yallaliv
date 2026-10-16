@@ -128,9 +128,11 @@ export function createGoogleMap(el, { lang = 'fr', center = [29.9187, 31.2001], 
       zoom,
       mapTypeControl: false, streetViewControl: false, fullscreenControl: false,
       clickableIcons: false, gestureHandling: 'greedy',
-      ...(google.maps.RenderingType ? { renderingType: google.maps.RenderingType.VECTOR } : {}),   // cartes vectorielles → rotation possible
+      ...(google.maps.RenderingType ? { renderingType: google.maps.RenderingType.RASTER } : {}),   // v41 : RASTER PLAT « comme Google » — PLUS de bâtiments 3D au zoom (choix utilisateur)
+      tilt: 0,
     });
     gBump('maps');   // 🧮 v33 : 1 chargement de carte = 1 unité de quota
+    A.__ylRaster = !!google.maps.RenderingType;   // v41 : sonde (carte plate, sans bâtiments 3D)
     A.__ready = true;
     A.__ops.forEach((f) => { try { f(A.__g, A.__map); } catch {} });
     A.__ops = [];
@@ -356,10 +358,12 @@ function decodePolyline(str) {
  * (on ne paie que les champs demandés) + TRAFFIC_AWARE (Essentials, pas Pro).
  * Retourne {coords: [[lat,lng]…], distance: m, duration: s} ou null.
  */
-export async function gRoute(from, to) {
-  // 💾 v32 : cache 12 h, extrémités arrondies à ~11 m — les trajets fixes (magasin→client,
-  // tournées) ne consomment PLUS de quota à chaque réaffichage
-  const ck = 'rt|2|' + (+from.lat).toFixed(4) + ',' + (+from.lng).toFixed(4) + '|' + (+to.lat).toFixed(4) + ',' + (+to.lng).toFixed(4);
+export async function gRoute(from, to, live = false) {
+  // 💾 v32 : cache 12 h, extrémités FIXES arrondies à ~11 m — les trajets magasin→client ne
+  // consomment PLUS de quota à chaque réaffichage. 🤝 v41 : extrémité LIVE (le livreur, qui
+  // bouge) arrondie à ~100 m → TOUS les observateurs (client, magasin, livreur) d'une même
+  // cellule partagent LE MÊME trajet mis en cache serveur = 1 SEUL appel Google pour tous.
+  const ck = 'rt|' + (live ? '3' : '2') + '|' + (+from.lat).toFixed(live ? 3 : 4) + ',' + (+from.lng).toFixed(live ? 3 : 4) + '|' + (+to.lat).toFixed(4) + ',' + (+to.lng).toFixed(4);
   const hit = cGet(ck, 12 * 36e5);
   if (hit) { gBump('hits'); return hit; }
   const l2 = await l2Get(ck);   // 🗄️ v33 : cache croisé serveur — le trajet vu par le marchand, le livreur ET le client = 1 seul appel
@@ -406,6 +410,34 @@ export async function gRoute(from, to) {
  * autres le relisent → 0 appel Routes API. TTL 12 h : si la route change (travaux),
  * le premier visiteur après expiration déclenche UN SEUL recalcul, partagé par tous.
  */
+/**
+ * 📐 v41 : PROJECTION d'un point sur la polyline du trajet — le cœur du « comme Google » :
+ * renvoie { d, lat, lng, idx, before, after } où lat/lng = point PROJETÉ (la pastille s'y
+ * colle au millimètre près, même si le GPS saute), d = distance au trajet (m), et
+ * before/after = le trajet découpé au point de projection (parcouru ⬜ / restant 🟢).
+ * 100% local : 0 appel API.
+ */
+export function snapToRoute(lat, lng, coords) {
+  if (!coords || coords.length < 2) return { d: Infinity, lat, lng, idx: -1, before: null, after: null };
+  const R = 6371000, rad = Math.PI / 180, cl = Math.cos(lat * rad);
+  let best = null;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const ax = (coords[i][1] - lng) * rad * R * cl, ay = (coords[i][0] - lat) * rad * R;
+    const bx = (coords[i + 1][1] - lng) * rad * R * cl, by = (coords[i + 1][0] - lat) * rad * R;
+    const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+    const t = L2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L2)) : 0;
+    const qx = ax + t * dx, qy = ay + t * dy, d = Math.hypot(qx, qy);
+    if (!best || d < best.d) best = { d, i, t };
+  }
+  const [ala, aln] = coords[best.i], [bla, bln] = coords[best.i + 1];
+  const sla = ala + (bla - ala) * best.t, sln = aln + (bln - aln) * best.t;
+  return {
+    d: best.d, lat: sla, lng: sln, idx: best.i,
+    before: coords.slice(0, best.i + 1).concat([[sla, sln]]),
+    after: [[sla, sln]].concat(coords.slice(best.i + 1)),
+  };
+}
+
 export async function gOrderRoute(orderId, from, to) {
   if (!orderId) return gRoute(from, to);
   const ck = 'ort|' + orderId;

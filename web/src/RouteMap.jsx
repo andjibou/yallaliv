@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useT } from './lib.jsx';
 import {
   createMap, emojiMarker, arrowMarker, stopMarker, storeMarker,
-  arrowSetHeading, glideMarker, updateArrowStatus, addLine, rmLine, fitPts, bindPopup, gRoute, gOrderRoute, mbRoute,
+  arrowSetHeading, glideMarker, updateArrowStatus, addLine, rmLine, fitPts, bindPopup, gRoute, gOrderRoute, mbRoute, snapToRoute,
 } from './MapGl.jsx';
 import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';
 
@@ -17,8 +17,8 @@ export { arrowSetHeading, glideMarker };   // compat : DriversMap les importe d'
  * réel, 10k/mois gratuits) → Mapbox Directions (100k/mois) → OSRM public
  * (gratuit, sans clé). Retourne {coords: [[lat,lng]…], distance: m, duration: s} ou null.
  */
-export async function fetchRoute(from, to, orderId = null) {
-  const g = await (orderId ? gOrderRoute(orderId, from, to) : gRoute(from, to)).catch(() => null);   // 🥇 Google Directions (🤝 v38 : trajet de COMMANDE partagé si orderId)
+export async function fetchRoute(from, to, orderId = null, live = false) {
+  const g = await (orderId ? gOrderRoute(orderId, from, to) : gRoute(from, to, live)).catch(() => null);   // 🥇 Google Directions (🤝 v38 trajet de COMMANDE · 🤝 v41 clé LIVE ~100 m partagée)
   if (g) return g;
   const mb = await mbRoute(from, to).catch(() => null); // 🥈 Mapbox Directions
   if (mb) return mb;
@@ -135,6 +135,8 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
   const coordsRef = useRef(null);   // itineraire courant (pour detecter un ecart)
   const rerouteAt = useRef(0);      // anti-spam : 1 recalcul / 20 s max
   const lineId = useRef(null);
+  const grayId = useRef(null);      // v41 : partie déjà PARCOURUE (gris, comme Google)
+  const snapIdx = useRef(-1);       // v41 : segment du dernier découpage
   const [info, setInfo] = useState(null);
   const [flash, setFlash] = useState(false);
   const t = useT();
@@ -156,6 +158,8 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
     // marqueurs départ / arrivée
     ['from', 'to'].forEach((k) => { if (markers.current[k]) { markers.current[k].remove(); markers.current[k] = null; } });
     if (lineId.current) { rmLine(m, lineId.current); lineId.current = null; }
+    if (grayId.current) { rmLine(m, grayId.current); grayId.current = null; }
+    snapIdx.current = -1;
     // 🧭 live : le départ EST le livreur -> pastille + flèche de direction
     markers.current.from = (live ? arrowMarker('#0e9f6e') : emojiMarker(fromEmoji)).setLngLat([from.lng, from.lat]).addTo(m);
     if (live) { glideMarker(markers.current.from); m.jumpTo({ center: [from.lng, from.lat], zoom: 16 }); }
@@ -165,11 +169,12 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
     // itinéraire réel (ou ligne droite en secours)
     setInfo(null);
     coordsRef.current = null;
-    fetchRoute(from, to, orderId).then((r) => {
+    fetchRoute(from, to, orderId, !!live).then((r) => {
       if (cancelled || !map.current) return;
       if (r) {
         lineId.current = addLine(map.current, r.coords, { color: '#0e9f6e', width: 5, opacity: 0.85 });
         coordsRef.current = r.coords;
+        snapIdx.current = -1;
         setInfo({ distance: r.distance, duration: r.duration });
       } else {
         lineId.current = addLine(map.current, [[from.lat, from.lng], [to.lat, to.lng]], { color: '#0e9f6e', width: 3, dashed: true });
@@ -186,18 +191,33 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
   useEffect(() => {
     const m = map.current;
     if (!m || !from || !to || !lineId.current || !coordsRef.current) return;
-    markers.current.from?.setLngLat([from.lng, from.lat]);
-    const d = distToRouteM(from.lat, from.lng, coordsRef.current);
-    if (d <= 75 || Date.now() - rerouteAt.current < 20000) return;
+    // 📌 v41 : pastille COLLÉE au trajet (projection centimétrique — comme Google Navigation)
+    // + partie déjà parcourue redessinée en GRIS. 100% local : 0 appel API.
+    const sp = snapToRoute(from.lat, from.lng, coordsRef.current);
+    if (sp.d <= 75) {
+      markers.current.from?.setLngLat([sp.lng, sp.lat]);
+      if (sp.idx !== snapIdx.current) {
+        snapIdx.current = sp.idx;
+        if (grayId.current) { rmLine(m, grayId.current); grayId.current = null; }
+        rmLine(m, lineId.current); lineId.current = null;
+        grayId.current = addLine(m, sp.before, { color: '#9ca3af', width: 5, opacity: 0.9 });   // ⬜ parcouru
+        lineId.current = addLine(m, sp.after, { color: '#0e9f6e', width: 5, opacity: 0.85 });    // restant
+      }
+      return;
+    }
+    markers.current.from?.setLngLat([from.lng, from.lat]);   // hors trajet : position réelle
+    if (Date.now() - rerouteAt.current < 20000) return;
     rerouteAt.current = Date.now();
     let cancelled = false;
     setFlash(true);
     setTimeout(() => setFlash(false), 4000);
     rmLine(m, lineId.current); lineId.current = null;
-    fetchRoute(from, to).then((r) => {
+    if (grayId.current) { rmLine(m, grayId.current); grayId.current = null; }
+    fetchRoute(from, to, null, true).then((r) => {   // 🤝 v41 : recalcul — clé LIVE ~100 m partagée
       if (cancelled || !map.current) return;
       if (r) {
         coordsRef.current = r.coords;
+        snapIdx.current = -1;
         lineId.current = addLine(map.current, r.coords, { color: '#0e9f6e', width: 5, opacity: 0.85 });
         setInfo({ distance: r.distance, duration: r.duration });
       } else {
@@ -248,6 +268,8 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
   const leg1Ref = useRef(null);    // itineraire livreur->magasin (ecart -> recalcul)
   const rerouteAt = useRef(0);
   const l1 = useRef(null), l2 = useRef(null);
+  const l1g = useRef(null);        // v41 : partie déjà PARCOURUE de la jambe livreur→magasin (gris)
+  const snap1 = useRef(-1);        // v41 : segment du dernier découpage
   const [legs, setLegs] = useState(null);
   const [flash, setFlash] = useState(false);
   const t = useT();
@@ -265,7 +287,8 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
     if (!m || !driverPos || !storePos || !clientPos) return;
     let cancelled = false;
     ['d', 's', 'c'].forEach((k) => { if (marks.current[k]) { marks.current[k].remove(); marks.current[k] = null; } });
-    [l1, l2].forEach((ref) => { if (ref.current) { rmLine(m, ref.current); ref.current = null; } });
+    [l1, l2, l1g].forEach((ref) => { if (ref.current) { rmLine(m, ref.current); ref.current = null; } });
+    snap1.current = -1;
     // 🧭 live : pastille + flèche de direction sur le livreur, ouverture zoomée sur lui
     marks.current.d = (live ? arrowMarker('#0e9f6e') : emojiMarker('🛵')).setLngLat([driverPos.lng, driverPos.lat]).addTo(m);
     if (live) { glideMarker(marks.current.d); m.jumpTo({ center: [driverPos.lng, driverPos.lat], zoom: 16 }); }
@@ -274,7 +297,7 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
     setLegs(null);
     leg1Ref.current = null;
 
-    Promise.all([fetchRoute(driverPos, storePos), fetchRoute(storePos, clientPos, orderId)]).then(([r1, r2]) => {   // 🤝 v38 : jambe magasin→client partagée via la COMMANDE (0 appel pour les suivants)
+    Promise.all([fetchRoute(driverPos, storePos, null, true), fetchRoute(storePos, clientPos, orderId)]).then(([r1, r2]) => {   // 🤝 v38 jambe magasin→client (COMMANDE) · v41 jambe LIVE ~100 m PARTAGÉE par tous les observateurs
       if (cancelled || !map.current) return;
       leg1Ref.current = r1 ? r1.coords : null;
       l1.current = addLine(m,
@@ -295,17 +318,32 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
   useEffect(() => {
     const m = map.current;
     if (!m || !driverPos || !storePos || !l1.current || !leg1Ref.current) return;
-    marks.current.d?.setLngLat([driverPos.lng, driverPos.lat]);
-    const d = distToRouteM(driverPos.lat, driverPos.lng, leg1Ref.current);
-    if (d <= 75 || Date.now() - rerouteAt.current < 20000) return;
+    // 📌 v41 : pastille COLLÉE à la jambe rouge + partie parcourue en GRIS (comme Google) —
+    // visible par le livreur ET par tous ceux qui regardent ce trajet. 0 appel API.
+    const sp = snapToRoute(driverPos.lat, driverPos.lng, leg1Ref.current);
+    if (sp.d <= 75) {
+      marks.current.d?.setLngLat([sp.lng, sp.lat]);
+      if (sp.idx !== snap1.current) {
+        snap1.current = sp.idx;
+        if (l1g.current) { rmLine(m, l1g.current); l1g.current = null; }
+        rmLine(m, l1.current);
+        l1g.current = addLine(m, sp.before, { color: '#9ca3af', width: 5, opacity: 0.9 });       // ⬜ parcouru
+        l1.current = addLine(m, sp.after, { color: '#ef4444', width: 5, opacity: 0.9 });         // restant (rouge)
+      }
+      return;
+    }
+    marks.current.d?.setLngLat([driverPos.lng, driverPos.lat]);   // hors trajet : position réelle
+    if (Date.now() - rerouteAt.current < 20000) return;
     rerouteAt.current = Date.now();
     let cancelled = false;
     setFlash(true);
     setTimeout(() => setFlash(false), 4000);
-    fetchRoute(driverPos, storePos).then((r) => {
+    fetchRoute(driverPos, storePos, null, true).then((r) => {   // 🤝 v41 : recalcul — clé LIVE ~100 m partagée
       if (cancelled || !map.current || !r) return;
       leg1Ref.current = r.coords;
+      snap1.current = -1;
       rmLine(map.current, l1.current);
+      if (l1g.current) { rmLine(map.current, l1g.current); l1g.current = null; }
       l1.current = addLine(map.current, r.coords, { color: '#ef4444', width: 5, opacity: 0.9 });
       setLegs((pv) => [r, pv?.[1]]);
     });
