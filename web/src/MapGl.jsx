@@ -116,7 +116,7 @@ export function createMap(el, opts = {}) {
     if (hit && !hit.A.__dead && Date.now() - hit.t < 12 * 36e5) {
       hit.A.__handlers = {}; hit.A.__ops = [];   // handlers du composant précédent abandonnés
       try { el.appendChild(hit.div); } catch {}
-      for (const c of [...el.children]) if (c !== hit.div) c.style.display = 'none';   // 🎨 v37 : google.maps.Map() vidait le conteneur → le ⛶ n'apparaissait jamais sur les cartes Google — UI rétablie
+      // ⛶ v42 : PLUS de display:none sur les autres enfants — le bouton plein écran (FsBtn), l'épingle PickMap et les boutons live doivent rester VISIBLES par-dessus la carte (vérifié : new google.maps.Map() ne vide PAS le conteneur)
       try { hit.A.resize(); } catch {}
       setTimeout(() => { try { hit.A.resize(); } catch {} }, 200);
       hit.t = Date.now();
@@ -126,7 +126,7 @@ export function createMap(el, opts = {}) {
     const div = document.createElement('div');
     div.style.cssText = 'width:100%;height:100%';
     try { el.appendChild(div); } catch {}
-    for (const c of [...el.children]) if (c !== div) c.style.display = 'none';   // 🎨 v37 : idem — ⛶ réservé au moteur Mapbox (sans clé)
+    // ⛶ v42 : idem — les enfants React (FsBtn, épingle…) restent visibles par-dessus la carte
     const A = createGoogleMap(div, opts);
     const rec = { A, div, t: Date.now() };
     MPOOL.set(pk, rec);

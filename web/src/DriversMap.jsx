@@ -24,6 +24,8 @@ export default function DriversMap({ drivers }) {
   const map = useRef(null);
   const { full, toggle } = useMapFullscreen(map);
   const mks = useRef({});        // marqueurs persistants par id livreur
+  const lastFix = useRef({});     // 🔒 v42 anti-jitter : dernière position/cap APPLIQUÉS (seuils 10 m / 12°)
+  const havDM = (a1, a2, b1, b2) => { const R = 6371000, rd = Math.PI / 180, dA = (a1 - b1) * rd, dO = (a2 - b2) * rd; return 2 * R * Math.asin(Math.sqrt(Math.sin(dA / 2) ** 2 + Math.cos(a1 * rd) * Math.cos(b1 * rd) * Math.sin(dO / 2) ** 2)); };
   const stKeys = useRef({});     // dernier statut affiché (pour ne restyler que si nécessaire)
   const fittedFor = useRef('');  // ensemble de livreurs déjà cadré (on ne re-cadre pas à chaque position)
   const routesRef = useRef({ lines: [], markers: [] });   // trajets des livreurs en course
@@ -49,14 +51,23 @@ export default function DriversMap({ drivers }) {
       const st = statusOf(d);
       const popup = `<b>${d.name}</b>${d.general ? ' 🌍' : ''}<br>📞 ${d.phone || '—'}<br>${st.dot} ${st.label}${d.active?.length ? `<br>🛵 En course · commande #${d.active[0].id}` : ''}`;
       let mk = mks.current[d.id];
+      // 🔒 v42 : la pastille reste STABLE — elle ne bouge QUE si le livreur bouge VRAIMENT
+      // (≥ 10 m) et son bec pivote seulement sur un VRAI changement de cap (≥ 12°) : fini
+      // le tremblement GPS qui la faisait « bouger dans tous les sens » chez le magasin.
+      const lf = (lastFix.current[d.id] = lastFix.current[d.id] || {});
+      const moved = !mk || lf.lat == null || havDM(d.lat, d.lng, lf.lat, lf.lng) >= 10;
+      const turned = typeof d.bearing === 'number' && (lf.b == null || Math.abs(((d.bearing - lf.b) % 360 + 540) % 360 - 180) >= 12);
       if (!mk) {
         mk = arrowMarker(st.color, st.dim).setLngLat([d.lng, d.lat]).addTo(m);
         glideMarker(mk);
         bindPopup(mk, popup);
         mks.current[d.id] = mk;
         stKeys.current[d.id] = st.color + st.dim;
+        if (typeof d.bearing === 'number') arrowSetHeading(mk, d.bearing, 0);
+        lf.lat = d.lat; lf.lng = d.lng; lf.b = typeof d.bearing === 'number' ? d.bearing : lf.b;
       } else {
-        mk.setLngLat([d.lng, d.lat]);
+        if (moved) { mk.setLngLat([d.lng, d.lat]); lf.lat = d.lat; lf.lng = d.lng; }
+        if (turned) { arrowSetHeading(mk, d.bearing, 0); lf.b = d.bearing; }
         const k = st.color + st.dim;
         if (stKeys.current[d.id] !== k) {   // statut changé (couleur d'anneau) -> restyle sans recréer
           updateArrowStatus(mk, st.color, st.dim);
@@ -64,12 +75,11 @@ export default function DriversMap({ drivers }) {
         }
         mk.getPopup()?.setHTML(popup);
       }
-      arrowSetHeading(mk, typeof d.bearing === 'number' ? d.bearing : null, 0);
       pts.push([d.lat, d.lng]);
     }
     // livreurs partis de la liste -> marqueurs retirés
     Object.keys(mks.current).forEach((id) => {
-      if (!seen.has(+id)) { mks.current[id].remove(); delete mks.current[id]; delete stKeys.current[id]; }
+      if (!seen.has(+id)) { mks.current[id].remove(); delete mks.current[id]; delete stKeys.current[id]; delete lastFix.current[id]; }
     });
     // cadrage : seulement si l'ensemble des livreurs affichés change (jamais en plein suivi)
     const key = drivers.filter((d) => d.lat != null).map((d) => d.id).sort((a, b) => a - b).join(',');

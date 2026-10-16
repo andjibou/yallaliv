@@ -128,11 +128,12 @@ export function createGoogleMap(el, { lang = 'fr', center = [29.9187, 31.2001], 
       zoom,
       mapTypeControl: false, streetViewControl: false, fullscreenControl: false,
       clickableIcons: false, gestureHandling: 'greedy',
-      ...(google.maps.RenderingType ? { renderingType: google.maps.RenderingType.RASTER } : {}),   // v41 : RASTER PLAT « comme Google » — PLUS de bâtiments 3D au zoom (choix utilisateur)
-      tilt: 0,
+      ...(google.maps.RenderingType ? { renderingType: google.maps.RenderingType.VECTOR } : {}),   // v42 : VECTORielle → ROTATION possible « comme Google »…
+      tilt: 0,                                                                                                                                                        // …mais PLATE : tilt 0 VERROUILLÉ → JAMAIS de bâtiments 3D
     });
     gBump('maps');   // 🧮 v33 : 1 chargement de carte = 1 unité de quota
-    A.__ylRaster = !!google.maps.RenderingType;   // v41 : sonde (carte plate, sans bâtiments 3D)
+    A.__ylFlat = !!google.maps.RenderingType;   // v42 : sonde (vectorielle PLATE)
+    try { A.__map.addListener('tilt_changed', () => { try { if (A.__map.getTilt()) A.__map.setTilt(0); } catch {} }); } catch {}   // 🔒 verrou PLAT : même un geste à 2 doigts n'incline JAMAIS la caméra (0 bâtiment 3D)
     A.__ready = true;
     A.__ops.forEach((f) => { try { f(A.__g, A.__map); } catch {} });
     A.__ops = [];
@@ -164,7 +165,7 @@ export function createGoogleMap(el, { lang = 'fr', center = [29.9187, 31.2001], 
   A.panTo = ([lng, lat]) => op((_g, m) => m.panTo({ lat, lng }));
   A.stop = () => {};
   // 🧭 rotation Uber : les cartes VECTORIELLES Google pivotent via heading (+ inclinaison)
-  A.setBearing = (b) => op((_g, m) => { try { m.setTilt(b ? 45 : 0); m.setHeading(b); } catch {} });
+  A.setBearing = (b) => op((_g, m) => { try { m.setTilt(0); m.setHeading(b); } catch {} });   // v42 : rotation SANS inclinaison (l'ancien tilt 45 était la cause des bâtiments 3D)
   A.getBearing = () => { try { return (A.__map && A.__map.getHeading()) || 0; } catch { return 0; } };
   A.resize = () => { try { A.__g?.maps?.event?.trigger(A.__map, 'resize'); } catch {} };
   A.fitBounds = (b, opts = {}) => op((g, m) => { m.fitBounds(b, opts.padding ?? 40); if (opts.maxZoom) g.maps.event.addListenerOnce(m, 'idle', () => { if (m.getZoom() > opts.maxZoom) m.setZoom(opts.maxZoom); }); });

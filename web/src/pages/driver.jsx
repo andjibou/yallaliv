@@ -4,6 +4,7 @@ import { Empty, Spinner, LangSwitch, StatusBadge, PayBadge, Modal } from '../ui.
 import ChatModal, { LastMsgLine } from '../Chat.jsx';
 import RouteMap, { DualRouteMap, TourMap, buildTour } from '../RouteMap.jsx';
 import AccountSettings from '../AccountSettings.jsx';
+import DriverNav from '../DriverNav.jsx';   // 🧭 v42 : bouton NAVIGATION flottant + plein écran + panneau livraisons
 
 export default function DriverApp() {
   const t = useT();
@@ -411,6 +412,8 @@ export default function DriverApp() {
   return (
     <div className="shell">
       <DrvHead t={t} user={user} online={online} warn={YG ? gpsMissing : 0} onAccount={() => setAcct(true)} />
+      {/* 🧭 v42 : NAVIGATION — bouton flottant (bas-droite, fixe) visible sur TOUTES les pages dès que le livreur est EN LIGNE ; carte du POOL « drout » (0 Maps JS en plus) + panneau livraisons triées par proximité */}
+      <DriverNav online={online} pos={pos || lastPos.current} liveCtl={liveCtl} onAct={act} onPin={setPinAsk} onRefuse={(o) => { setRefuseAsk(o); setRefuseReason(''); }} />
       {isNative && !YG && (
         <div className="card" style={{ background: '#fee2e2', border: '1px solid #ef4444', padding: '10px 14px', fontSize: 13 }}>
           🔴 <b>APK ANCIEN détecté</b> — cette application ne contient pas le service GPS natif (vérifie : réglages Android → YallaLiv → version doit être <b>3.0</b>). Installe le nouvel APK fourni par l'administrateur, puis reconnecte-toi.

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useT, useLang, toast } from './lib.jsx';
-import { createMap, gReverse, gAutocomplete, gPlaceDetails, mbForward, mbReverse, fetchT, LANG3, l2Get, l2Put } from './MapGl.jsx';   // v36 : Places session + v38 : l2Get/l2Put (cache suggestions partage)   // 🎯 v36 : Places Autocomplete en session + Place Details à la sélection
+import { createMap, gReverse, gAutocomplete, gPlaceDetails, mbForward, mbReverse, fetchT, LANG3, l2Get, l2Put } from './MapGl.jsx';
+import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';   // ⛶ v42 : plein écran PARTOUT où il y a une carte   // v36 : Places session + v38 : l2Get/l2Put (cache suggestions partage)   // 🎯 v36 : Places Autocomplete en session + Place Details à la sélection
 
 // ================= 📍 v2026.10.14.34 — Géocodage CINQ-SOURCES (économie de quota) =================
 // 🆓 v35 : l'AUTOCOMPLÉTION n'interroge PLUS JAMAIS Google — rapport utilisateur :
@@ -195,6 +196,7 @@ export default function PickMap({ initial, onConfirm }) {
   const langRef = useRef(lang); langRef.current = lang;
   const el = useRef(null);
   const map = useRef(null);
+  const { full, toggle } = useMapFullscreen(map);   // ⛶ v42
   const tm = useRef(null);
   const [pos, setPos] = useState(initial);
   const [addr, setAddr] = useState(null);
@@ -245,7 +247,9 @@ export default function PickMap({ initial, onConfirm }) {
   return (
     <div>
       <div style={{ position: 'relative' }}>
-        <div ref={el} style={{ height: 320, borderRadius: 14, border: '1px solid #e3e9f0', background: '#eef2f7' }} />
+        <div ref={el} style={full ? FS_STYLE : { position: 'relative', height: 320, borderRadius: 14, border: '1px solid #e3e9f0', background: '#eef2f7' }}>
+          <FsBtn full={full} onClick={toggle} />   {/* ⛶ v42 : carte plein écran */}
+        </div>
         {/* épingle FIXE au centre — seule la carte bouge */}
         <div style={{
           position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -100%)',
