@@ -1,5 +1,11 @@
 import * as maplibregl from 'maplibre-gl';   // 🆓 v45 : MapLibre GL — fork COMMUNAUTAIRE de mapbox-gl, SANS token, SANS requête mapbox.com (mapbox-gl v2+ exige un token pour afficher les tuiles — cause des cartes grises v44)
 import 'maplibre-gl/dist/maplibre-gl.css';
+
+// 🔧 v46 : WORKER auto-hébergé — MapLibre calcule l'URL de son worker par rapport au module
+// (inexistante en dev Vite .vite/deps/ ET en build /assets/) → « Worker failed to load » →
+// les sources GeoJSON n'étaient JAMAIS traitées → itinéraires invisibles. On héberge le
+// worker (copie de node_modules/maplibre-gl/dist/maplibre-gl-worker.mjs) dans public/.
+try { maplibregl.config.WORKER_URL = '/yl-maplibre-worker.mjs'; } catch {}
 import {
   GMAPS_KEY, createGoogleMap, attachMarker, markerSetPos, markerRemove, bindGPopup,
   addGLine, gForward, gReverse, gRoute, gOrderRoute, gAutocomplete, gPlaceDetails, loadGoogle, gFailed, onAuthFailure, l2Get, l2Put, snapToRoute,
@@ -240,9 +246,36 @@ export function arrowSetHeading(marker, hdg, mapBearing) {
 /** Déplacement fluide (glisse au lieu de sauter). */
 export function glideMarker(marker) {
   try {
+    // 🔧 v46 : moteur MapLibre/Mapbox — GLIDE EN JS (requestAnimationFrame). JAMAIS de
+    // transition CSS sur l'élément racine : le moteur y écrit « transform » à chaque
+    // frame ; une transition CSS y fait TREMBLER le marqueur pendant les déplacements
+    // de carte (il lag, puis « revient à sa place » quand le geste s'arrête).
+    if (marker && marker.__tgt === 'mb' && marker.__inst && !marker.__ylGlide) {
+      marker.__ylGlide = true;
+      const inst = marker.__inst;
+      const real = inst.setLngLat.bind(inst);
+      let raf = 0;
+      inst.setLngLat = (ll) => {
+        const to = Array.isArray(ll) ? { lng: ll[0], lat: ll[1] } : { lng: ll && ll.lng, lat: ll && ll.lat };
+        const cur = inst.getLngLat ? inst.getLngLat() : null;
+        if (!cur || cur.lng == null || (to.lng === cur.lng && to.lat === cur.lat)) { real(to); return inst; }
+        cancelAnimationFrame(raf);
+        const from = { lng: cur.lng, lat: cur.lat };
+        const t0 = (typeof performance !== 'undefined' ? performance : Date).now();
+        const step = (now) => {
+          const k = Math.min(1, (now - t0) / 550);   // même douceur que l'ancien .55s
+          real({ lng: from.lng + (to.lng - from.lng) * k, lat: from.lat + (to.lat - from.lat) * k });
+          if (k < 1) raf = requestAnimationFrame(step);
+        };
+        raf = requestAnimationFrame(step);
+        return inst;
+      };
+      return;
+    }
+    // moteur Google : drapeau lu par draw() (positions left/top — pas de conflit transform)
     const el = marker?.getElement?.(); if (!el) return;
     el.style.transition = 'transform .55s linear';
-    el.dataset.glide = '1';   // le moteur Google lit ce drapeau dans draw()
+    el.dataset.glide = '1';
   } catch {}
 }
 
