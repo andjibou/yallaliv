@@ -386,9 +386,19 @@ export async function gRoute(from, to, live = false) {
 }
 
 async function osrmRoute(from, to) {
+  // 🎯 v52 : 2 essais RAPIDES (4,5 s puis 4 s) — avant : 1 seul essai de 6 s → un
+  // serveur OSRM lent faisait attendre 6 s puis échouer. Total borné ≤ 8,5 s.
+  for (let i = 0; i < 2; i++) {
+    const r = await osrmTry(from, to, i === 0 ? 4500 : 4000);
+    if (r) return r;
+  }
+  return null;
+}
+
+async function osrmTry(from, to, ms) {
   gBump('rt');   // 🧮 appel réseau réel (OSRM)
   const ac = new AbortController();
-  const tm = setTimeout(() => ac.abort(), 6000);
+  const tm = setTimeout(() => ac.abort(), ms);
   try {
     const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`, { signal: ac.signal });
     if (!res.ok) return null;

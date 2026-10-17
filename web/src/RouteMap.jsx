@@ -147,6 +147,7 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
   const grayId = useRef(null);      // v41 : partie déjà PARCOURUE (gris, comme Google)
   const snapIdx = useRef(-1);       // v41 : segment du dernier découpage
   const prevPos = useRef(null);     // 🎯 v50 : position précédente → collage UNIQUEMENT en mouvement
+  const movAcc = useRef(0);         // 🎯 v52 : déplacement CUMULÉ (observateur : le livreur qui MARCHE avance de ~1 m par poll)
   const splitAt = useRef(null);     // 🎯 v50 : dernier point de découpage → gris avancé TOUS LES 8 m
   const [info, setInfo] = useState(null);
   const [flash, setFlash] = useState(false);
@@ -238,11 +239,22 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
     // « téléporter » jusqu'à 30 m sur la route d'à côté. Seuil roulant : 20 m.
     const prev = prevPos.current; prevPos.current = { lat: from.lat, lng: from.lng };
     const spd = live && live.getSpd ? live.getSpd() : null;
-    const moving = (prev != null && havM(prev, from) > 4) || (typeof spd === 'number' && spd > 1.4);
+    const acc = live && live.getAcc ? live.getAcc() : null;   // 🎯 v52 : précision GPS du livreur
+    const movAt = live && live.getMovingAt ? live.getMovingAt() : 0;
+    // 🎯 v52 : VRAI mouvement = vitesse GPS > 0,3 m/s (marche lente ✓) OU 4 m d'un coup
+    // OU l'app livreur signale un déplacement réel (< 6 s) OU 4 m CUMULÉS (observateur
+    // qui regarde un livreur à pied : ~1 m par poll — avant : jamais « en mouvement »).
+    const dPrev = prev != null ? havM(prev, from) : null;
+    if (dPrev != null && dPrev <= 4) movAcc.current += dPrev; else movAcc.current = 0;
+    const moving = (typeof spd === 'number' && spd > 0.3) || (dPrev != null && dPrev > 4) || (movAt && Date.now() - movAt < 6000) || movAcc.current > 4;
     const hdgL = live && live.getHdg ? live.getHdg() : (typeof hdgRef.current === 'number' ? hdgRef.current : null);   // 🧭 v48 : observateur → cap du serveur (bon côté de la chaussée)
     const sp = snapToRoute(from.lat, from.lng, coordsRef.current, typeof hdgL === 'number' ? hdgL : null);
     try { window.__ylSnapD = Math.round(sp.d); } catch {}   // sonde (tests)
-    if (moving && sp.d <= 20) {
+    // 🎯 v52 : seuil de collage CONSCIENT DU BRUIT GPS : dans la marge d'erreur
+    // (précision × 1,2, entre 20 et 45 m) → la pastille est SUR la route du bon côté
+    // (cap) — jamais « de l'autre côté de la rue » à cause d'un fix décalé.
+    const snapTh = Math.min(45, Math.max(20, typeof acc === 'number' ? acc * 1.2 : 20));
+    if (moving && sp.d <= snapTh) {
       offRoute.current = 0;
       markers.current.from?.setLngLat([sp.lng, sp.lat]);
       try { window.__ylSnapM = 1; window.__ylGrayEnd = [sp.lat, sp.lng]; } catch {}   // 🎯 v50 sondes
@@ -261,8 +273,13 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
     markers.current.from?.setLngLat([from.lng, from.lat]);   // 🎯 v50 : position RÉELLE (à l'arrêt ou hors trajet)
     try { window.__ylSnapM = 0; } catch {}   // 🎯 v50 sonde
     if (!moving) { offRoute.current = 0; return; }   // 🎯 v50 : à l'arrêt, JAMAIS de recalcul (on est juste garé à côté de la route)
+    // 🎯 v52 : hors-trajet CONFIRMÉ = au-delà du BRUIT GPS (d > précision × 1,2) et
+    // 3 positions soutenues (avant : 2, sans tenir compte de la marge d'erreur → un
+    // simple fix décalé déclenchait un FAUX itinéraire).
+    const noise = Math.max(20, (typeof acc === 'number' ? acc : 25) * 1.2);
+    if (sp.d <= noise) { offRoute.current = 0; return; }   // c'est le bruit GPS, pas un vrai écart
     offRoute.current = (offRoute.current || 0) + 1;
-    if (offRoute.current < 2) return;   // 2 positions consécutives hors trajet (anti glitch GPS)
+    if (offRoute.current < 3) return;   // 2 positions consécutives hors trajet (anti glitch GPS)
     if (Date.now() - rerouteAt.current < 5000) return;   // 🚀 v49 : anti-rafales 5 s (avant 12 s) — recalcul quasi immédiat
     rerouteAt.current = Date.now();
     let cancelled = false;
@@ -330,6 +347,7 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
   const l1g = useRef(null);        // v41 : partie déjà PARCOURUE de la jambe livreur→magasin (gris)
   const snap1 = useRef(-1);        // v41 : segment du dernier découpage
   const prev1 = useRef(null);      // 🎯 v50 : position précédente → collage UNIQUEMENT en mouvement
+  const movAcc1 = useRef(0);       // 🎯 v52 : déplacement CUMULÉ (observateur + livreur à pied)
   const split1At = useRef(null);   // 🎯 v50 : gris avancé TOUS LES 8 m
   const [legs, setLegs] = useState(null);
   const [flash, setFlash] = useState(false);
@@ -407,11 +425,17 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
     // 🎯 v50 : collage UNIQUEMENT EN MOUVEMENT (≥ 4 m) — à l'arrêt : position RÉELLE.
     const prev = prev1.current; prev1.current = { lat: driverPos.lat, lng: driverPos.lng };
     const spd = live && live.getSpd ? live.getSpd() : null;
-    const moving = (prev != null && havM(prev, driverPos) > 4) || (typeof spd === 'number' && spd > 1.4);
+    const acc = live && live.getAcc ? live.getAcc() : null;   // 🎯 v52 : précision GPS
+    const movAt = live && live.getMovingAt ? live.getMovingAt() : 0;
+    // 🎯 v52 : marche lente suivie (vitesse > 0,3 m/s · déplacement cumulé · signal du livreur)
+    const dPrev = prev != null ? havM(prev, driverPos) : null;
+    if (dPrev != null && dPrev <= 4) movAcc1.current += dPrev; else movAcc1.current = 0;
+    const moving = (typeof spd === 'number' && spd > 0.3) || (dPrev != null && dPrev > 4) || (movAt && Date.now() - movAt < 6000) || movAcc1.current > 4;
     const hdgL = live && live.getHdg ? live.getHdg() : (typeof hdgRef.current === 'number' ? hdgRef.current : null);   // 🧭 v48 : observateur → cap serveur (bon côté)
     const sp = snapToRoute(driverPos.lat, driverPos.lng, leg1Ref.current, typeof hdgL === 'number' ? hdgL : null);
     try { window.__ylSnapD = Math.round(sp.d); } catch {}   // sonde (tests)
-    if (moving && sp.d <= 20) {
+    const snapTh = Math.min(45, Math.max(20, typeof acc === 'number' ? acc * 1.2 : 20));   // 🎯 v52 : collage dans la marge d'erreur GPS (jamais le mauvais côté en roulant)
+    if (moving && sp.d <= snapTh) {
       off1.current = 0;
       marks.current.d?.setLngLat([sp.lng, sp.lat]);
       try { window.__ylSnapM = 1; window.__ylGrayEnd = [sp.lat, sp.lng]; } catch {}   // 🎯 v50 sondes
@@ -427,8 +451,10 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
     marks.current.d?.setLngLat([driverPos.lng, driverPos.lat]);   // 🎯 v50 : position RÉELLE (à l'arrêt ou hors trajet)
     try { window.__ylSnapM = 0; } catch {}   // 🎯 v50 sonde
     if (!moving) { off1.current = 0; return; }   // 🎯 v50 : à l'arrêt, JAMAIS de recalcul
+    const noise = Math.max(20, (typeof acc === 'number' ? acc : 25) * 1.2);   // 🎯 v52 : au-delà du BRUIT GPS seulement
+    if (sp.d <= noise) { off1.current = 0; return; }
     off1.current = (off1.current || 0) + 1;
-    if (off1.current < 2) return;
+    if (off1.current < 3) return;   // 🎯 v52 : 3 positions soutenues (fini les faux itinéraires)
     if (Date.now() - rerouteAt.current < 5000) return;   // 🚀 v49 : anti-rafales 5 s (avant 12 s) — recalcul quasi immédiat
     rerouteAt.current = Date.now();
     let cancelled = false;

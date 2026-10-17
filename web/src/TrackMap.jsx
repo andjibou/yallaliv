@@ -38,6 +38,8 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
   const routeCoords = useRef(null);   // v41 : géométrie courante (collage de la pastille)
   const snapIdx = useRef(-1);     // v41 : segment du dernier découpage (évite les redraw inutiles)
   const prevPosT = useRef(null);  // 🎯 v50 : position précédente → collage UNIQUEMENT en mouvement
+  const walkAccT = useRef(0);     // 🎯 v52 : déplacement CUMULÉ — le livreur qui MARCHE (~1 m par poll) est suivi
+  const drOffT = useRef(0);       // 🎯 v52 : lectures consécutives hors-trajet (2 requises → fini les faux itinéraires)
   const lastSpT = useRef(null);   // 🎯 v50 : dernier découpage → gris avancé dès 10 m
   const fitKey = useRef('');      // 🧭 v48 : cadrage fait UNE fois — plus de saut à chaque position
   const hdgRef = useRef(hdg); hdgRef.current = hdg;   // 🧭 v48 : cap serveur, rafraîchi par le poll
@@ -86,7 +88,9 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
       // à l'arrêt (devant le magasin, chez le client) : position RÉELLE, jamais
       // « téléportée » jusqu'à 30 m sur la route d'à côté.
       const prevT = prevPosT.current; prevPosT.current = { lat: driverPos.lat, lng: driverPos.lng };
-      const movingT = prevT != null && havM(prevT, driverPos) > 4;
+      const dT = prevT != null ? havM(prevT, driverPos) : null;
+      if (dT != null && dT <= 4) walkAccT.current += dT; else walkAccT.current = 0;   // 🎯 v52 : marche lente — cumul
+      const movingT = (dT != null && dT > 4) || walkAccT.current > 4;
       const dp = movingT && snapS && snapS.d <= 20 ? { lat: snapS.lat, lng: snapS.lng } : driverPos;   // 🎯 v50
       if (markers.current.driver) markers.current.driver.setLngLat([dp.lng, dp.lat]);
       else { markers.current.driver = arrowMarker('#0e9f6e').setLngLat([dp.lng, dp.lat]).addTo(m); glideMarker(markers.current.driver, 550); }
@@ -141,7 +145,8 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
       // IMMÉDIAT si le livreur a quitté son trajet. Plus de « mémo 5 min » servi en
       // priorité : à la réouverture on recalcule TOUJOURS frais depuis la position
       // réelle ; le mémo ne sert plus que de SECOURS si OSRM ne répond pas.
-      if (key !== routeKey.current && (now - routeAt.current >= 15e3 || (snapS && snapS.d > 30))) {
+      drOffT.current = snapS && snapS.d > 35 ? (drOffT.current || 0) + 1 : 0;   // 🎯 v52 : hors-trajet CONFIRMÉ = 2 lectures > 35 m (avant : 1 lecture > 30 m → faux itinéraires sur un spike GPS)
+      if (key !== routeKey.current && (now - routeAt.current >= 15e3 || drOffT.current >= 2)) {
         routeKey.current = key; routeAt.current = now;
         fetchRoute(driverPos, clientPos, null, true).then((r) => {
           if (r) {

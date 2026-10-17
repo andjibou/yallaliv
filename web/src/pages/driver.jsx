@@ -60,7 +60,12 @@ export default function DriverApp() {
     }
     return h.gps != null ? h.gps : h.calc;                                                // ④ dernier connu
   };
-  const liveCtl = useRef({ getHdg: bestHdg, getSpd: () => hdgRef.current.gpsSpd || 0 }).current;   // 🎯 v50 : + vitesse (collage au trajet UNIQUEMENT en mouvement) — stable entre rendus
+  const liveCtl = useRef({
+    getHdg: bestHdg,
+    getSpd: () => hdgRef.current.gpsSpd || 0,                                       // 🎯 v50
+    getAcc: () => (Date.now() - (hdgRef.current.accAt || 0) < 12000 ? hdgRef.current.acc : null),   // 🎯 v52 : précision GPS (collage dans la marge d erreur → jamais le mauvais côté en roulant)
+    getMovingAt: () => hdgRef.current.movingAt || 0,                                // 🎯 v52 : dernier vrai déplacement (marche lente suivie)
+  }).current;   // stable entre rendus
   try { window.__ylLive = liveCtl; } catch {}   // 🎯 v50 : sonde (tests)
   const seenAv = useRef(null);
   const activeRef = useRef(null);
@@ -178,7 +183,7 @@ export default function DriverApp() {
       //      🎯 v50 : 12 → 6 m : un virage est suivi DÈS 6 m parcourus (avant : la flèche
       //      restait fixe jusqu'à 12 m dans la nouvelle direction).
       if (!h.anchor) h.anchor = { lat, lng };
-      else if (havM(h.anchor, { lat, lng }) > 6) {
+      else if (havM(h.anchor, { lat, lng }) > (h.calcAt ? 6 : 3)) {   // 🎯 v52 : 1ᵉʳ pas à 3 m — un piéton est détecté dès 3 m
         const dLat = (lat - h.anchor.lat) * 111320, dLng = (lng - h.anchor.lng) * 111320 * Math.cos((lat * Math.PI) / 180);
         h.calc = ((Math.atan2(dLng, dLat) * 180) / Math.PI + 360) % 360;
         h.calcAt = Date.now();
@@ -206,30 +211,41 @@ export default function DriverApp() {
       }
       const disp = lastPos.current;
       const dm = disp ? havM(disp, { lat, lng }) : Infinity;
-      const immobile = (spd != null && spd < 0.75) || (spd == null && dm < 5);   // 🎯 v50 : hystérésis 8 → 5 m
-      const send = () => {
+      // 🎯 v52 : l'ancre de cap (déplacement FRANC) a avancé récemment → le livreur
+      // MARCHE ou roule au ralenti → l'affichage suit, même sans vitesse GPS (WebView)
+      // et même à 0,4 m/s. Avant : « immobile » à < 0,75 m/s → un piéton était FIGÉ.
+      const walkingGrace = h.calcAt != null && Date.now() - h.calcAt < 20000;
+      const immobile = (spd != null && spd < 0.4) || (spd != null && spd < 0.75 && dm < 3) || (spd == null && !walkingGrace && dm < 25);   // 🎯 v52 : piéton suivi · dérive à l arrêt figée
+      h.acc = typeof accuracy === 'number' ? accuracy : null; h.accAt = Date.now();   // 🎯 v52 : précision GPS exposée aux cartes (collage conscient du bruit)
+      const send = (ll) => {   // 🎯 v52 : envoie la position AFFICHÉE — à l arrêt : figée/affinée. Avant : le fix BRUT → le magasin/client voyaient le livreur « bouger tout seul » garé sur place
         if (stopped) return;
         if (!nativeOk && Date.now() - lastPut > 1500) {
           lastPut = Date.now();
           const b = bestHdg();   // 🧭 cap transmis avec la position (le magasin voit le bec)
-          api('/driver/location', { method: 'PUT', body: { lat, lng, ...(typeof b === 'number' ? { bearing: Math.round(b * 10) / 10 } : {}) } }).catch(() => {});
+          const P = ll || { lat, lng };
+          api('/driver/location', { method: 'PUT', body: { lat: P.lat, lng: P.lng, ...(typeof b === 'number' ? { bearing: Math.round(b * 10) / 10 } : {}) } }).catch(() => {});
         }
       };
       if (disp != null && immobile) {
-        // 🎯 v50 : à l'arrêt on AFFINE — lissage des bons fixes (≤ 20 m) : le point
-        // CONVERGE vers la position réelle au lieu de rester sur un fix dérivé.
+        // 🎯 v50/v52 : à l'arrêt on AFFINE — lissage des bons fixes (≤ 20 m), par
+        // PETITS PAS (≤ ~1,2 m — avant : saut jusqu'à 2 m, visible à l'écran).
         if (typeof accuracy === 'number' && accuracy <= 20) {
           const st = h.stop || (h.stop = { lat: disp.lat, lng: disp.lng, n: 0 });
-          st.lat += (lat - st.lat) * 0.2; st.lng += (lng - st.lng) * 0.2; st.n++;
-          if (st.n >= 5 && havM(disp, { lat: st.lat, lng: st.lng }) > 2) {
-            lastPos.current = { lat: st.lat, lng: st.lng };
-            setPos({ lat: st.lat, lng: st.lng });
-            h.stop = null;   // point affiné — on recommence si besoin
+          st.lat += (lat - st.lat) * 0.25; st.lng += (lng - st.lng) * 0.25; st.n++;
+          if (st.n >= 6) {
+            const d2 = havM(disp, { lat: st.lat, lng: st.lng });
+            if (d2 > 1.5) {
+              const k = Math.min(1, 1.2 / d2);
+              const nl = { lat: disp.lat + (st.lat - disp.lat) * k, lng: disp.lng + (st.lng - disp.lng) * k };
+              lastPos.current = nl; setPos(nl);
+            }
+            h.stop = null;
           }
         }
-        send(); return;            // à l'arrêt : affichage stable, serveur à jour
+        send(lastPos.current); return;   // 🎯 v52 : serveur = position AFFICHÉE (stable — le magasin ne voit plus la dérive)
       }
-      h.stop = null;   // 🎯 v50 : en mouvement → plus d'affinage d'arrêt
+      h.stop = null;   // en mouvement → plus d'affinage d'arrêt
+      h.movingAt = Date.now();   // 🎯 v52 : dernier VRAI déplacement — les cartes collent au trajet même en marchant
       lastPos.current = { lat, lng };
       setPos({ lat, lng });
       send();
