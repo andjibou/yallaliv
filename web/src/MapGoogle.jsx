@@ -355,17 +355,37 @@ function decodePolyline(str) {
  * Routes, plus aucun risque de facturation). Appelé depuis le navigateur (CORS
  * autorisé). Retourne {coords: [[lat,lng]…], distance: m, duration: s} ou null.
  */
+// 🚀 v49 : dédup 5 s des trajets LIVE (même page) — le SEUL frein restant, purement
+// anti-rafales (invisible à l'œil), pour rester correct avec le serveur public OSRM.
+const RT_LIVE = new Map();   // "lat,lng|lat,lng" -> { at, r }
+
 export async function gRoute(from, to, live = false) {
-  // 💾 v32 : cache 12 h, extrémités FIXES arrondies à ~11 m. 🤝 v41 : extrémité LIVE
-  // (le livreur) arrondie à ~100 m → TOUS les observateurs d'une même cellule
-  // partagent LE MÊME trajet mis en cache serveur = 1 SEUL appel réseau pour tous.
-  // 🆓 v43 : le moteur devient OSRM public (1 req/s conseillé — le cache partagé
-  // le respecte naturellement).
-  const ck = 'rt|' + (live ? '3' : '2') + '|' + (+from.lat).toFixed(live ? 3 : 4) + ',' + (+from.lng).toFixed(live ? 3 : 4) + '|' + (+to.lat).toFixed(4) + ',' + (+to.lng).toFixed(4);
+  // 🚀 v49 : MODE LIBRE — « on n'a plus besoin d'économiser » :
+  //  • trajet LIVE (extrémité = le livreur qui bouge) : TOUJOURS FRAIS. Fini
+  //    l'arrondi ~100 m et le cache partagé 12 h (serveur + local) : chaque
+  //    observateur reçoit le trajet EXACT depuis la position réelle du livreur (~11 m),
+  //    recalculé dès qu'il avance. Garde-fou unique : dédup 5 s en mémoire.
+  //  • extrémités FIXES (magasin→client) : cache 12 h conservé — résultats
+  //    IDENTIQUES (les adresses ne bougent pas), 0 perte de précision.
+  const fk = (+from.lat).toFixed(4) + ',' + (+from.lng).toFixed(4) + '|' + (+to.lat).toFixed(4) + ',' + (+to.lng).toFixed(4);
+  if (live) {
+    const m5 = RT_LIVE.get(fk);
+    if (m5 && Date.now() - m5.at < 5000) { gBump('hits'); return m5.r; }
+    const r = await osrmRoute(from, to);
+    if (r) { RT_LIVE.set(fk, { at: Date.now(), r }); if (RT_LIVE.size > 60) RT_LIVE.delete(RT_LIVE.keys().next().value); }
+    return r;
+  }
+  const ck = 'rt|2|' + fk;
   const hit = cGet(ck, 12 * 36e5);
   if (hit) { gBump('hits'); return hit; }
-  const l2 = await l2Get(ck);   // 🗄️ v33 : cache croisé serveur — le trajet vu par le marchand, le livreur ET le client = 1 seul appel
+  const l2 = await l2Get(ck);   // 🗄️ v33 : cache croisé serveur — extrémités FIXES uniquement
   if (l2) { gBump('hits'); cSet(ck, l2); return l2; }
+  const r = await osrmRoute(from, to);
+  if (r) { cSet(ck, r); l2Put(ck, r); }
+  return r;
+}
+
+async function osrmRoute(from, to) {
   gBump('rt');   // 🧮 appel réseau réel (OSRM)
   const ac = new AbortController();
   const tm = setTimeout(() => ac.abort(), 6000);
@@ -374,13 +394,11 @@ export async function gRoute(from, to, live = false) {
     if (!res.ok) return null;
     const r = (await res.json())?.routes?.[0];
     if (!r?.geometry?.coordinates?.length) return null;
-    const out = {
+    return {
       coords: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
       distance: r.distance ?? null,
       duration: r.duration ?? null,
     };
-    cSet(ck, out); l2Put(ck, out);
-    return out;
   } catch { return null; } finally { clearTimeout(tm); }
 }
 

@@ -93,13 +93,13 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
       else if (pts.length > 1) fitPts(m, pts, 0.35);
     }
 
-    // Itineraire routier livreur -> client — v39 : recalcul AU PLUS toutes les 5 MINUTES
-    // (le marqueur du livreur continue de glisser en direct, gratuitement, entre deux calculs).
+    // Itineraire routier livreur -> client — 🚀 v49 : recalcul AU PLUS toutes les 15 s
+    // (avant : 5 min) — le trajet suit VRAIMENT le livreur, ETAs toujours à jour.
     if (driverPos && clientPos) {
       const now = Date.now();
       const ck = (orderId != null ? orderId + '|' : '') + clientPos.lat.toFixed(4) + ',' + clientPos.lng.toFixed(4);
       if (ck !== routeCK.current) { routeCK.current = ck; routeAt.current = 0; }   // nouvelle commande -> recalcul immediat
-      const key = ck + '|' + driverPos.lat.toFixed(3) + ',' + driverPos.lng.toFixed(3);
+      const key = ck + '|' + driverPos.lat.toFixed(4) + ',' + driverPos.lng.toFixed(4);   // 🚀 v49 : ~11 m (avant ~111 m) → recalcul dès que le livreur avance vraiment
       // 🎨 v41 : dessin découpé — parcouru ⬜ GRIS + restant 🟢 VERT (comme Google Navigation),
       // recalculé LOCALEMENT à chaque mise à jour de position (0 appel API).
       const drawSplit = (coords) => {
@@ -122,20 +122,25 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
         if (grayId.current) { rmLine(map.current, grayId.current); grayId.current = null; }
         lineId.current = addLine(map.current, [[driverPos.lat, driverPos.lng], [clientPos.lat, clientPos.lng]], { color: '#0e9f6e', width: 3, dashed: true });
       };
-      const memo = orderId != null ? trackMemo.get(orderId) : null;
-      if (memo && now - memo.at < 5 * 60e3 && !routeKey.current) {
-        routeKey.current = 'memo'; routeAt.current = Date.now();   // reouverture < 5 min : itineraire resservi SANS AUCUN appel (throttle arme)
-        routeCoords.current = memo.r ? memo.r.coords : null;
-        if (memo.r) drawSplit(memo.r.coords); else drawFlat();
-      } else if (key !== routeKey.current && (now - routeAt.current >= 5 * 60e3 || (snapS && snapS.d > 30 && now - routeAt.current >= 20e3))) {   // 🎯 v47 : le livreur a QUITTÉ le trajet → nouvel itinéraire au plus 20 s
+      // 🚀 v49 : MODE LIBRE — recalcul AU PLUS toutes les 15 s (avant : 5 MINUTES) et
+      // IMMÉDIAT si le livreur a quitté son trajet. Plus de « mémo 5 min » servi en
+      // priorité : à la réouverture on recalcule TOUJOURS frais depuis la position
+      // réelle ; le mémo ne sert plus que de SECOURS si OSRM ne répond pas.
+      if (key !== routeKey.current && (now - routeAt.current >= 15e3 || (snapS && snapS.d > 30))) {
         routeKey.current = key; routeAt.current = now;
-        fetchRoute(driverPos, clientPos, null, true).then((r) => {   // 🤝 v41 : clé LIVE ~100 m partagée par TOUS les observateurs
-          if (orderId != null && r) {
-            trackMemo.set(orderId, { at: Date.now(), r });
-            if (trackMemo.size > 10) trackMemo.delete(trackMemo.keys().next().value);
+        fetchRoute(driverPos, clientPos, null, true).then((r) => {
+          if (r) {
+            if (orderId != null) {
+              trackMemo.set(orderId, { at: Date.now(), r });
+              if (trackMemo.size > 10) trackMemo.delete(trackMemo.keys().next().value);
+            }
+            routeCoords.current = r.coords;
+            drawSplit(r.coords);
+          } else {
+            const fb = orderId != null ? trackMemo.get(orderId) : null;   // 🛟 secours : OSRM indisponible → dernier trajet connu
+            routeCoords.current = fb?.r ? fb.r.coords : null;
+            if (fb?.r) drawSplit(fb.r.coords); else drawFlat();
           }
-          routeCoords.current = r ? r.coords : null;
-          if (r) drawSplit(r.coords); else drawFlat();
         });
       } else if (routeCoords.current && snapS && snapS.d <= 75 && snapS.idx !== snapIdx.current) {
         drawSplit(routeCoords.current);   // 🔄 le livreur a changé de segment : re-découpage LOCAL (0 appel)

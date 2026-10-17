@@ -13,10 +13,10 @@ import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';
 export { arrowSetHeading, glideMarker };   // compat : DriversMap les importe d'ici
 
 /**
- * 🛣️ v43 : Itinéraire OSRM PUBLIC (gratuit, sans clé) — cache 12 h local +
- * serveur PARTAGÉ (rt|2|/rt|3|/ort|<id>), extrémité LIVE arrondie ~100 m :
- * tous les observateurs d'un même trajet = 1 SEUL appel réseau (🤝 v38/v41
- * conservés, moteur changé — plus aucune API Google/Mapbox ici).
+ * 🛣️ v43 : Itinéraire OSRM PUBLIC (gratuit, sans clé). 🚀 v49 MODE LIBRE :
+ * extrémité LIVE à ~11 m et TOUJOURS FRAÎCHE (fini le ~100 m partagé et le
+ * cache 12 h sur le livreur) — chaque observateur a le trajet EXACT ; seules
+ * les jambes FIXES (magasin→client) gardent le cache 12 h (résultats identiques).
  * Retourne {coords: [[lat,lng]…], distance: m, duration: s} ou null.
  */
 export async function fetchRoute(from, to, orderId = null, live = false) {
@@ -141,7 +141,7 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
   const { full, toggle } = useMapFullscreen(map);
   const markers = useRef({});
   const coordsRef = useRef(null);   // itineraire courant (pour detecter un ecart)
-  const rerouteAt = useRef(0);      // anti-spam : 1 recalcul / 12 s max (v47)
+  const rerouteAt = useRef(0);      // 🚀 v49 : anti-rafales 5 s max
   const offRoute = useRef(0);       // 🎯 v47 : positions consécutives hors trajet (recalcul à 2)
   const lineId = useRef(null);
   const grayId = useRef(null);      // v41 : partie déjà PARCOURUE (gris, comme Google)
@@ -241,7 +241,7 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
     markers.current.from?.setLngLat([from.lng, from.lat]);   // hors trajet : position réelle
     offRoute.current = (offRoute.current || 0) + 1;
     if (offRoute.current < 2) return;   // 2 positions consécutives hors trajet (anti glitch GPS)
-    if (Date.now() - rerouteAt.current < 12000) return;
+    if (Date.now() - rerouteAt.current < 5000) return;   // 🚀 v49 : anti-rafales 5 s (avant 12 s) — recalcul quasi immédiat
     rerouteAt.current = Date.now();
     let cancelled = false;
     setFlash(true);
@@ -391,7 +391,7 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
     marks.current.d?.setLngLat([driverPos.lng, driverPos.lat]);   // hors trajet : position réelle
     off1.current = (off1.current || 0) + 1;
     if (off1.current < 2) return;
-    if (Date.now() - rerouteAt.current < 12000) return;
+    if (Date.now() - rerouteAt.current < 5000) return;   // 🚀 v49 : anti-rafales 5 s (avant 12 s) — recalcul quasi immédiat
     rerouteAt.current = Date.now();
     let cancelled = false;
     setFlash(true);
