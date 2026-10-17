@@ -155,7 +155,7 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
   useEffect(() => {
     if (!el.current || map.current) return;
     // 🧭 live (livreur) : rotation auto sur son cap (native GL JS)
-    map.current = createMap(el.current, { zoom: 13, poolKey });   // 🏊 v37 : survit en arrière-plan ≤ 12 h · 🔑 v38 : clé paramétrable (vue unifiée)
+    map.current = createMap(el.current, { zoom: 13, poolKey });   // 🧹 v48 : carte DÉTRUITE à la fermeture — 0 carte en arrière-plan, mémoire libérée immédiatement
     return () => { map.current?.remove(); map.current = null; markers.current = {}; };
   }, []);
 
@@ -314,7 +314,7 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    map.current = createMap(el.current, { zoom: 13, poolKey });   // 🏊 v37 : survit en arrière-plan ≤ 12 h
+    map.current = createMap(el.current, { zoom: 13, poolKey });   // 🧹 v48 : carte DÉTRUITE à la fermeture — 0 carte en arrière-plan, mémoire libérée immédiatement
     return () => { map.current?.remove(); map.current = null; marks.current = {}; };
   }, []);
 
@@ -521,7 +521,7 @@ export function TourMap({ driverPos, stops, height = 340, live = null }) {
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    map.current = createMap(el.current, { zoom: 13, poolKey: 'dual' });   // 🏊 v37 : survit en arrière-plan ≤ 12 h
+    map.current = createMap(el.current, { zoom: 13, poolKey: 'dual' });   // 🧹 v48 : carte DÉTRUITE à la fermeture — 0 carte en arrière-plan, mémoire libérée immédiatement
     grp.current = { markers: [], lines: [] };
     return () => { map.current?.remove(); map.current = null; grp.current = null; driverMk.current = null; };
   }, []);
@@ -621,7 +621,7 @@ export function StoresMap({ stores, height = 380, onSelect }) {
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    map.current = createMap(el.current, { zoom: 12, poolKey: 'stores' });   // 🏊 v37 : survit en arrière-plan ≤ 12 h
+    map.current = createMap(el.current, { zoom: 12, poolKey: 'stores' });   // 🧹 v48 : carte DÉTRUITE à la fermeture — 0 carte en arrière-plan, mémoire libérée immédiatement
     grp.current = [];
     return () => { map.current?.remove(); map.current = null; grp.current = null; };
   }, []);

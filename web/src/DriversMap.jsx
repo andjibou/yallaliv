@@ -34,7 +34,7 @@ export default function DriversMap({ drivers }) {
 
   useEffect(() => {
     if (!el.current || map.current) return;
-    map.current = createMap(el.current, { zoom: 12, poolKey: 'drivers' });   // 🏊 v37 : survit en arrière-plan ≤ 12 h
+    map.current = createMap(el.current, { zoom: 12, poolKey: 'drivers' });   // 🧹 v48 : carte DÉTRUITE à la fermeture — 0 carte en arrière-plan, mémoire libérée immédiatement
     return () => { map.current?.remove(); map.current = null; mks.current = {}; stKeys.current = {}; };
   }, []);
 

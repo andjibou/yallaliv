@@ -16,9 +16,9 @@ const destOf = (o) => (o.status === 'picked_up' ? { lat: o.client_lat, lng: o.cl
  * 🧭 v42 — NAVIGATION du livreur « comme Google » :
  * • bouton flottant FIXE (bas-droite), visible sur TOUTES les pages de l'espace livreur
  *   dès qu'il passe EN LIGNE ;
- * • clic → carte PLEIN ÉCRAN du pool « drout » (🤝 0 Maps JavaScript en plus : 1 seule
- *   carte / 12 h, réutilisée) : pastille collée au trajet, carte qui TOURN E avec le cap
- *   du livreur (tilt 0 : jamais de bâtiments 3D) ;
+ * • clic → carte PLEIN ÉCRAN « drout » (🧹 v48 : créée à l'ouverture, DÉTRUITE à la
+ *   fermeture — 0 carte en arrière-plan, mémoire libérée) : pastille collée au trajet,
+ *   carte qui TOURN E avec le cap du livreur (tilt 0 : jamais de bâtiments 3D) ;
  * • bouton 📋 par-dessus la carte : la liste de ses livraisons, TRIÉE par proximité du
  *   point d'ARRIVÉE (la plus proche en premier) — il peut passer une commande en
  *   « récupérée », la marquer « livrée » ou refuser SANS fermer la carte ;
@@ -69,7 +69,7 @@ export default function DriverNav({ online, pos, liveCtl, onAct, onPin, onRefuse
         >🧭</button>
       )}
 
-      {/* carte de NAVIGATION plein écran (pool « drout » : la MÊME carte que les vues trajet → 0 chargement en plus) */}
+      {/* carte de NAVIGATION plein écran « drout » (🧹 v48 : détruite à la fermeture — 0 carte en arrière-plan) */}
       {open && (
         <div className="dnav-full" style={{ position: 'fixed', inset: 0, zIndex: 80, background: '#eef2f7' }}>
           {target && pos ? (
