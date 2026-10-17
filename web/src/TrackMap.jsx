@@ -52,7 +52,7 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
       snapS = snapToRoute(driverPos.lat, driverPos.lng, routeCoords.current);
       try { window.__ylSnapD = Math.round(snapS.d); } catch {}   // sonde (tests)
     }
-    if (driverPos) setMk('driver', snapS && snapS.d <= 75 ? { lat: snapS.lat, lng: snapS.lng } : driverPos, '🛵');
+    if (driverPos) setMk('driver', snapS && snapS.d <= 30 ? { lat: snapS.lat, lng: snapS.lng } : driverPos, '🛵');   // 🎯 v47 : collage chirurgical 30 m
 
     // Itineraire routier livreur -> client — v39 : recalcul AU PLUS toutes les 5 MINUTES
     // (avant : chaque ~110 m du livreur = 1 appel Routes API facture, ~1 toutes les 13 s !).
@@ -71,7 +71,7 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
         const sp = snapToRoute(driverPos.lat, driverPos.lng, coords);
         snapIdx.current = sp.idx;
         try { window.__ylSnapD = Math.round(sp.d); } catch {}
-        if (sp.d <= 75) {
+        if (sp.d <= 30) {
           grayId.current = addLine(map.current, sp.before, { color: '#9ca3af', width: 5, opacity: 0.9 });
           lineId.current = addLine(map.current, sp.after, { color: '#0e9f6e', width: 5, opacity: 0.85 });
         } else {
@@ -89,7 +89,7 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
         routeKey.current = 'memo'; routeAt.current = Date.now();   // reouverture < 5 min : itineraire resservi SANS AUCUN appel (throttle arme)
         routeCoords.current = memo.r ? memo.r.coords : null;
         if (memo.r) drawSplit(memo.r.coords); else drawFlat();
-      } else if (key !== routeKey.current && now - routeAt.current >= 5 * 60e3) {
+      } else if (key !== routeKey.current && (now - routeAt.current >= 5 * 60e3 || (snapS && snapS.d > 30 && now - routeAt.current >= 20e3))) {   // 🎯 v47 : le livreur a QUITTÉ le trajet → nouvel itinéraire au plus 20 s (plus d'attente 5 min)
         routeKey.current = key; routeAt.current = now;
         fetchRoute(driverPos, clientPos, null, true).then((r) => {   // 🤝 v41 : clé LIVE ~100 m partagée par TOUS les observateurs
           if (orderId != null && r) {
@@ -101,7 +101,7 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
         });
       } else if (routeCoords.current && snapS && snapS.d <= 75 && snapS.idx !== snapIdx.current) {
         drawSplit(routeCoords.current);   // 🔄 le livreur a changé de segment : re-découpage LOCAL (0 appel)
-      } else if (routeCoords.current && snapS && snapS.d > 75 && (grayId.current || snapIdx.current !== -1)) {
+      } else if (routeCoords.current && snapS && snapS.d > 30 && (grayId.current || snapIdx.current !== -1)) {
         drawSplit(routeCoords.current);   // 🔄 le livreur s'est écarté : trajet complet reaffiche (gris retire)
       }
     } else {

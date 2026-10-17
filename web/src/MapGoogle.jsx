@@ -398,10 +398,16 @@ export async function gRoute(from, to, live = false) {
  * before/after = le trajet découpé au point de projection (parcouru ⬜ / restant 🟢).
  * 100% local : 0 appel API.
  */
-export function snapToRoute(lat, lng, coords) {
+export function snapToRoute(lat, lng, coords, heading = null) {
   if (!coords || coords.length < 2) return { d: Infinity, lat, lng, idx: -1, before: null, after: null };
   const R = 6371000, rad = Math.PI / 180, cl = Math.cos(lat * rad);
-  let best = null;
+  // 🎯 v47 : précision CHIRURGICALE — on collecte TOUTES les projections à ≤ 45 m
+  // (une route à double sens = 2 chaussées ~15 m apart : la plus proche n'est pas
+  // forcément la BONNE). Si le livreur fournit son cap, on ne retient que les
+  // segments ALIGNÉS avec sa direction (± 75°) → la pastille se colle sur SA
+  // chaussée, jamais de l'autre côté de la route.
+  const angDiff = (a, b) => Math.abs(((a - b) % 360 + 540) % 360 - 180);
+  let best = null; const cands = [];
   for (let i = 0; i < coords.length - 1; i++) {
     const ax = (coords[i][1] - lng) * rad * R * cl, ay = (coords[i][0] - lat) * rad * R;
     const bx = (coords[i + 1][1] - lng) * rad * R * cl, by = (coords[i + 1][0] - lat) * rad * R;
@@ -409,6 +415,20 @@ export function snapToRoute(lat, lng, coords) {
     const t = L2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L2)) : 0;
     const qx = ax + t * dx, qy = ay + t * dy, d = Math.hypot(qx, qy);
     if (!best || d < best.d) best = { d, i, t };
+    if (d <= 45) {
+      let segBear = null;
+      if (heading != null && L2 > 0) {
+        const east = (coords[i + 1][1] - coords[i][1]) * rad * R * cl;
+        const north = (coords[i + 1][0] - coords[i][0]) * rad * R;
+        segBear = ((Math.atan2(east, north) * 180 / Math.PI) + 360) % 360;
+      }
+      cands.push({ d, i, t, segBear });
+    }
+  }
+  if (heading != null && cands.length) {
+    const aligned = cands.filter((c) => c.segBear == null || angDiff(c.segBear, heading) <= 75);
+    const pool = aligned.length ? aligned : cands;
+    best = pool.reduce((a, b) => (a.d <= b.d ? a : b));   // le plus proche PARMI les segments alignés avec le cap
   }
   const [ala, aln] = coords[best.i], [bla, bln] = coords[best.i + 1];
   const sla = ala + (bla - ala) * best.t, sln = aln + (bln - aln) * best.t;

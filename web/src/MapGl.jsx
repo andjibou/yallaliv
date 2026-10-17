@@ -80,6 +80,7 @@ function createMapboxMap(el, { center = [29.9187, 31.2001], zoom = 13, bearing =
 // Google v37, devenu inutile : OpenStreetMap ne facture RIEN au chargement.
 const MLIVE = new Set();
 try { window.__ylMaps = MLIVE; } catch {}   // sonde (tests)
+try { window.__ylSnap = snapToRoute; } catch {}   // 🎯 v47 : sonde snap chirurgical (tests)
 
 /**
  * Crée la carte — v43/v44 : TOUJOURS OpenStreetMap (bibliothèque mapbox-gl +
@@ -244,14 +245,14 @@ export function arrowSetHeading(marker, hdg, mapBearing) {
 }
 
 /** Déplacement fluide (glisse au lieu de sauter). */
-export function glideMarker(marker) {
+export function glideMarker(marker, ms = 550) {
   try {
     // 🔧 v46 : moteur MapLibre/Mapbox — GLIDE EN JS (requestAnimationFrame). JAMAIS de
     // transition CSS sur l'élément racine : le moteur y écrit « transform » à chaque
     // frame ; une transition CSS y fait TREMBLER le marqueur pendant les déplacements
     // de carte (il lag, puis « revient à sa place » quand le geste s'arrête).
     if (marker && marker.__tgt === 'mb' && marker.__inst && !marker.__ylGlide) {
-      marker.__ylGlide = true;
+      marker.__ylGlide = ms;   // 🔄 v47 : 350 ms livreur (suivi « en mm près ») / 550 ms observateurs
       const inst = marker.__inst;
       const real = inst.setLngLat.bind(inst);
       let raf = 0;
@@ -263,7 +264,7 @@ export function glideMarker(marker) {
         const from = { lng: cur.lng, lat: cur.lat };
         const t0 = (typeof performance !== 'undefined' ? performance : Date).now();
         const step = (now) => {
-          const k = Math.min(1, (now - t0) / 550);   // même douceur que l'ancien .55s
+          const k = Math.min(1, (now - t0) / (marker.__ylGlide || 550));
           real({ lng: from.lng + (to.lng - from.lng) * k, lat: from.lat + (to.lat - from.lat) * k });
           if (k < 1) raf = requestAnimationFrame(step);
         };
