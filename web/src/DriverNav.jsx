@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { api, useT, usePoll } from './lib.jsx';
+import { api, useT, usePoll, useBackClose } from './lib.jsx';   // 🎯 v51 : useBackClose — le bouton RETOUR ferme la carte (avant : il quittait la page livreur)
 import RouteMap, { DualRouteMap } from './RouteMap.jsx';
 
 const havM = (a, b) => {
@@ -29,6 +29,7 @@ export default function DriverNav({ online, pos, liveCtl, onAct, onPin, onRefuse
   const t = useT();
   const [open, setOpen] = useState(false);
   const [showList, setShowList] = useState(false);
+  useBackClose(open, () => setOpen(false));   // 🎯 v51 : RETOUR (téléphone/navigateur) ferme la carte de navigation — ne quitte PLUS la page
   const [orders, setOrders] = useState(null);
   const posRef = useRef(pos); posRef.current = pos;
 

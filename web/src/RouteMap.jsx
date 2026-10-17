@@ -77,7 +77,7 @@ function useLiveNav(mapRef, live, getMarker) {
       // 🧭 v48 : la BOUSSOLE est INDÉPENDANTE du suivi — le livreur peut déplacer la
       // carte (📍 s'éteint) sans perdre l'orientation sur son cap (🧭 reste actif).
       if (typeof h !== 'number' || !s.rot || s.zooming) return;
-      const target = (360 - ((h % 360) + 360) % 360) % 360;        // cap du livreur pointé vers le HAUT
+      const target = ((h % 360) + 360) % 360;        // 🎯 v51 : bearing = LE CAP → le cap pointe vers le HAUT (avant : 360-h — carte INVERSÉE pour tout cap intermédiaire, prouvé par projection réelle)
       const cur = mm.getBearing() || 0;
       const d = ((target - cur) % 360 + 540) % 360 - 180;
       if (Math.abs(d) > 2) { s.myBearing = ((cur + d * 0.35) % 360 + 360) % 360; mm.setBearing(s.myBearing); }

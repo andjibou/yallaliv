@@ -236,7 +236,7 @@ export function arrowSetHeading(marker, hdg, mapBearing) {
   try {
     const el = marker?.getElement?.()?.querySelector?.('.yl-rot');
     if (!el || typeof hdg !== 'number' || isNaN(hdg)) return;
-    const target = ((hdg + (mapBearing || 0)) % 360 + 360) % 360;
+    const target = ((hdg - (mapBearing || 0)) % 360 + 360) % 360;   // 🎯 v51 : - bearing (le cap à l écran = cap - rotation de la carte — avant « + » : flèche décalée de 2× le cap sur carte tournée)
     const prev = parseFloat(el.dataset.rot || '0') || 0;
     const d = ((target - prev) % 360 + 540) % 360 - 180;
     el.dataset.rot = String(prev + d);

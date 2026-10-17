@@ -187,7 +187,23 @@ export default function DriverApp() {
 
       // ---- 📍 anti-dérive : fixes imprécis ignorés, et à l'arrêt le marqueur ne
       //      bouge PLUS (le GPS « marchande » de quelques mètres même téléphone posé)
-      if (typeof accuracy === 'number' && accuracy > 30) return;   // 🎯 v50 : fix trop mauvais REFUSÉ (avant : 75 m ! → un fix à 50 m d'erreur affichait le livreur 50 m ailleurs)
+      // 🎯 v50 : fix trop mauvais pour l'AFFICHAGE (avant : accepté jusqu'à 75 m →
+      // un fix à 50 m d'erreur affichait le livreur 50 m ailleurs).
+      // 🎯 v51 : MAIS le serveur est quand même tenu au courant (au plus 1 envoi / 10 s,
+      // dernière position AFFICHÉE — ou le fix brut si aucune) : sans ça, plus rien
+      // n'était envoyé en GPS dégradé → position > 10 min côté serveur → le livreur
+      // passait HORS-LIGNE tout seul (vu sur le terrain).
+      if (typeof accuracy === 'number' && accuracy > 30) {
+        if (!nativeOk && Date.now() - (h.lastBadPut || 0) > 10000 && lastPos.current) {
+          h.lastBadPut = Date.now();
+          if (Date.now() - lastPut > 1500) {
+            lastPut = Date.now();
+            const b = bestHdg();
+            api('/driver/location', { method: 'PUT', body: { lat: lastPos.current.lat, lng: lastPos.current.lng, ...(typeof b === 'number' ? { bearing: Math.round(b * 10) / 10 } : {}) } }).catch(() => {});
+          }
+        }
+        return;
+      }
       const disp = lastPos.current;
       const dm = disp ? havM(disp, { lat, lng }) : Infinity;
       const immobile = (spd != null && spd < 0.75) || (spd == null && dm < 5);   // 🎯 v50 : hystérésis 8 → 5 m
@@ -237,6 +253,24 @@ export default function DriverApp() {
     };
     const pollIt = setInterval(pollSrv, 2000);
 
+    // 🎯 v51 : HEARTBEAT — si le webview n'envoie AUCUN fix depuis > 8 s (GPS capricieux),
+    // on renvoie la dernière position connue (≤ 1 / 10 s) : le serveur ne nous passe
+    // plus hors-ligne pour « position > 10 min ». Et toutes les 45 s on RÉAFFIRME
+    // « en ligne » (le serveur a pu nous passer hors-ligne pendant un verrouillage).
+    const hbIt = setInterval(() => {
+      if (stopped || nativeOk) return;
+      if (lastFixAt.current && Date.now() - lastFixAt.current <= 8000) return;
+      const hh = hdgRef.current;   // 🎯 v51 (correctif de portée : « h » n existe que dans onFix)
+      if (!lastPos.current || Date.now() - (hh.lastHb || 0) < 10000) return;
+      hh.lastHb = Date.now();
+      const b = bestHdg();
+      api('/driver/location', { method: 'PUT', body: { lat: lastPos.current.lat, lng: lastPos.current.lng, ...(typeof b === 'number' ? { bearing: Math.round(b * 10) / 10 } : {}) } }).catch(() => {});
+    }, 5000);
+    const keepOnlineIt = setInterval(() => {
+      if (stopped || !online) return;
+      api('/driver/online', { method: 'PUT', body: { online: true } }).catch(() => {});
+    }, 45000);
+
     // 🧭 v2026.09.23.3 — APK : le service GPS natif envoie les positions ; le webview
     // envoie le CAP (boussole/cap GPS) -> le magasin voit le bec pivoter en direct,
     // même si le livreur est arrêté sur place. Léger : un nombre toutes les 1.5 s.
@@ -281,7 +315,7 @@ export default function DriverApp() {
     document.addEventListener('visibilitychange', onVis);
 
     return () => {
-      stopped = true; clearInterval(pollIt); clearInterval(brgIt); document.removeEventListener('visibilitychange', onVis);
+      stopped = true; clearInterval(pollIt); clearInterval(brgIt); clearInterval(hbIt); clearInterval(keepOnlineIt); document.removeEventListener('visibilitychange', onVis);
       try { window.removeEventListener('deviceorientationabsolute', onOrient, true); } catch {}
       try { window.removeEventListener('deviceorientation', onOrient, true); } catch {}
       try { if (watchId != null && navigator.geolocation?.clearWatch) navigator.geolocation.clearWatch(watchId); } catch {}
