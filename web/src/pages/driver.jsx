@@ -51,8 +51,8 @@ export default function DriverApp() {
     const h = hdgRef.current;
     const now = Date.now();
     if (h.gps != null && now - h.gpsAt < 7000 && h.gpsSpd > 1.1) return h.gps;            // ① cap GPS (en mouvement)
-    if (h.calc != null && now - h.calcAt < 15000 && h.gpsSpd > 0.5) return h.calc;        // ② cap calculé (marche lente)
-    if (h.comp != null && now - h.compAt < 4000) {                                        // ③ boussole calibrée (à l'arrêt)
+    if (h.calc != null && now - h.calcAt < 15000 && h.gpsSpd > 0.3) return h.calc;        // ② cap calculé (🎯 v50 : 0.5 → 0.3, réactif dès la marche)
+    if (h.gpsSpd < 1 && h.comp != null && now - h.compAt < 4000) {                        // ③ boussole — 🎯 v50 : UNIQUEMENT à l'arrêt (en roulant, le châssis du véhicule la fausse → la flèche « tournait toute seule »)
       let c = h.comp;
       if (h.calSign) c = ((h.calSign < 0 ? 360 - c : c) + 360) % 360;                    //   sens détecté vs cap GPS
       if (h.calOff != null) c = ((c - h.calOff) + 360) % 360;                            //   décalage appris vs cap GPS
@@ -60,7 +60,8 @@ export default function DriverApp() {
     }
     return h.gps != null ? h.gps : h.calc;                                                // ④ dernier connu
   };
-  const liveCtl = useRef({ getHdg: bestHdg }).current;   // passé aux cartes (stable entre rendus)
+  const liveCtl = useRef({ getHdg: bestHdg, getSpd: () => hdgRef.current.gpsSpd || 0 }).current;   // 🎯 v50 : + vitesse (collage au trajet UNIQUEMENT en mouvement) — stable entre rendus
+  try { window.__ylLive = liveCtl; } catch {}   // 🎯 v50 : sonde (tests)
   const seenAv = useRef(null);
   const activeRef = useRef(null);
 
@@ -172,10 +173,12 @@ export default function DriverApp() {
         }
       }
 
-      // ---- 🧭 cap calculé par déplacement FRANC (>= 12 m depuis le point d'ancrage) :
-      //      sens réel du mouvement, insensible au « marchandage » GPS de ±5-15 m
+      // ---- 🧭 cap calculé par déplacement FRANC (>= 6 m depuis le point d'ancrage) :
+      //      sens réel du mouvement, insensible au « marchandage » GPS de ±5-15 m.
+      //      🎯 v50 : 12 → 6 m : un virage est suivi DÈS 6 m parcourus (avant : la flèche
+      //      restait fixe jusqu'à 12 m dans la nouvelle direction).
       if (!h.anchor) h.anchor = { lat, lng };
-      else if (havM(h.anchor, { lat, lng }) > (h.calcAt ? 12 : 6)) {
+      else if (havM(h.anchor, { lat, lng }) > 6) {
         const dLat = (lat - h.anchor.lat) * 111320, dLng = (lng - h.anchor.lng) * 111320 * Math.cos((lat * Math.PI) / 180);
         h.calc = ((Math.atan2(dLng, dLat) * 180) / Math.PI + 360) % 360;
         h.calcAt = Date.now();
@@ -184,10 +187,10 @@ export default function DriverApp() {
 
       // ---- 📍 anti-dérive : fixes imprécis ignorés, et à l'arrêt le marqueur ne
       //      bouge PLUS (le GPS « marchande » de quelques mètres même téléphone posé)
-      if (typeof accuracy === 'number' && accuracy > 75) return;   // fix trop mauvais
+      if (typeof accuracy === 'number' && accuracy > 30) return;   // 🎯 v50 : fix trop mauvais REFUSÉ (avant : 75 m ! → un fix à 50 m d'erreur affichait le livreur 50 m ailleurs)
       const disp = lastPos.current;
       const dm = disp ? havM(disp, { lat, lng }) : Infinity;
-      const immobile = (spd != null && spd < 0.75) || (spd == null && dm < 8);
+      const immobile = (spd != null && spd < 0.75) || (spd == null && dm < 5);   // 🎯 v50 : hystérésis 8 → 5 m
       const send = () => {
         if (stopped) return;
         if (!nativeOk && Date.now() - lastPut > 1500) {
@@ -196,7 +199,21 @@ export default function DriverApp() {
           api('/driver/location', { method: 'PUT', body: { lat, lng, ...(typeof b === 'number' ? { bearing: Math.round(b * 10) / 10 } : {}) } }).catch(() => {});
         }
       };
-      if (disp != null && immobile) { send(); return; }            // à l'arrêt : affichage figé, serveur à jour
+      if (disp != null && immobile) {
+        // 🎯 v50 : à l'arrêt on AFFINE — lissage des bons fixes (≤ 20 m) : le point
+        // CONVERGE vers la position réelle au lieu de rester sur un fix dérivé.
+        if (typeof accuracy === 'number' && accuracy <= 20) {
+          const st = h.stop || (h.stop = { lat: disp.lat, lng: disp.lng, n: 0 });
+          st.lat += (lat - st.lat) * 0.2; st.lng += (lng - st.lng) * 0.2; st.n++;
+          if (st.n >= 5 && havM(disp, { lat: st.lat, lng: st.lng }) > 2) {
+            lastPos.current = { lat: st.lat, lng: st.lng };
+            setPos({ lat: st.lat, lng: st.lng });
+            h.stop = null;   // point affiné — on recommence si besoin
+          }
+        }
+        send(); return;            // à l'arrêt : affichage stable, serveur à jour
+      }
+      h.stop = null;   // 🎯 v50 : en mouvement → plus d'affinage d'arrêt
       lastPos.current = { lat, lng };
       setPos({ lat, lng });
       send();
@@ -248,7 +265,8 @@ export default function DriverApp() {
         if (h.comp == null) h.comp = raw;
         else {
           const d = wrap180(raw - h.comp);
-          const a = Math.abs(d) > 40 ? 0.65 : Math.abs(d) > 12 ? 0.38 : 0.14;   // vif sur les virages, stable au repos
+          if (Math.abs(d) < 4) return;   // 🎯 v50 : zone morte < 4° — le bruit est ignoré (la flèche ne « tremble » plus toute seule)
+          const a = Math.abs(d) > 40 ? 0.55 : Math.abs(d) > 12 ? 0.3 : 0.1;   // 🎯 v50 : vif sur les VRAIS pivots, très stable au repos
           h.comp = (h.comp + d * a + 360) % 360;
         }
         h.compMode = isAbs ? 'abs' : 'rel';

@@ -3,6 +3,13 @@ import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';
 import { createMap, emojiMarker, arrowMarker, arrowSetHeading, glideMarker, addLine, rmLine, fitPts, snapToRoute } from './MapGl.jsx';   // 🧭 v48 : arrowMarker/arrowSetHeading/glideMarker — flèche orientée pour l'observateur
 import { fetchRoute } from './RouteMap.jsx';
 
+const havM = (a, b) => {   // 🎯 v50 : distance locale (collage seulement en mouvement)
+  const R = 6371000, rd = Math.PI / 180;
+  const dA = (b.lat - a.lat) * rd, dO = (b.lng - a.lng) * rd;
+  const h = Math.sin(dA / 2) ** 2 + Math.cos(a.lat * rd) * Math.cos(b.lat * rd) * Math.sin(dO / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+};
+
 /**
  * Carte de suivi (client / observateur) : position magasin / client / livreur.
  * v41 : pastille collée au trajet + parcouru en gris. v47 : collage chirurgical 30 m,
@@ -30,6 +37,8 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
   const grayId = useRef(null);    // v41 : partie DÉJÀ PARCOURUE (gris, comme Google)
   const routeCoords = useRef(null);   // v41 : géométrie courante (collage de la pastille)
   const snapIdx = useRef(-1);     // v41 : segment du dernier découpage (évite les redraw inutiles)
+  const prevPosT = useRef(null);  // 🎯 v50 : position précédente → collage UNIQUEMENT en mouvement
+  const lastSpT = useRef(null);   // 🎯 v50 : dernier découpage → gris avancé dès 10 m
   const fitKey = useRef('');      // 🧭 v48 : cadrage fait UNE fois — plus de saut à chaque position
   const hdgRef = useRef(hdg); hdgRef.current = hdg;   // 🧭 v48 : cap serveur, rafraîchi par le poll
 
@@ -73,7 +82,12 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
     // 🧭 v48 : livreur = PASTILLE + FLÈCHE orientée, qui GLISSE (550 ms) — l'observateur
     // le voit AVANCER et TOURNER, comme le livreur lui-même.
     if (driverPos) {
-      const dp = snapS && snapS.d <= 30 ? { lat: snapS.lat, lng: snapS.lng } : driverPos;   // 🎯 v47 : collage 30 m
+      // 🎯 v50 : collage UNIQUEMENT EN MOUVEMENT (≥ 4 m depuis la dernière position) —
+      // à l'arrêt (devant le magasin, chez le client) : position RÉELLE, jamais
+      // « téléportée » jusqu'à 30 m sur la route d'à côté.
+      const prevT = prevPosT.current; prevPosT.current = { lat: driverPos.lat, lng: driverPos.lng };
+      const movingT = prevT != null && havM(prevT, driverPos) > 4;
+      const dp = movingT && snapS && snapS.d <= 20 ? { lat: snapS.lat, lng: snapS.lng } : driverPos;   // 🎯 v50
       if (markers.current.driver) markers.current.driver.setLngLat([dp.lng, dp.lat]);
       else { markers.current.driver = arrowMarker('#0e9f6e').setLngLat([dp.lng, dp.lat]).addTo(m); glideMarker(markers.current.driver, 550); }
     } else if (markers.current.driver) { markers.current.driver.remove(); delete markers.current.driver; }
@@ -108,7 +122,8 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
         if (grayId.current) { rmLine(map.current, grayId.current); grayId.current = null; }
         const sp = snapToRoute(driverPos.lat, driverPos.lng, coords, typeof hdgRef.current === 'number' ? hdgRef.current : null);
         snapIdx.current = sp.idx;
-        try { window.__ylSnapD = Math.round(sp.d); } catch {}
+        lastSpT.current = { lat: sp.lat, lng: sp.lng };
+        try { window.__ylSnapD = Math.round(sp.d); window.__ylGrayEnd = [sp.lat, sp.lng]; } catch {}   // 🎯 v50 : + sonde gris
         if (sp.d <= 30) {
           grayId.current = addLine(map.current, sp.before, { color: '#9ca3af', width: 5, opacity: 0.9 });
           lineId.current = addLine(map.current, sp.after, { color: '#0e9f6e', width: 5, opacity: 0.85 });
@@ -142,8 +157,8 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
             if (fb?.r) drawSplit(fb.r.coords); else drawFlat();
           }
         });
-      } else if (routeCoords.current && snapS && snapS.d <= 75 && snapS.idx !== snapIdx.current) {
-        drawSplit(routeCoords.current);   // 🔄 le livreur a changé de segment : re-découpage LOCAL (0 appel)
+      } else if (routeCoords.current && snapS && snapS.d <= 75 && (snapS.idx !== snapIdx.current || !lastSpT.current || havM(lastSpT.current, { lat: snapS.lat, lng: snapS.lng }) > 10)) {
+        drawSplit(routeCoords.current);   // 🔄 🎯 v50 : re-découpage au changement de segment OU dès 10 m parcourus (avant : jusqu'à 200 m de retard sur les portions droites)
       } else if (routeCoords.current && snapS && snapS.d > 30 && (grayId.current || snapIdx.current !== -1)) {
         drawSplit(routeCoords.current);   // 🔄 le livreur s'est écarté : trajet complet reaffiche (gris retire)
       }

@@ -146,11 +146,20 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
   const lineId = useRef(null);
   const grayId = useRef(null);      // v41 : partie déjà PARCOURUE (gris, comme Google)
   const snapIdx = useRef(-1);       // v41 : segment du dernier découpage
+  const prevPos = useRef(null);     // 🎯 v50 : position précédente → collage UNIQUEMENT en mouvement
+  const splitAt = useRef(null);     // 🎯 v50 : dernier point de découpage → gris avancé TOUS LES 8 m
   const [info, setInfo] = useState(null);
   const [flash, setFlash] = useState(false);
   const [routeReady, setRouteReady] = useState(0);   // 🎯 v47 : le snap se relance à l ARRIVÉE de l itinéraire (livreur immobile = observateur)
+  const [stopTick, setStopTick] = useState(0);   // 🎯 v50 : à l'arrêt, la position affichée est figée par l'anti-dérive → ce tick ré-évalue et remet la pastille sur sa position RÉELLE
+  const lastFromAt = useRef(0);
   const t = useT();
   const hdgRef = useRef(hdg); hdgRef.current = hdg;   // 🧭 v48 : cap observateur (rafraîchi par le poll sans recréer la carte)
+  useEffect(() => { lastFromAt.current = Date.now(); }, [from?.lat, from?.lng]);
+  useEffect(() => {
+    const it = setInterval(() => { if (Date.now() - lastFromAt.current > 2500) setStopTick((x) => x + 1); }, 2500);
+    return () => clearInterval(it);
+  }, []);
 
   useEffect(() => {
     if (!el.current || map.current) return;
@@ -223,14 +232,25 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
     // 🎯 v47 : CHIRURGICAL — collage à 30 m MAX en tenant compte du CAP (jamais du
     // mauvais côté de la chaussée) ; recalcul dès 2 positions consécutives hors trajet
     // (anti-spam 12 s) : un virage manqué = nouvel itinéraire immédiat, comme Google.
+    // 🎯 v50 : collage au trajet UNIQUEMENT EN MOUVEMENT (≥ 4 m depuis la dernière
+    // position, ou vitesse GPS > 1,4 m/s). À l'arrêt — devant le magasin, chez le
+    // client — la pastille reste à la position RÉELLE : avant, le collage pouvait la
+    // « téléporter » jusqu'à 30 m sur la route d'à côté. Seuil roulant : 20 m.
+    const prev = prevPos.current; prevPos.current = { lat: from.lat, lng: from.lng };
+    const spd = live && live.getSpd ? live.getSpd() : null;
+    const moving = (prev != null && havM(prev, from) > 4) || (typeof spd === 'number' && spd > 1.4);
     const hdgL = live && live.getHdg ? live.getHdg() : (typeof hdgRef.current === 'number' ? hdgRef.current : null);   // 🧭 v48 : observateur → cap du serveur (bon côté de la chaussée)
     const sp = snapToRoute(from.lat, from.lng, coordsRef.current, typeof hdgL === 'number' ? hdgL : null);
     try { window.__ylSnapD = Math.round(sp.d); } catch {}   // sonde (tests)
-    if (sp.d <= 30) {
+    if (moving && sp.d <= 20) {
       offRoute.current = 0;
       markers.current.from?.setLngLat([sp.lng, sp.lat]);
-      if (sp.idx !== snapIdx.current) {
-        snapIdx.current = sp.idx;
+      try { window.__ylSnapM = 1; window.__ylGrayEnd = [sp.lat, sp.lng]; } catch {}   // 🎯 v50 sondes
+      // 🎯 v50 : gris avancé au changement de segment OU dès 8 m parcourus DANS le
+      // segment (avant : uniquement au changement de segment → jusqu'à 200 m de retard
+      // sur les longues portions droites).
+      if (sp.idx !== snapIdx.current || !splitAt.current || havM(splitAt.current, { lat: sp.lat, lng: sp.lng }) > 8) {
+        snapIdx.current = sp.idx; splitAt.current = { lat: sp.lat, lng: sp.lng };
         if (grayId.current) { rmLine(m, grayId.current); grayId.current = null; }
         rmLine(m, lineId.current); lineId.current = null;
         grayId.current = addLine(m, sp.before, { color: '#9ca3af', width: 5, opacity: 0.9 });   // ⬜ parcouru
@@ -238,7 +258,9 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
       }
       return;
     }
-    markers.current.from?.setLngLat([from.lng, from.lat]);   // hors trajet : position réelle
+    markers.current.from?.setLngLat([from.lng, from.lat]);   // 🎯 v50 : position RÉELLE (à l'arrêt ou hors trajet)
+    try { window.__ylSnapM = 0; } catch {}   // 🎯 v50 sonde
+    if (!moving) { offRoute.current = 0; return; }   // 🎯 v50 : à l'arrêt, JAMAIS de recalcul (on est juste garé à côté de la route)
     offRoute.current = (offRoute.current || 0) + 1;
     if (offRoute.current < 2) return;   // 2 positions consécutives hors trajet (anti glitch GPS)
     if (Date.now() - rerouteAt.current < 5000) return;   // 🚀 v49 : anti-rafales 5 s (avant 12 s) — recalcul quasi immédiat
@@ -261,7 +283,7 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
       }
     });
     return () => { cancelled = true; };
-  }, [from?.lat, from?.lng, routeReady]);   // 🎯 v47 : + routeReady (itinéraire arrivé)
+  }, [from?.lat, from?.lng, routeReady, stopTick]);   // 🎯 v47 : + routeReady · 🎯 v50 : + stopTick (arrêt → position réelle)
 
   // 🧭 Mode Uber (live) : la carte suit le livreur en permanence — tant qu'il ne la
   // déplace pas lui-même (un drag désactive le suivi, 📍 le réactive).
@@ -307,10 +329,19 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
   const l1 = useRef(null), l2 = useRef(null);
   const l1g = useRef(null);        // v41 : partie déjà PARCOURUE de la jambe livreur→magasin (gris)
   const snap1 = useRef(-1);        // v41 : segment du dernier découpage
+  const prev1 = useRef(null);      // 🎯 v50 : position précédente → collage UNIQUEMENT en mouvement
+  const split1At = useRef(null);   // 🎯 v50 : gris avancé TOUS LES 8 m
   const [legs, setLegs] = useState(null);
   const [flash, setFlash] = useState(false);
+  const [stopTick, setStopTick] = useState(0);   // 🎯 v50 : arrêt (position figée) → ré-évaluation → position RÉELLE
+  const lastPosAt = useRef(0);
   const t = useT();
   const hdgRef = useRef(hdg); hdgRef.current = hdg;   // 🧭 v48 : cap observateur (poll) sans recréer la carte
+  useEffect(() => { lastPosAt.current = Date.now(); }, [driverPos?.lat, driverPos?.lng]);
+  useEffect(() => {
+    const it = setInterval(() => { if (Date.now() - lastPosAt.current > 2500) setStopTick((x) => x + 1); }, 2500);
+    return () => clearInterval(it);
+  }, []);
 
   useEffect(() => {
     if (!el.current || map.current) return;
@@ -373,14 +404,19 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
     // 📌 v41 : pastille COLLÉE à la jambe rouge + partie parcourue en GRIS (comme Google) —
     // visible par le livreur ET par tous ceux qui regardent ce trajet. 0 appel API.
     // 🎯 v47 : CHIRURGIAL — 30 m MAX + cap (bonne chaussée) + recalcul à 2 positions hors trajet.
+    // 🎯 v50 : collage UNIQUEMENT EN MOUVEMENT (≥ 4 m) — à l'arrêt : position RÉELLE.
+    const prev = prev1.current; prev1.current = { lat: driverPos.lat, lng: driverPos.lng };
+    const spd = live && live.getSpd ? live.getSpd() : null;
+    const moving = (prev != null && havM(prev, driverPos) > 4) || (typeof spd === 'number' && spd > 1.4);
     const hdgL = live && live.getHdg ? live.getHdg() : (typeof hdgRef.current === 'number' ? hdgRef.current : null);   // 🧭 v48 : observateur → cap serveur (bon côté)
     const sp = snapToRoute(driverPos.lat, driverPos.lng, leg1Ref.current, typeof hdgL === 'number' ? hdgL : null);
     try { window.__ylSnapD = Math.round(sp.d); } catch {}   // sonde (tests)
-    if (sp.d <= 30) {
+    if (moving && sp.d <= 20) {
       off1.current = 0;
       marks.current.d?.setLngLat([sp.lng, sp.lat]);
-      if (sp.idx !== snap1.current) {
-        snap1.current = sp.idx;
+      try { window.__ylSnapM = 1; window.__ylGrayEnd = [sp.lat, sp.lng]; } catch {}   // 🎯 v50 sondes
+      if (sp.idx !== snap1.current || !split1At.current || havM(split1At.current, { lat: sp.lat, lng: sp.lng }) > 8) {   // 🎯 v50 : gris tous les 8 m
+        snap1.current = sp.idx; split1At.current = { lat: sp.lat, lng: sp.lng };
         if (l1g.current) { rmLine(m, l1g.current); l1g.current = null; }
         rmLine(m, l1.current);
         l1g.current = addLine(m, sp.before, { color: '#9ca3af', width: 5, opacity: 0.9 });       // ⬜ parcouru
@@ -388,7 +424,9 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
       }
       return;
     }
-    marks.current.d?.setLngLat([driverPos.lng, driverPos.lat]);   // hors trajet : position réelle
+    marks.current.d?.setLngLat([driverPos.lng, driverPos.lat]);   // 🎯 v50 : position RÉELLE (à l'arrêt ou hors trajet)
+    try { window.__ylSnapM = 0; } catch {}   // 🎯 v50 sonde
+    if (!moving) { off1.current = 0; return; }   // 🎯 v50 : à l'arrêt, JAMAIS de recalcul
     off1.current = (off1.current || 0) + 1;
     if (off1.current < 2) return;
     if (Date.now() - rerouteAt.current < 5000) return;   // 🚀 v49 : anti-rafales 5 s (avant 12 s) — recalcul quasi immédiat
@@ -406,7 +444,7 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
       setLegs((pv) => [r, pv?.[1]]);
     });
     return () => { cancelled = true; };
-  }, [driverPos?.lat, driverPos?.lng, legs]);   // 🎯 v47 : + legs (itinéraire arrivé → snap immédiat, même livreur immobile)
+  }, [driverPos?.lat, driverPos?.lng, legs, stopTick]);   // 🎯 v47 : + legs · 🎯 v50 : + stopTick (arrêt → position réelle)
 
   // 🧭 Mode Uber (live) : la carte suit le livreur — un drag désactive, 📍 réactive
   useEffect(() => {
