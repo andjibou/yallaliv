@@ -899,11 +899,13 @@ function Drivers() {
                   driverPos={{ lat: tv.lat, lng: tv.lng }}
                   storePos={{ lat: o.store_lat, lng: o.store_lng }}
                   clientPos={{ lat: o.client_lat, lng: o.client_lng }}
+                  hdg={typeof tv.bearing === 'number' ? tv.bearing : null}   // 🧭 v48 : cap du livreur → flèche orientée (le magasin le VOIT tourner)
                   poolKey="mrout"   // 🤝 v38 : une seule carte pour les vues trajet du magasin
                   orderId={o.id}   // 🤝 v38 : trajet magasin→client partagé via la commande (0 appel Routes)
                 />
               ) : (
-                <RouteMap from={{ lat: tv.lat, lng: tv.lng }} to={{ lat: o.client_lat, lng: o.client_lng }} fromEmoji="🛵" toEmoji="🏠"  poolKey="mrout" />
+                // 🧭 v48 : hdg = cap du livreur → pastille-flèche orientée pour le magasin
+                <RouteMap from={{ lat: tv.lat, lng: tv.lng }} to={{ lat: o.client_lat, lng: o.client_lng }} fromEmoji="🛵" toEmoji="🏠" hdg={typeof tv.bearing === 'number' ? tv.bearing : null} poolKey="mrout" />
               )
             )}
             <div className="mt8" style={{ background: '#f8fafc', borderRadius: 12, padding: 10 }}>

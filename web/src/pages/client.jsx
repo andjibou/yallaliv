@@ -1814,6 +1814,7 @@ export function ClientOrders() {
               storePos={track.order.store_lat != null ? { lat: track.order.store_lat, lng: track.order.store_lng } : null}
               clientPos={track.order.client_lat != null ? { lat: track.order.client_lat, lng: track.order.client_lng } : null}
               driverPos={track.driver_pos ? { lat: track.driver_pos.lat, lng: track.driver_pos.lng } : null}
+              hdg={track.driver_pos && typeof track.driver_pos.bearing === 'number' ? track.driver_pos.bearing : null}   // 🧭 v48 : cap → flèche orientée (le client VOIT le livreur tourner)
               orderId={track.order.id}   // v39 : itineraire throttle + partage par commande
             />
             <div className="row spread mt12 wrap">

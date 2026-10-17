@@ -55,51 +55,58 @@ function useLiveNav(mapRef, live, getMarker) {
     };
     const onZoomStart = () => { s.zooming = true; };
     const onZoomEnd = () => { setTimeout(() => { s.zooming = false; }, 700); };
-    const bind = () => { s.bound = true; m().on({ dragstart: onDrag, rotate: onRot, zoomstart: onZoomStart, zoomend: onZoomEnd }); };
+    // 🐛 v48 : .on({...}) est une API LEAFLET — MapLibre ne comprend que .on('type', fn)
+    // → depuis la migration, le drag NE désactivait PLUS le suivi (la carte sautait
+    // sous les doigts du livreur). Réparé : chaque événement est bindé séparément.
+    const bind = () => {
+      s.bound = true;
+      m().on('dragstart', onDrag);
+      m().on('rotate', onRot);
+      m().on('zoomstart', onZoomStart);
+      m().on('zoomend', onZoomEnd);
+    };
     const ready = () => { if (!dead && m() && !s.bound) bind(); };
     ready();
     const it = setInterval(() => {
       const mm = m(); if (!mm) return;
       if (!s.bound) ready();
+      try { window.__ylNavS = { f: s.follow, r: s.rot }; } catch {}   // 🧭 v48 : sonde (tests)
       const h = live.getHdg ? live.getHdg() : null;
       const b = mm.getBearing() || 0;
       arrowSetHeading(getMarker ? getMarker() : null, h, b);
-      if (typeof h !== 'number' || !s.follow || !s.rot || s.zooming) return;
+      // 🧭 v48 : la BOUSSOLE est INDÉPENDANTE du suivi — le livreur peut déplacer la
+      // carte (📍 s'éteint) sans perdre l'orientation sur son cap (🧭 reste actif).
+      if (typeof h !== 'number' || !s.rot || s.zooming) return;
       const target = (360 - ((h % 360) + 360) % 360) % 360;        // cap du livreur pointé vers le HAUT
       const cur = mm.getBearing() || 0;
       const d = ((target - cur) % 360 + 540) % 360 - 180;
       if (Math.abs(d) > 2) { s.myBearing = ((cur + d * 0.35) % 360 + 360) % 360; mm.setBearing(s.myBearing); }
     }, 120);
-    return () => { dead = true; clearInterval(it); try { if (s.bound) m()?.off({ dragstart: onDrag, rotate: onRot, zoomstart: onZoomStart, zoomend: onZoomEnd }); } catch {} s.bound = false; };
+    return () => {
+      dead = true; clearInterval(it);
+      try { if (s.bound) { m()?.off('dragstart', onDrag); m()?.off('rotate', onRot); m()?.off('zoomstart', onZoomStart); m()?.off('zoomend', onZoomEnd); } } catch {}
+      s.bound = false;
+    };
   }, [!!live]);
   return {
     nav,
     isFollow: () => nav.current.follow,
     isRot: () => nav.current.rot,
-    isNav: () => nav.current.follow && nav.current.rot,   // 🧭 v47 : mode navigation COMPLET
-    // 🧭 v47 : MODE NAVIGATION « comme Google » — un seul bouton : suivi permanent +
-    // rotation sur le cap + zoom navigation (16,8). Re-toucher → retour nord en haut.
-    navMode: () => {
-      const s = nav.current;
-      const on = !(s.follow && s.rot);
-      s.follow = on; s.rot = on; bump((x) => x + 1);
-      const mm = mapRef.current;
-      if (!mm) return;
-      try {
-        mm.stop();
-        if (on) mm.easeTo({ zoom: Math.max(mm.getZoom() || 13, 16.8), duration: 700 });
-        else { s.myBearing = 0; mm.easeTo({ bearing: 0, duration: 450 }); }
-      } catch {}
-    },
+    isRot: () => nav.current.rot,   // 🧭 v48 : Mode Boussole indépendant du suivi
+    // 📍 v48 : RECENTRER = suivi uniquement (ne touche PAS au Mode Boussole)
     recenter: (lat, lng) => {
-      const s = nav.current; s.follow = true; s.rot = true; bump((x) => x + 1);
+      const s = nav.current; s.follow = true; bump((x) => x + 1);
       const mm = mapRef.current;
       if (mm && lat != null) { try { mm.stop(); mm.easeTo({ center: [lng, lat], zoom: Math.max(mm.getZoom() || 13, 16.5), duration: 600 }); } catch {} }
     },
+    // 🧭 v48 : MODE BOUSSOLE (bouton séparé, comme Google Maps) — l'affichage s'oriente
+    // selon la DIRECTION DU MOUVEMENT du livreur. OFF → retour nord en haut.
     toggleRot: () => {
       const s = nav.current; s.rot = !s.rot; bump((x) => x + 1);
       const mm = mapRef.current;
-      if (!s.rot && mm) { s.myBearing = 0; mm.setBearing(0); }   // retour nord en haut
+      try {
+        if (!s.rot && mm) { s.myBearing = 0; mm.stop(); mm.easeTo({ bearing: 0, duration: 450 }); }
+      } catch {}
     }
   };
 }
@@ -119,7 +126,7 @@ function LiveBtns({ navApi, pos }) {
   return (
     <div style={{ position: 'absolute', top: 50, right: 8, zIndex: 1100, display: 'flex', flexDirection: 'column', gap: 6 }}>
       {btn(navApi.isFollow(), '📍', 'Recentrer sur ma position (suivi auto)', () => navApi.recenter(pos?.lat, pos?.lng))}
-      {btn(navApi.isNav(), '🧭', 'Mode navigation (la carte me suit et tourne avec moi)', navApi.navMode)}   {/* 🧭 v47 : suivi + rotation + zoom, un seul bouton */}
+      {btn(navApi.isRot(), '🧭', 'Mode Boussole (l affichage s oriente selon ma direction de mouvement)', navApi.toggleRot)}   {/* 🧭 v48 : MODE BOUSSOLE — bouton séparé, comme Google Maps */}
     </div>
   );
 }
@@ -128,7 +135,7 @@ function LiveBtns({ navApi, pos }) {
  * Carte avec itinéraire routier de `from` à `to` (Mapbox Directions, repli OSRM).
  * Fallback : ligne droite pointillée si aucune réponse (hors ligne).
  */
-export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠', height = 300, live = null, poolKey = 'nav', orderId = null }) {
+export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠', height = 300, live = null, poolKey = 'nav', orderId = null, hdg = null }) {   // 🧭 v48 : hdg = cap du livreur VU PAR UN OBSERVATEUR (flèche orientée + snap du bon côté)
   const el = useRef(null);
   const map = useRef(null);
   const { full, toggle } = useMapFullscreen(map);
@@ -143,6 +150,7 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
   const [flash, setFlash] = useState(false);
   const [routeReady, setRouteReady] = useState(0);   // 🎯 v47 : le snap se relance à l ARRIVÉE de l itinéraire (livreur immobile = observateur)
   const t = useT();
+  const hdgRef = useRef(hdg); hdgRef.current = hdg;   // 🧭 v48 : cap observateur (rafraîchi par le poll sans recréer la carte)
 
   useEffect(() => {
     if (!el.current || map.current) return;
@@ -164,8 +172,12 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
     if (grayId.current) { rmLine(m, grayId.current); grayId.current = null; }
     snapIdx.current = -1;
     // 🧭 live : le départ EST le livreur -> pastille + flèche de direction
-    markers.current.from = (live ? arrowMarker('#0e9f6e') : emojiMarker(fromEmoji)).setLngLat([from.lng, from.lat]).addTo(m);
-    if (live) { glideMarker(markers.current.from, 350); m.jumpTo({ center: [from.lng, from.lat], zoom: 16 }); }   // 🔄 v47 : glide 350 ms — suivi quasi immédiat
+    // 🧭 v48 : l'OBSERVATEUR aussi (hdg transmis par le magasin/client) : flèche
+    // orientée + glissé fluide — plus jamais un emoji 🛵 figé qui saute.
+    const drvMk = live || hdg != null;
+    markers.current.from = (drvMk ? arrowMarker('#0e9f6e') : emojiMarker(fromEmoji)).setLngLat([from.lng, from.lat]).addTo(m);
+    if (drvMk) glideMarker(markers.current.from, live ? 350 : 550);   // 🔄 v47 : 350 ms livreur · v48 : 550 ms observateur
+    if (live) m.jumpTo({ center: [from.lng, from.lat], zoom: 16 });
     markers.current.to = emojiMarker(toEmoji).setLngLat([to.lng, to.lat]).addTo(m);
     if (!live) fitPts(m, [[from.lat, from.lng], [to.lat, to.lng]], 0.3);
 
@@ -187,7 +199,18 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
     });
 
     return () => { cancelled = true; };
-  }, [to?.lat, to?.lng, fromEmoji, toEmoji]);
+  }, [to?.lat, to?.lng, fromEmoji, toEmoji, hdg != null]);   // 🧭 v48 : + hdg (flèche dès que le cap arrive)
+
+  // 🧭 v48 : OBSERVATEUR (pas de live) — la flèche du livreur pivote avec son cap
+  // transmis par le serveur (et contre-tourne si l'observateur fait pivoter la carte).
+  useEffect(() => {
+    if (live || hdg == null) return undefined;
+    const it = setInterval(() => {
+      const mm = map.current; if (!mm) return;
+      arrowSetHeading(markers.current.from, hdgRef.current, mm.getBearing() || 0);
+    }, 150);
+    return () => clearInterval(it);
+  }, [!!live, hdg != null]);
 
   // 🧠 Intelligence : a chaque mouvement, si le livreur est SUR l'itineraire -> on glisse
   // son marqueur. S'il l'a depasse (> 75 m) -> NOUVEL itineraire depuis sa position actuelle,
@@ -200,8 +223,8 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
     // 🎯 v47 : CHIRURGICAL — collage à 30 m MAX en tenant compte du CAP (jamais du
     // mauvais côté de la chaussée) ; recalcul dès 2 positions consécutives hors trajet
     // (anti-spam 12 s) : un virage manqué = nouvel itinéraire immédiat, comme Google.
-    const hdg = live && live.getHdg ? live.getHdg() : null;
-    const sp = snapToRoute(from.lat, from.lng, coordsRef.current, typeof hdg === 'number' ? hdg : null);
+    const hdgL = live && live.getHdg ? live.getHdg() : (typeof hdgRef.current === 'number' ? hdgRef.current : null);   // 🧭 v48 : observateur → cap du serveur (bon côté de la chaussée)
+    const sp = snapToRoute(from.lat, from.lng, coordsRef.current, typeof hdgL === 'number' ? hdgL : null);
     try { window.__ylSnapD = Math.round(sp.d); } catch {}   // sonde (tests)
     if (sp.d <= 30) {
       offRoute.current = 0;
@@ -273,7 +296,7 @@ export default function RouteMap({ from, to, fromEmoji = '🏪', toEmoji = '🏠
  * Trajet double du livreur : sa position → magasin (ROUGE) puis magasin → client (VERT).
  * Affiché automatiquement à l'acceptation d'une livraison.
  */
-export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, live = null, poolKey = 'route', orderId = null }) {
+export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, live = null, poolKey = 'route', orderId = null, hdg = null }) {   // 🧭 v48 : hdg = cap du livreur VU PAR UN OBSERVATEUR
   const el = useRef(null);
   const map = useRef(null);
   const { full, toggle } = useMapFullscreen(map);
@@ -287,6 +310,7 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
   const [legs, setLegs] = useState(null);
   const [flash, setFlash] = useState(false);
   const t = useT();
+  const hdgRef = useRef(hdg); hdgRef.current = hdg;   // 🧭 v48 : cap observateur (poll) sans recréer la carte
 
   useEffect(() => {
     if (!el.current || map.current) return;
@@ -304,8 +328,12 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
     [l1, l2, l1g].forEach((ref) => { if (ref.current) { rmLine(m, ref.current); ref.current = null; } });
     snap1.current = -1;
     // 🧭 live : pastille + flèche de direction sur le livreur, ouverture zoomée sur lui
-    marks.current.d = (live ? arrowMarker('#0e9f6e') : emojiMarker('🛵')).setLngLat([driverPos.lng, driverPos.lat]).addTo(m);
-    if (live) { glideMarker(marks.current.d, 350); m.jumpTo({ center: [driverPos.lng, driverPos.lat], zoom: 16 }); }   // 🔄 v47
+    // 🧭 v48 : l'OBSERVATEUR aussi (hdg du serveur) — flèche orientée + glissé fluide,
+    // plus jamais l'emoji 🛵 figé : le magasin VOIT le livreur tourner et avancer.
+    const drvMk = live || hdg != null;
+    marks.current.d = (drvMk ? arrowMarker('#0e9f6e') : emojiMarker('🛵')).setLngLat([driverPos.lng, driverPos.lat]).addTo(m);
+    if (drvMk) glideMarker(marks.current.d, live ? 350 : 550);   // 🔄 v47 livreur 350 ms · v48 observateur 550 ms
+    if (live) m.jumpTo({ center: [driverPos.lng, driverPos.lat], zoom: 16 });
     marks.current.s = emojiMarker('🏪').setLngLat([storePos.lng, storePos.lat]).addTo(m);
     marks.current.c = emojiMarker('🏠').setLngLat([clientPos.lng, clientPos.lat]).addTo(m);
     setLegs(null);
@@ -325,7 +353,17 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
       setTimeout(() => map.current?.resize(), 60);
     });
     return () => { cancelled = true; };
-  }, [storePos?.lat, storePos?.lng, clientPos?.lat, clientPos?.lng]);
+  }, [storePos?.lat, storePos?.lng, clientPos?.lat, clientPos?.lng, hdg != null]);   // 🧭 v48 : + hdg (flèche dès que le cap arrive)
+
+  // 🧭 v48 : OBSERVATEUR — la flèche du livreur pivote avec le cap du serveur
+  useEffect(() => {
+    if (live || hdg == null) return undefined;
+    const it = setInterval(() => {
+      const mm = map.current; if (!mm) return;
+      arrowSetHeading(marks.current.d, hdgRef.current, mm.getBearing() || 0);
+    }, 150);
+    return () => clearInterval(it);
+  }, [!!live, hdg != null]);
 
   // 🧠 Intelligence : le livreur bouge -> sur le trajet rouge ? marqueur glisse.
   // Trajet depasse (> 75 m) -> le segment livreur->magasin est RECALCULE depuis sa position.
@@ -335,8 +373,8 @@ export function DualRouteMap({ driverPos, storePos, clientPos, height = 320, liv
     // 📌 v41 : pastille COLLÉE à la jambe rouge + partie parcourue en GRIS (comme Google) —
     // visible par le livreur ET par tous ceux qui regardent ce trajet. 0 appel API.
     // 🎯 v47 : CHIRURGIAL — 30 m MAX + cap (bonne chaussée) + recalcul à 2 positions hors trajet.
-    const hdg = live && live.getHdg ? live.getHdg() : null;
-    const sp = snapToRoute(driverPos.lat, driverPos.lng, leg1Ref.current, typeof hdg === 'number' ? hdg : null);
+    const hdgL = live && live.getHdg ? live.getHdg() : (typeof hdgRef.current === 'number' ? hdgRef.current : null);   // 🧭 v48 : observateur → cap serveur (bon côté)
+    const sp = snapToRoute(driverPos.lat, driverPos.lng, leg1Ref.current, typeof hdgL === 'number' ? hdgL : null);
     try { window.__ylSnapD = Math.round(sp.d); } catch {}   // sonde (tests)
     if (sp.d <= 30) {
       off1.current = 0;

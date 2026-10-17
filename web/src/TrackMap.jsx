@@ -1,19 +1,24 @@
 import React, { useEffect, useRef } from 'react';
 import { useMapFullscreen, FsBtn, FS_STYLE } from './MapFullscreen.jsx';
-import { createMap, emojiMarker, addLine, rmLine, fitPts, snapToRoute } from './MapGl.jsx';   // + 📐 v41 snapToRoute
+import { createMap, emojiMarker, arrowMarker, arrowSetHeading, glideMarker, addLine, rmLine, fitPts, snapToRoute } from './MapGl.jsx';   // 🧭 v48 : arrowMarker/arrowSetHeading/glideMarker — flèche orientée pour l'observateur
 import { fetchRoute } from './RouteMap.jsx';
 
 /**
- * Carte de suivi (v2026.10.05.2 : Mapbox GL) : position magasin / client / livreur.
- * Itinéraire routier réel (Mapbox Directions, repli OSRM) entre le livreur et le
- * client, recalculé quand le livreur bouge significativement (~300 m).
- * Fallback : ligne droite.
+ * Carte de suivi (client / observateur) : position magasin / client / livreur.
+ * v41 : pastille collée au trajet + parcouru en gris. v47 : collage chirurgical 30 m,
+ * recalcul ≤ 20 s si le livreur quitte le trajet.
+ * 🧭 v48 CHIRURGICAL :
+ *  • la pastille du livreur est une FLÈCHE orientée par le CAP transmis par le serveur
+ *    (l'observateur VOIT le livreur tourner) et GLISSE au lieu de sauter ;
+ *  • les marqueurs ne sont plus détruits/recréés à chaque position (plus de clignotement) ;
+ *  • le cadrage ne saute PLUS à chaque mise à jour : fait une seule fois (magasin/client
+ *    ou 1ère position livreur) — l'observateur peut zoomer et REGARDER le livreur avancer.
  */
 // v39 : memoire de suivi — rouvrir le suivi d'une MEME commande dans les 5 min = 0 appel
 // (l'itineraire calcule est resservi tel quel ; le marqueur du livreur, lui, reste LIVE).
 const trackMemo = new Map();   // orderId -> { at, r }
 
-export default function TrackMap({ storePos, clientPos, driverPos, orderId = null }) {
+export default function TrackMap({ storePos, clientPos, driverPos, orderId = null, hdg = null }) {   // 🧭 v48 : hdg = cap du livreur (bearing serveur)
   const el = useRef(null);
   const map = useRef(null);
   const { full, toggle } = useMapFullscreen(map);
@@ -25,6 +30,8 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
   const grayId = useRef(null);    // v41 : partie DÉJÀ PARCOURUE (gris, comme Google)
   const routeCoords = useRef(null);   // v41 : géométrie courante (collage de la pastille)
   const snapIdx = useRef(-1);     // v41 : segment du dernier découpage (évite les redraw inutiles)
+  const fitKey = useRef('');      // 🧭 v48 : cadrage fait UNE fois — plus de saut à chaque position
+  const hdgRef = useRef(hdg); hdgRef.current = hdg;   // 🧭 v48 : cap serveur, rafraîchi par le poll
 
   useEffect(() => {
     if (!el.current || map.current) return;
@@ -32,31 +39,62 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
     return () => { map.current?.remove(); map.current = null; markers.current = {}; };
   }, []);
 
+  // 🧭 v48 : la flèche du livreur PIVOTE en continu (cap serveur) et contre-tourne
+  // si l'observateur fait pivoter la carte lui-même.
+  useEffect(() => {
+    const it = setInterval(() => {
+      const mm = map.current; if (!mm) return;
+      arrowSetHeading(markers.current.driver, hdgRef.current, mm.getBearing() || 0);
+    }, 150);
+    return () => clearInterval(it);
+  }, []);
+
   useEffect(() => {
     const m = map.current;
     if (!m) return;
-    const pts = [];
+
+    // ── 🧭 v48 : marqueurs PERSISTANTS — créés une fois, DÉPLACÉS ensuite.
+    //    Avant : tout était détruit/recréé à CHAQUE position (poll 4 s) → clignotement.
     const setMk = (key, pos, emoji) => {
-      if (markers.current[key]) { markers.current[key].remove(); delete markers.current[key]; }
-      if (!pos) return;
-      markers.current[key] = emojiMarker(emoji).setLngLat([pos.lng, pos.lat]).addTo(m);
-      pts.push([pos.lat, pos.lng]);
+      if (!pos) { if (markers.current[key]) { markers.current[key].remove(); delete markers.current[key]; } return; }
+      if (markers.current[key]) markers.current[key].setLngLat([pos.lng, pos.lat]);
+      else markers.current[key] = emojiMarker(emoji).setLngLat([pos.lng, pos.lat]).addTo(m);
     };
     setMk('store', storePos, '🏪');
     setMk('client', clientPos, '🏠');
-    // 📌 v41 : la pastille du livreur se COLLE au trajet (projection centimétrique — comme
-    // Google Navigation) : même un déplacement de quelques centimètres la fait avancer SUR
-    // la route, jamais à travers les immeubles. 0 appel API.
-    let snapS = null;
-    if (driverPos && routeCoords.current) {
-      snapS = snapToRoute(driverPos.lat, driverPos.lng, routeCoords.current);
-      try { window.__ylSnapD = Math.round(snapS.d); } catch {}   // sonde (tests)
+
+    // 📌 v41/v47 : pastille COLLÉE au trajet (projection centimétrique, cap → bon côté
+    // de la chaussée). 0 appel API.
+    const snapS = driverPos && routeCoords.current
+      ? snapToRoute(driverPos.lat, driverPos.lng, routeCoords.current, typeof hdgRef.current === 'number' ? hdgRef.current : null)
+      : null;
+    if (snapS) { try { window.__ylSnapD = Math.round(snapS.d); } catch {} }   // sonde (tests)
+
+    // 🧭 v48 : livreur = PASTILLE + FLÈCHE orientée, qui GLISSE (550 ms) — l'observateur
+    // le voit AVANCER et TOURNER, comme le livreur lui-même.
+    if (driverPos) {
+      const dp = snapS && snapS.d <= 30 ? { lat: snapS.lat, lng: snapS.lng } : driverPos;   // 🎯 v47 : collage 30 m
+      if (markers.current.driver) markers.current.driver.setLngLat([dp.lng, dp.lat]);
+      else { markers.current.driver = arrowMarker('#0e9f6e').setLngLat([dp.lng, dp.lat]).addTo(m); glideMarker(markers.current.driver, 550); }
+    } else if (markers.current.driver) { markers.current.driver.remove(); delete markers.current.driver; }
+
+    // ── 🧭 v48 : cadrage UNE SEULE FOIS (magasin/client connus ou 1ère position livreur).
+    //    Avant : fitPts à CHAQUE position → la carte sautait, impossible de zoomer.
+    const fk = (storePos ? storePos.lat.toFixed(4) + ',' + storePos.lng.toFixed(4) : '-') + '|' +
+               (clientPos ? clientPos.lat.toFixed(4) + ',' + clientPos.lng.toFixed(4) : '-') + '|' +
+               (driverPos ? 'd' : '');
+    if (fk !== fitKey.current) {
+      fitKey.current = fk;
+      const pts = [];
+      if (storePos) pts.push([storePos.lat, storePos.lng]);
+      if (clientPos) pts.push([clientPos.lat, clientPos.lng]);
+      if (driverPos) pts.push([driverPos.lat, driverPos.lng]);
+      if (pts.length === 1) m.jumpTo({ center: [pts[0][1], pts[0][0]], zoom: 14 });
+      else if (pts.length > 1) fitPts(m, pts, 0.35);
     }
-    if (driverPos) setMk('driver', snapS && snapS.d <= 30 ? { lat: snapS.lat, lng: snapS.lng } : driverPos, '🛵');   // 🎯 v47 : collage chirurgical 30 m
 
     // Itineraire routier livreur -> client — v39 : recalcul AU PLUS toutes les 5 MINUTES
-    // (avant : chaque ~110 m du livreur = 1 appel Routes API facture, ~1 toutes les 13 s !).
-    // Le marqueur du livreur continue de glisser en direct (gratuit) entre deux calculs.
+    // (le marqueur du livreur continue de glisser en direct, gratuitement, entre deux calculs).
     if (driverPos && clientPos) {
       const now = Date.now();
       const ck = (orderId != null ? orderId + '|' : '') + clientPos.lat.toFixed(4) + ',' + clientPos.lng.toFixed(4);
@@ -68,7 +106,7 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
         if (!map.current) return;
         if (lineId.current) { rmLine(map.current, lineId.current); lineId.current = null; }
         if (grayId.current) { rmLine(map.current, grayId.current); grayId.current = null; }
-        const sp = snapToRoute(driverPos.lat, driverPos.lng, coords);
+        const sp = snapToRoute(driverPos.lat, driverPos.lng, coords, typeof hdgRef.current === 'number' ? hdgRef.current : null);
         snapIdx.current = sp.idx;
         try { window.__ylSnapD = Math.round(sp.d); } catch {}
         if (sp.d <= 30) {
@@ -89,7 +127,7 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
         routeKey.current = 'memo'; routeAt.current = Date.now();   // reouverture < 5 min : itineraire resservi SANS AUCUN appel (throttle arme)
         routeCoords.current = memo.r ? memo.r.coords : null;
         if (memo.r) drawSplit(memo.r.coords); else drawFlat();
-      } else if (key !== routeKey.current && (now - routeAt.current >= 5 * 60e3 || (snapS && snapS.d > 30 && now - routeAt.current >= 20e3))) {   // 🎯 v47 : le livreur a QUITTÉ le trajet → nouvel itinéraire au plus 20 s (plus d'attente 5 min)
+      } else if (key !== routeKey.current && (now - routeAt.current >= 5 * 60e3 || (snapS && snapS.d > 30 && now - routeAt.current >= 20e3))) {   // 🎯 v47 : le livreur a QUITTÉ le trajet → nouvel itinéraire au plus 20 s
         routeKey.current = key; routeAt.current = now;
         fetchRoute(driverPos, clientPos, null, true).then((r) => {   // 🤝 v41 : clé LIVE ~100 m partagée par TOUS les observateurs
           if (orderId != null && r) {
@@ -111,8 +149,6 @@ export default function TrackMap({ storePos, clientPos, driverPos, orderId = nul
     }
 
     setTimeout(() => m.resize(), 60);
-    if (pts.length === 1) m.jumpTo({ center: [pts[0][1], pts[0][0]], zoom: 14 });
-    else if (pts.length > 1) fitPts(m, pts, 0.35);
   }, [storePos, clientPos, driverPos]);
 
   return (
