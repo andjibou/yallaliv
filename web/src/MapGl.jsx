@@ -1,5 +1,5 @@
-import mapboxgl from 'mapbox-gl';
-import 'mapbox-gl/dist/mapbox-gl.css';
+import * as maplibregl from 'maplibre-gl';   // 🆓 v45 : MapLibre GL — fork COMMUNAUTAIRE de mapbox-gl, SANS token, SANS requête mapbox.com (mapbox-gl v2+ exige un token pour afficher les tuiles — cause des cartes grises v44)
+import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   GMAPS_KEY, createGoogleMap, attachMarker, markerSetPos, markerRemove, bindGPopup,
   addGLine, gForward, gReverse, gRoute, gOrderRoute, gAutocomplete, gPlaceDetails, loadGoogle, gFailed, onAuthFailure, l2Get, l2Put, snapToRoute,
@@ -55,7 +55,7 @@ function createMapboxMap(el, { center = [29.9187, 31.2001], zoom = 13, bearing =
   // 🆓 v43/v44 : tuiles OpenStreetMap raster UNIQUEMENT — gratuites, sans clé, sans
   // compte. Rotation NATIVE conservée (setBearing / geste à deux doigts) ;
   // inclinaison désactivée : la carte reste PLATE (zéro bâtiment 3D — choix v42).
-  const map = new mapboxgl.Map({
+  const map = new maplibregl.Map({
     container: el,
     style: FALLBACK_STYLE,
     center, zoom, bearing,
@@ -148,7 +148,7 @@ class YlMarker {
   addTo(m) {
     if (m.__mb || m.__yl !== 'google') {   // Mapbox (ou adaptateur Google déjà basculé)
       this.__tgt = 'mb';
-      this.__inst = new mapboxgl.Marker({ element: this.el, anchor: 'center' });
+      this.__inst = new maplibregl.Marker({ element: this.el, anchor: 'center' });
       if (this.__pos) this.__inst.setLngLat(this.__pos);
       this.__inst.addTo(m.__mb || m);
     } else {                                // Google
@@ -331,7 +331,7 @@ export function fitPts(map, pts, pad = 0.3, opts = {}) {
   }
   const m = map.__mb || map;
   if (pts.length === 1) { m.jumpTo({ center: [pts[0][1], pts[0][0]], zoom: opts.zoom || 14 }); return; }
-  const b = new mapboxgl.LngLatBounds();
+  const b = new maplibregl.LngLatBounds();
   pts.forEach(([lat, lng]) => b.extend([lng, lat]));
   const cw = m.getCanvas()?.clientWidth || 360, ch = m.getCanvas()?.clientHeight || 300;
   m.fitBounds(b, { padding: Math.round(pad * Math.min(cw, ch) * 0.5), maxZoom: opts.maxZoom || 17, duration: 0 });
@@ -346,9 +346,9 @@ export function bindPopup(marker, html) {
     bindGPopup(marker.__A, marker.__inst, () => marker.__popupHtml);
     return marker.__popupStub;
   }
-  const pop = new mapboxgl.Popup({ offset: 22, closeButton: false, maxWidth: '240px' }).setHTML(html);
+  const pop = new maplibregl.Popup({ offset: 22, closeButton: false, maxWidth: '240px' }).setHTML(html);
   marker.__inst?.setPopup?.(pop);
   return pop;
 }
 
-export { mapboxgl };
+
